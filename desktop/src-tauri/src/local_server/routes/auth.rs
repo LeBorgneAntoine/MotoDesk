@@ -1,0 +1,597 @@
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use chrono::Utc;
+use serde::Deserialize;
+
+use crate::local_server::error::{LocalError, LocalResult};
+use crate::local_server::state::SharedState;
+
+pub fn router() -> Router<SharedState> {
+    Router::new()
+        .route("/sync-session", post(sync_session))
+        .route("/login", post(login))
+        .route("/register", post(register))
+        .route("/refresh", post(refresh))
+        .route("/logout", post(logout))
+        .route("/me", get(me))
+        .route("/local/status", get(local_status))
+        .route("/local/setup", post(local_setup))
+        .route("/local/login", post(local_login))
+        .route("/promote", post(promote))
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginInput {
+    email: String,
+    password: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RegisterInput {
+    email: String,
+    password: String,
+    full_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RefreshInput {
+    refresh_token: String,
+}
+
+async fn proxy_post(
+    state: &SharedState,
+    path: &str,
+    body: serde_json::Value,
+) -> LocalResult<(StatusCode, serde_json::Value)> {
+    let base = crate::local_server::cloud::cloud_base_url(state).await;
+    let url = format!("{base}{path}");
+    tracing::debug!(%url, "proxying auth request to cloud");
+    let res = state
+        .http
+        .post(&url)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await;
+    match res {
+        Ok(r) if r.status().is_success() || r.status().as_u16() == 201 => {
+            let status = StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::OK);
+            let json: serde_json::Value = r.json().await.unwrap_or_default();
+            Ok((status, json))
+        }
+        Ok(r) => {
+            let code = r.status().as_u16();
+            tracing::warn!(status = code, url = %url, "cloud auth proxy non-ok");
+            if (500..600).contains(&code) {
+                Err(LocalError::CloudRequired)
+            } else {
+                Err(LocalError::InvalidCredentials)
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, url = %url, "cloud auth proxy failed");
+            Err(LocalError::CloudRequired)
+        }
+    }
+}
+
+async fn cache_session(state: &SharedState, bundle: &serde_json::Value) -> LocalResult<()> {
+    let user = bundle.get("user").cloned().unwrap_or_default();
+    // Before anything is stored: an account from another company does not get in.
+    crate::local_server::company::ensure_same_company(
+        &state.db,
+        user.get("company_id").and_then(|v| v.as_str()),
+    )
+    .await?;
+    // Tokens belong in the OS keychain. When it cannot keep them (no usable
+    // credential store) they are kept in the local database instead: losing
+    // them silently would switch cloud sync and bootstrap off without a word.
+    let tokens_json = match crate::local_server::secrets::store_tokens(&bundle.to_string()) {
+        Ok(()) => "{}".to_string(),
+        Err(e) => {
+            tracing::warn!(error = %e, "OS keychain unavailable; keeping the cloud session in the local database");
+            bundle.to_string()
+        }
+    };
+    sqlx::query(
+        r#"
+        INSERT INTO cached_session (id, user_json, tokens_json, cached_at)
+        VALUES (1, $1, $3, $2)
+        ON CONFLICT(id) DO UPDATE SET user_json = $1, tokens_json = $3, cached_at = $2
+        "#,
+    )
+    .bind(user.to_string())
+    .bind(Utc::now().to_rfc3339())
+    .bind(tokens_json)
+    .execute(&state.db)
+    .await?;
+
+    // Persist the company id so the mesh can advertise its fingerprint, then
+    // refresh the company mesh secret + identity/logo cache in the background.
+    if let Some(company_id) = user.get("company_id").and_then(|v| v.as_str()) {
+        let _ = sqlx::query("UPDATE sync_state SET company_id = $1 WHERE id = 1")
+            .bind(company_id)
+            .execute(&state.db)
+            .await;
+    }
+    state.reload_company().await;
+
+    let refresh_state = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::local_server::company::refresh_company(&refresh_state).await {
+            tracing::debug!(error = %e, "company refresh after login failed");
+        }
+    });
+
+    Ok(())
+}
+
+/// Store session from cloud login (frontend calls cloud directly, then syncs here).
+async fn sync_session(
+    State(state): State<SharedState>,
+    Json(bundle): Json<serde_json::Value>,
+) -> LocalResult<Json<serde_json::Value>> {
+    cache_session(&state, &bundle).await?;
+    Ok(Json(bundle))
+}
+
+async fn login(
+    State(state): State<SharedState>,
+    Json(body): Json<LoginInput>,
+) -> LocalResult<Json<serde_json::Value>> {
+    let (_, json) = proxy_post(
+        &state,
+        "/api/auth/login",
+        serde_json::json!({ "email": body.email, "password": body.password }),
+    )
+    .await?;
+    cache_session(&state, &json).await?;
+    Ok(Json(json))
+}
+
+async fn register(
+    State(state): State<SharedState>,
+    Json(body): Json<RegisterInput>,
+) -> LocalResult<(StatusCode, Json<serde_json::Value>)> {
+    let (status, json) = proxy_post(
+        &state,
+        "/api/auth/register",
+        serde_json::json!({
+            "email": body.email,
+            "password": body.password,
+            "full_name": body.full_name,
+        }),
+    )
+    .await?;
+    cache_session(&state, &json).await?;
+    Ok((status, Json(json)))
+}
+
+async fn refresh(
+    State(state): State<SharedState>,
+    Json(body): Json<RefreshInput>,
+) -> LocalResult<Json<serde_json::Value>> {
+    let (_, json) = proxy_post(
+        &state,
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": body.refresh_token }),
+    )
+    .await?;
+    cache_session(&state, &json).await?;
+    Ok(Json(json))
+}
+
+async fn logout(State(state): State<SharedState>) -> LocalResult<StatusCode> {
+    crate::local_server::secrets::clear_all();
+    let _ = sqlx::query("DELETE FROM cached_session WHERE id = 1")
+        .execute(&state.db)
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---- Standalone mode ------------------------------------------------------------------
+
+/// What the sign-in screen needs to know before anyone is signed in.
+async fn local_status(
+    State(state): State<SharedState>,
+) -> LocalResult<Json<crate::local_server::local_accounts::LocalStatus>> {
+    Ok(Json(crate::local_server::local_accounts::status(&state.db).await?))
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalSetupInput {
+    username: String,
+    password: String,
+    confirm: String,
+    /// Create a new network although another one is visible on the LAN.
+    #[serde(default)]
+    force: bool,
+}
+
+/// The first run: create the shop's network by creating its first administrator, with no cloud.
+async fn local_setup(
+    State(state): State<SharedState>,
+    Json(input): Json<LocalSetupInput>,
+) -> LocalResult<(StatusCode, Json<serde_json::Value>)> {
+    if !input.force {
+        let seen = crate::local_server::mesh::join_candidates(&state).await;
+        if !seen.is_empty() {
+            return Err(LocalError::NetworkExists(format!(
+                "Un réseau local Motodesk est visible ({} poste(s)). Si votre atelier en a déjà un, connectez-vous pour le rejoindre ; sinon confirmez la création d'un nouveau réseau.",
+                seen.len()
+            )));
+        }
+    }
+    let bundle = crate::local_server::local_accounts::setup(
+        &state,
+        &input.username,
+        &input.password,
+        &input.confirm,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(bundle)))
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalLoginInput {
+    username: String,
+    password: String,
+}
+
+/// Sign in to the network. A PC that already belongs to it checks the account it holds; a PC
+/// that has never joined looks for a PC of the network and joins it with the same credentials.
+async fn local_login(
+    State(state): State<SharedState>,
+    Json(input): Json<LocalLoginInput>,
+) -> LocalResult<Json<serde_json::Value>> {
+    use crate::local_server::{local_accounts, mesh};
+    if local_accounts::status(&state.db).await?.can_setup {
+        let candidates = mesh::join_candidates(&state).await;
+        let bundle =
+            mesh::join::join_network(&state, &input.username, &input.password, &candidates).await?;
+        return Ok(Json(bundle));
+    }
+    Ok(Json(local_accounts::login(&state, &input.username, &input.password).await?))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PromoteInput {
+    pub email: String,
+    pub password: String,
+    pub confirm: String,
+    pub full_name: Option<String>,
+    pub company_name: Option<String>,
+}
+
+/// Put a standalone installation online: register its company on the cloud under the ids
+/// it already has, then let the normal sync upload everything.
+async fn promote(
+    State(state): State<SharedState>,
+    Json(input): Json<PromoteInput>,
+) -> LocalResult<Json<serde_json::Value>> {
+    promote_inner(&state, input).await.map(Json)
+}
+
+pub(crate) async fn promote_inner(
+    state: &SharedState,
+    input: PromoteInput,
+) -> LocalResult<serde_json::Value> {
+    use crate::local_server::local_accounts;
+
+    crate::local_server::auth_guard::require_admin(state).await?;
+    if !local_accounts::is_standalone(&state.db).await {
+        return Err(LocalError::Conflict("Cette installation est déjà en ligne.".into()));
+    }
+    let email = input.email.trim().to_string();
+    if !email.contains('@') || email.len() < 5 {
+        return Err(LocalError::BadRequest("Saisissez une adresse e-mail valide.".into()));
+    }
+    local_accounts::check_new_password(&input.password, &input.confirm)?;
+
+    let (user_json,): (String,) = sqlx::query_as("SELECT user_json FROM cached_session WHERE id = 1")
+        .fetch_one(&state.db)
+        .await?;
+    let user: serde_json::Value = serde_json::from_str(&user_json).unwrap_or_default();
+    let (Some(user_id), Some(company_id)) = (
+        user.get("id").and_then(|v| v.as_str()).map(str::to_string),
+        user.get("company_id").and_then(|v| v.as_str()).map(str::to_string),
+    ) else {
+        return Err(LocalError::Internal(anyhow::anyhow!("the local session has no ids")));
+    };
+    let username = user.get("username").and_then(|v| v.as_str()).unwrap_or("");
+
+    let cached_name: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(legal_name), '')) FROM company_cache WHERE id = 1",
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .flatten();
+    let company_name = input
+        .company_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or(cached_name)
+        .unwrap_or_else(|| "Mon atelier".to_string());
+    let full_name = input
+        .full_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(username)
+        .to_string();
+
+    let base = crate::local_server::cloud::cloud_base_url(state).await;
+    let res = state
+        .http
+        .post(format!("{base}/api/auth/register"))
+        .json(&serde_json::json!({
+            "email": email,
+            "password": input.password,
+            "full_name": full_name,
+            "company_name": company_name,
+            // The company and its admin keep the ids this PC's data already refers to.
+            "company_id": company_id,
+            "user_id": user_id,
+        }))
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, url = %base, "promotion: cloud unreachable");
+            LocalError::BadRequest(format!(
+                "Impossible de joindre le serveur cloud ({base}). Vérifiez votre connexion internet et l'adresse du serveur."
+            ))
+        })?;
+    if !res.status().is_success() {
+        let status = res.status();
+        let body: serde_json::Value = res.json().await.unwrap_or_default();
+        let message = body
+            .pointer("/error/message")
+            .and_then(|m| m.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Le cloud a refusé la création (HTTP {status})."));
+        tracing::warn!(%status, %message, "promotion refused by the cloud");
+        return Err(LocalError::BadRequest(match status.as_u16() {
+            403 => format!(
+                "{message} Les inscriptions sont fermées sur ce cloud : demandez à son administrateur de les ouvrir le temps de la mise en ligne."
+            ),
+            _ => message,
+        }));
+    }
+    let bundle: serde_json::Value = res.json().await.map_err(|e| LocalError::Internal(e.into()))?;
+
+    // From here on the cloud knows this company: the installation is online, whatever
+    // else goes wrong, and signing in with the new account always works.
+    sqlx::query("UPDATE sync_state SET standalone = 0 WHERE id = 1")
+        .execute(&state.db)
+        .await?;
+    crate::local_server::routes::background::refresh(state).await;
+    if let Err(e) = cache_session(state, &bundle).await {
+        tracing::warn!(error = %e, "promotion: the cloud session could not be stored; sign in again");
+    }
+    if let Some(token) = bundle.get("access_token").and_then(|t| t.as_str()) {
+        push_identity(state, &base, token).await;
+    }
+    state.notify_sync();
+    Ok(bundle)
+}
+
+/// Send the company identity entered offline (legal name, logo) to the cloud.
+/// Best-effort: it can be entered again in Réglages.
+async fn push_identity(state: &SharedState, base: &str, token: &str) {
+    type Identity = (Option<String>, Option<String>, Option<Vec<u8>>, Option<String>);
+    let row: Option<Identity> = sqlx::query_as(
+        "SELECT name, legal_name, logo_bytes, logo_content_type FROM company_cache WHERE id = 1",
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+    let Some((name, legal_name, logo, content_type)) = row else { return };
+    let mut body = serde_json::Map::new();
+    if let Some(n) = name.filter(|n| !n.trim().is_empty()) {
+        body.insert("name".into(), n.into());
+    }
+    if let Some(l) = legal_name.filter(|l| !l.trim().is_empty()) {
+        body.insert("legal_name".into(), l.into());
+    }
+    if !body.is_empty() {
+        let _ = state
+            .http
+            .patch(format!("{base}/api/company"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await;
+    }
+    if let Some(bytes) = logo {
+        let _ = state
+            .http
+            .put(format!("{base}/api/company/logo"))
+            .bearer_auth(token)
+            .header("Content-Type", content_type.unwrap_or_else(|| "image/png".into()))
+            .body(bytes)
+            .send()
+            .await;
+    }
+}
+
+async fn me(State(state): State<SharedState>) -> LocalResult<Json<serde_json::Value>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT user_json FROM cached_session WHERE id = 1")
+            .fetch_optional(&state.db)
+            .await?;
+    if let Some((user,)) = row {
+        let user: serde_json::Value = serde_json::from_str(&user).unwrap_or_default();
+        return Ok(Json(user));
+    }
+    Err(LocalError::Unauthorized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local_server::local_accounts;
+    use crate::local_server::test_support::shop;
+    use axum::routing::{patch, put};
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+
+    /// A stand-in for the cloud: records what registration it is sent and answers.
+    async fn mock_cloud(register_status: u16) -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorder = seen.clone();
+        let app = Router::new()
+            .route(
+                "/api/auth/register",
+                post(move |Json(body): Json<serde_json::Value>| {
+                    let recorder = recorder.clone();
+                    async move {
+                        recorder.lock().unwrap().push(body.clone());
+                        if register_status != 201 {
+                            return (
+                                StatusCode::from_u16(register_status).unwrap(),
+                                Json(json!({"error": {"code": "registration_closed", "message": "Les inscriptions sont fermées."}})),
+                            );
+                        }
+                        (
+                            StatusCode::CREATED,
+                            Json(json!({
+                                "access_token": "cloud-token",
+                                "access_expires_in": 900,
+                                "refresh_token": "cloud-refresh",
+                                "refresh_expires_in": 604800,
+                                "user": {
+                                    "id": body["user_id"],
+                                    "company_id": body["company_id"],
+                                    "email": body["email"],
+                                    "full_name": body["full_name"],
+                                    "role": "admin",
+                                    "is_active": true,
+                                    "created_at": "2026-11-21T10:00:00Z",
+                                },
+                            })),
+                        )
+                    }
+                }),
+            )
+            .route("/api/company", patch(|| async { StatusCode::OK }))
+            .route("/api/company/logo", put(|| async { StatusCode::OK }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    async fn standalone_shop(cloud: &str) -> SharedState {
+        let state = shop().await;
+        local_accounts::setup(&state, "camille", "mot de passe", "mot de passe").await.unwrap();
+        sqlx::query("UPDATE sync_state SET cloud_url = $1 WHERE id = 1")
+            .bind(cloud)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        state
+    }
+
+    fn promotion() -> PromoteInput {
+        PromoteInput {
+            email: "camille@example.fr".into(),
+            password: "un autre mot de passe".into(),
+            confirm: "un autre mot de passe".into(),
+            full_name: Some("Camille Martin".into()),
+            company_name: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn going_online_registers_the_company_under_its_own_ids_and_switches_the_install() {
+        let (cloud, seen) = mock_cloud(201).await;
+        let state = standalone_shop(&cloud).await;
+        let (session,): (String,) = sqlx::query_as("SELECT user_json FROM cached_session WHERE id = 1")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        let session: serde_json::Value = serde_json::from_str(&session).unwrap();
+
+        let bundle = promote_inner(&state, promotion()).await.unwrap();
+        assert_eq!(bundle["access_token"], "cloud-token");
+
+        // What the cloud was asked to create: this PC's own ids, so the rows and the
+        // fiscal journal already written keep pointing at something that exists.
+        let sent = seen.lock().unwrap()[0].clone();
+        assert_eq!(sent["company_id"], session["company_id"]);
+        assert_eq!(sent["user_id"], session["id"]);
+        assert_eq!(sent["company_name"], "Garage Dupont", "the name entered offline travels");
+
+        // The install is online now: no local sign-in, a cloud token, a cloud session.
+        let status = local_accounts::status(&state.db).await.unwrap();
+        assert!(!status.standalone);
+        assert!(status.has_account, "the local account is kept, but no longer used");
+        let again = local_accounts::login(&state, "camille", "mot de passe").await;
+        assert!(matches!(again, Err(LocalError::Conflict(_))), "{again:?}");
+        let token = crate::local_server::secrets::session_access_token(&state.db).await.unwrap();
+        assert_eq!(token.as_deref(), Some("cloud-token"));
+        let (now,): (String,) = sqlx::query_as("SELECT user_json FROM cached_session WHERE id = 1")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        let now: serde_json::Value = serde_json::from_str(&now).unwrap();
+        assert_eq!(now["email"], "camille@example.fr");
+        assert_eq!(now["id"], session["id"], "the same person, for the journal's sake");
+        assert!(now.get("auth_mode").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_cloud_that_refuses_leaves_the_install_standalone() {
+        let (cloud, _) = mock_cloud(403).await;
+        let state = standalone_shop(&cloud).await;
+        let refused = promote_inner(&state, promotion()).await.unwrap_err();
+        match refused {
+            LocalError::BadRequest(message) => {
+                assert!(message.contains("fermées"), "{message}");
+                assert!(message.contains("administrateur"), "tells what to do: {message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(local_accounts::status(&state.db).await.unwrap().standalone);
+        assert!(crate::local_server::auth_guard::is_admin(&state).await, "still signed in locally");
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_cloud_leaves_the_install_standalone() {
+        let state = standalone_shop("http://127.0.0.1:9").await;
+        let refused = promote_inner(&state, promotion()).await.unwrap_err();
+        match refused {
+            LocalError::BadRequest(message) => assert!(message.contains("joindre"), "{message}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(local_accounts::status(&state.db).await.unwrap().standalone);
+    }
+
+    #[tokio::test]
+    async fn going_online_needs_a_matching_password_and_a_standalone_admin() {
+        let (cloud, seen) = mock_cloud(201).await;
+        let state = standalone_shop(&cloud).await;
+
+        let mut mismatch = promotion();
+        mismatch.confirm = "autre chose".into();
+        assert!(matches!(promote_inner(&state, mismatch).await, Err(LocalError::BadRequest(_))));
+        let mut no_email = promotion();
+        no_email.email = "pas un email".into();
+        assert!(matches!(promote_inner(&state, no_email).await, Err(LocalError::BadRequest(_))));
+        assert!(seen.lock().unwrap().is_empty(), "nothing reached the cloud");
+
+        promote_inner(&state, promotion()).await.unwrap();
+        let twice = promote_inner(&state, promotion()).await;
+        assert!(matches!(twice, Err(LocalError::Conflict(_))), "{twice:?}");
+    }
+}

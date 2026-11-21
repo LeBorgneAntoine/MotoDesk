@@ -1,0 +1,28 @@
+# Build output
+/target/
+**/target/
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/gen/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python (none ships, but a stray cache must never be committed)
+__pycache__/
+*.pyc
+
+# Customer data and backups must never be committed
+*.mgbak
+*.db
+*.db-shm
+*.db-wal
+local.db*

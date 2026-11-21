@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "desktop/src-tauri",
+    "crates/motodesk-core",
+    "crates/motodesk-db",
+    "crates/motodesk-fiscal",
+    "crates/motodesk-sync",
+]
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+thiserror = "1"
+anyhow = "1"
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "macros",
+    "uuid",
+    "chrono",
+] }

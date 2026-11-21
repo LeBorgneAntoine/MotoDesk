@@ -1,0 +1,16 @@
+[package]
+name = "motodesk-sync"
+version = "0.1.0"
+edition = "2021"
+description = "Change-log apply and field-level merge for Motodesk"
+
+[dependencies]
+motodesk-core = { path = "../motodesk-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }

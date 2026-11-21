@@ -1,0 +1,178 @@
+/* ============================================================
+ * global.css — Base reset, typography defaults, scrollbar,
+ * focus styles. Imports tokens (consumes them; never defines).
+ * ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+html {
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  color: var(--color-text);
+  background: var(--color-bg-app);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+
+html[data-blur="true"],
+html[data-blur="true"] body,
+html[data-blur="true"] #app {
+  background: transparent;
+}
+
+body {
+  overflow: hidden; /* desktop window, no browser scroll */
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text-strong);
+}
+
+h1 { font-size: var(--fs-3xl); }
+h2 { font-size: var(--fs-2xl); }
+h3 { font-size: var(--fs-xl); }
+h4 { font-size: var(--fs-lg); }
+h5 { font-size: var(--fs-md); }
+h6 { font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--color-text-muted); }
+
+p { margin: 0; }
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+a:hover { color: var(--color-accent-hover); text-decoration: underline; }
+
+code, kbd, samp, pre {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+hr {
+  border: 0;
+  border-top: var(--border-w) solid var(--color-border-subtle);
+  margin: var(--space-3) 0;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---- Selection & text inputs ---- */
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-text-strong);
+}
+
+input, textarea {
+  user-select: text;
+}
+
+/* ---- Focus ring ---- */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 0;
+}
+
+/* ============================================================
+ * Scrollbars — flat, square, white track, gray thumb. Designed
+ * to disappear visually on white surface panels and present a
+ * subtle "reserved lane" on the app background.
+ *
+ * IMPORTANT: Chromium 121+ (incl. Tauri WebView2 on Windows)
+ * silently disables `::-webkit-scrollbar` styling whenever
+ * `scrollbar-width` or `scrollbar-color` are set anywhere in
+ * the cascade — it falls back to OS-native rendering instead.
+ * So we only emit the standard properties in engines that do
+ * NOT support the webkit pseudo-elements (i.e. Firefox).
+ * Everywhere else we style via ::-webkit-scrollbar, which is
+ * supported by Chromium, Edge, Safari, and WebView2.
+ * ============================================================ */
+
+/* ---- Firefox-only standard properties --------------------- */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+  }
+}
+
+/* ---- WebKit / Chromium / Edge / WebView2 ------------------ */
+::-webkit-scrollbar {
+  width:  var(--scrollbar-size);
+  height: var(--scrollbar-size);
+  background: var(--color-scrollbar-track);
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-track-piece {
+  background: var(--color-scrollbar-track);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-scrollbar-thumb);
+  border: 0;
+  border-radius: 0;
+  /* Thumb fills the entire lane — no padding-box clip, no transparent border. */
+  background-clip: border-box;
+}
+::-webkit-scrollbar-thumb:hover  { background-color: var(--color-scrollbar-thumb-hover);  }
+::-webkit-scrollbar-thumb:active { background-color: var(--color-scrollbar-thumb-active); }
+
+/* Intersection of a vertical + horizontal scrollbar. */
+::-webkit-scrollbar-corner {
+  background: var(--color-scrollbar-track);
+  border-radius: 0;
+}
+
+/* Hide the up / down arrow buttons that Windows + WebView2 add by default. */
+::-webkit-scrollbar-button,
+::-webkit-scrollbar-button:start,
+::-webkit-scrollbar-button:end,
+::-webkit-scrollbar-button:vertical:start,
+::-webkit-scrollbar-button:vertical:end,
+::-webkit-scrollbar-button:horizontal:start,
+::-webkit-scrollbar-button:horizontal:end {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* ---- Utility classes ---- */
+.u-row    { display: flex; flex-direction: row; }
+.u-col    { display: flex; flex-direction: column; }
+.u-grow   { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.u-center { display: flex; align-items: center; justify-content: center; }
+.u-vcenter { display: flex; align-items: center; }
+.u-spacer { flex: 1 1 auto; }
+.u-text-muted { color: var(--color-text-muted); }
+.u-text-strong { color: var(--color-text-strong); font-weight: var(--fw-semibold); }
+.u-caps {
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+.u-divider-x { border-right: var(--border-w) solid var(--color-border); }
+.u-divider-y { border-bottom: var(--border-w) solid var(--color-border); }
