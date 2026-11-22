@@ -50,7 +50,7 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
     let db_path = data_dir.join("local.db");
 
     let pool = db::init_pool(&db_path).await?;
-    db::run_migrations(&pool).await?;
+    db::migrate_safely(&pool, &data_dir).await?;
     db::ensure_device_id(&pool).await?;
     let cloud_url = db::ensure_cloud_url(&pool).await?;
     let mesh_secret = secrets::load_mesh_secret()
@@ -95,7 +95,9 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
         .with_state(state.clone());
 
     let loopback_addr = format!("127.0.0.1:{LOCAL_API_PORT}");
-    let loopback_listener = tokio::net::TcpListener::bind(&loopback_addr).await?;
+    let loopback_listener = tokio::net::TcpListener::bind(&loopback_addr)
+        .await
+        .map_err(|source| crate::startup::StartupError::PortInUse { port: LOCAL_API_PORT, source })?;
     state
         .local_port
         .store(LOCAL_API_PORT, std::sync::atomic::Ordering::Relaxed);
@@ -105,7 +107,9 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
         .layer(RequestBodyLimitLayer::new(16 * 1024 * 1024))
         .with_state(state.clone());
     let mesh_addr = format!("0.0.0.0:{MESH_API_PORT}");
-    let mesh_listener = tokio::net::TcpListener::bind(&mesh_addr).await?;
+    let mesh_listener = tokio::net::TcpListener::bind(&mesh_addr)
+        .await
+        .map_err(|source| crate::startup::StartupError::PortInUse { port: MESH_API_PORT, source })?;
     state
         .mesh_port
         .store(MESH_API_PORT, std::sync::atomic::Ordering::Relaxed);

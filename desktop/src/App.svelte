@@ -9,6 +9,10 @@
   import { settingsStore } from "$lib/stores/settings.svelte";
   import { applyAppearance, watchAppearance } from "$lib/theme";
   import { posStore } from "$lib/pos/store.svelte";
+  import { isTauriRuntime, LOCAL_API_URL, probeHealth } from "$lib/api/localApi";
+  import { startupFailure, type StartupFailure } from "$lib/api/startup";
+  import { restartApp } from "$lib/api/backup";
+  import { watchStartup } from "$lib/stores/startupWatch";
 
   import Login from "./routes/Login.svelte";
   import Register from "./routes/Register.svelte";
@@ -18,7 +22,17 @@
   import Shell from "./routes/Shell.svelte";
   import Pos from "./routes/pos/Pos.svelte";
 
+  /** Set when the data service could not start: one page replaces every screen. */
+  let failure = $state<StartupFailure | null>(null);
+
   onMount(async () => {
+    if (isTauriRuntime()) {
+      void watchStartup({
+        healthy: () => probeHealth(LOCAL_API_URL),
+        recorded: startupFailure,
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      }).then((f) => (failure = f));
+    }
     watchAppearance();
     void settingsStore.load().then(() => applyAppearance()).catch(() => {});
     void posStore.load();
@@ -98,7 +112,22 @@
 </script>
 
 <div class="app">
-  {#if view === "pos"}
+  {#if failure}
+    <div class="app__auth">
+      <div class="app__auth-tb">
+        <TitleBar showSearch={false} transparent />
+      </div>
+      <div class="boot">
+        <StateView
+          kind="error"
+          title={failure.title}
+          body={failure.message}
+          actionLabel="Relancer Motodesk"
+          onAction={() => void restartApp()}
+        />
+      </div>
+    </div>
+  {:else if view === "pos"}
     <div class="app__pos">
       <Pos />
     </div>

@@ -2,8 +2,10 @@ mod background;
 mod local_server;
 mod logs;
 mod previous_install;
+mod startup;
 
 use local_server::{local_auth, LocalApiInfo, LOCAL_API_URL};
+use startup::{StartupFailure, StartupStatus};
 use tauri::Manager;
 
 /// Entry point of `motodesk-keytool` (see `src/bin/motodesk-keytool.rs`): diagnose and
@@ -22,6 +24,12 @@ fn quit_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn get_local_api_url(state: tauri::State<'_, LocalApiInfo>) -> LocalApiInfo {
     state.inner().clone()
+}
+
+/// Why the data service did not start, or nothing when it did (or has not finished yet).
+#[tauri::command]
+fn startup_failure(state: tauri::State<'_, std::sync::Arc<StartupStatus>>) -> Option<StartupFailure> {
+    state.get()
 }
 
 /// Restart the application, used after a restore has been queued so that it is
@@ -74,10 +82,13 @@ pub fn run() {
             restart_app,
             quit_app,
             logs_dir,
-            open_logs_folder
+            open_logs_folder,
+            startup_failure
         ])
         .setup(move |app| {
             app.manage(api_info);
+            let startup_status = std::sync::Arc::new(StartupStatus::default());
+            app.manage(startup_status.clone());
 
             if let Err(e) = background::install(app.handle()) {
                 tracing::warn!(error = %e, "notification-area icon not installed");
@@ -102,6 +113,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = local_server::start(&handle, local_token).await {
                     tracing::error!(error = %e, "local server failed to start");
+                    startup_status.record(&e);
                 }
             });
             Ok(())

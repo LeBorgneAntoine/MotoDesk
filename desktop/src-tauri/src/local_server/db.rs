@@ -41,6 +41,84 @@ pub async fn run_migrations(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// How many copies made before an update are kept.
+const PRE_MIGRATION_COPIES: usize = 3;
+/// Folder, next to the database, holding those copies.
+pub const PRE_MIGRATION_DIR: &str = "pre-migration";
+
+/// Newest update already applied to this database, `None` for a database that is new.
+async fn applied_version(pool: &SqlitePool) -> Option<i64> {
+    sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(version) FROM _sqlx_migrations WHERE success = 1")
+        .fetch_one(pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Bring the database up to this build's structure without putting the shop's data at risk:
+///
+/// - a database written by a newer build is left alone (opening it with older code could
+///   damage it), and the interface says so;
+/// - when updates are pending, a consistent copy of the database is kept first, so a bad
+///   update, or a build that turns out to be wrong, can be undone by hand;
+/// - an update that fails is rolled back by the database itself (each one is a transaction).
+pub async fn migrate_safely(pool: &SqlitePool, data_dir: &Path) -> anyhow::Result<()> {
+    migrate_with(pool, &MIGRATOR, data_dir).await
+}
+
+async fn migrate_with(
+    pool: &SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+    data_dir: &Path,
+) -> anyhow::Result<()> {
+    let known = migrator.iter().map(|m| m.version).max().unwrap_or(0);
+    if let Some(found) = applied_version(pool).await {
+        if found > known {
+            return Err(crate::startup::StartupError::DatabaseTooNew { found, known }.into());
+        }
+        if found < known {
+            if let Err(e) = keep_copy_before_update(pool, data_dir, found, known).await {
+                // Not being able to copy (a full disk, say) must not lock the shop out of
+                // its own application; the update itself is transactional.
+                tracing::warn!(error = %e, "no copy made before the database update");
+            }
+        }
+    }
+    migrator
+        .run(pool)
+        .await
+        .map_err(|e| crate::startup::StartupError::Migration(e.to_string()).into())
+}
+
+async fn keep_copy_before_update(
+    pool: &SqlitePool,
+    data_dir: &Path,
+    from: i64,
+    to: i64,
+) -> anyhow::Result<()> {
+    let dir = data_dir.join(PRE_MIGRATION_DIR);
+    std::fs::create_dir_all(&dir)?;
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let copy = dir.join(format!("local-{stamp}-v{from:03}-to-v{to:03}.db"));
+    let _ = std::fs::remove_file(&copy);
+    // VACUUM INTO writes a consistent single file, whatever is in the write-ahead log.
+    // A quote in the path (a user name such as O'Brien) would end the SQL literal.
+    let literal = copy.to_string_lossy().replace('\\', "/").replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{literal}'")).execute(pool).await?;
+    tracing::info!(from, to, copy = %copy.display(), "database copied before its update");
+
+    let mut copies: Vec<_> = std::fs::read_dir(&dir)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "db"))
+        .collect();
+    copies.sort();
+    while copies.len() > PRE_MIGRATION_COPIES {
+        let _ = std::fs::remove_file(copies.remove(0));
+    }
+    Ok(())
+}
+
 /// Newest schema migration this build knows. A backup made by a newer build
 /// carries a higher number and must not be restored over this one.
 pub fn latest_migration_version() -> i64 {
@@ -406,5 +484,123 @@ mod cloud_url_tests {
             choose_cloud_url(Some("http://127.0.0.1:8080"), "http://127.0.0.1:8080"),
             "http://127.0.0.1:8080"
         );
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    fn scratch() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("motodesk_migrate_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The structure as it was once: only the updates up to `version`.
+    fn migrator_until(version: i64) -> sqlx::migrate::Migrator {
+        sqlx::migrate::Migrator {
+            migrations: Cow::Owned(MIGRATOR.iter().filter(|m| m.version <= version).cloned().collect()),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+    }
+
+    async fn database_at(dir: &Path, version: i64) -> SqlitePool {
+        let pool = init_pool(&dir.join("local.db")).await.unwrap();
+        migrator_until(version).run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn healthy(pool: &SqlitePool) {
+        let (check,): (String,) = sqlx::query_as("PRAGMA integrity_check").fetch_one(pool).await.unwrap();
+        assert_eq!(check, "ok");
+        let broken = sqlx::query("PRAGMA foreign_key_check").fetch_all(pool).await.unwrap();
+        assert!(broken.is_empty(), "foreign keys broken after the update");
+    }
+
+    #[tokio::test]
+    async fn a_database_from_any_earlier_version_upgrades_cleanly() {
+        let versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
+        for version in versions {
+            let dir = scratch();
+            let pool = database_at(&dir, version).await;
+            migrate_safely(&pool, &dir).await.unwrap_or_else(|e| panic!("from version {version}: {e:#}"));
+            assert_eq!(applied_version(&pool).await, Some(latest_migration_version()));
+            healthy(&pool).await;
+            pool.close().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_update_keeps_a_copy_of_what_was_there() {
+        let dir = scratch();
+        let pool = database_at(&dir, 10).await;
+        sqlx::query("UPDATE sync_state SET local_port = 4242 WHERE id = 1").execute(&pool).await.unwrap();
+
+        migrate_safely(&pool, &dir).await.unwrap();
+
+        let copies: Vec<_> = std::fs::read_dir(dir.join(PRE_MIGRATION_DIR)).unwrap().flatten().collect();
+        assert_eq!(copies.len(), 1);
+        let old = init_pool(&copies[0].path()).await.unwrap();
+        assert_eq!(applied_version(&old).await, Some(10), "the copy is the structure before the update");
+        let (port,): (i64,) = sqlx::query_as("SELECT local_port FROM sync_state WHERE id = 1").fetch_one(&old).await.unwrap();
+        assert_eq!(port, 4242, "and it holds the data");
+        old.close().await;
+
+        let (port,): (i64,) = sqlx::query_as("SELECT local_port FROM sync_state WHERE id = 1").fetch_one(&pool).await.unwrap();
+        assert_eq!(port, 4242, "the data survived the update");
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn nothing_is_copied_when_there_is_nothing_to_update() {
+        let dir = scratch();
+        let pool = init_pool(&dir.join("local.db")).await.unwrap();
+        migrate_safely(&pool, &dir).await.unwrap(); // a new database
+        migrate_safely(&pool, &dir).await.unwrap(); // already up to date
+        assert!(!dir.join(PRE_MIGRATION_DIR).exists());
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_database_from_a_newer_version_is_left_alone() {
+        let dir = scratch();
+        let pool = init_pool(&dir.join("local.db")).await.unwrap();
+        migrate_safely(&pool, &dir).await.unwrap();
+        let newer = latest_migration_version() + 5;
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)              VALUES ($1, 'from the future', 1, x'00', 0)",
+        )
+        .bind(newer)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = migrate_safely(&pool, &dir).await.unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<crate::startup::StartupError>(),
+            Some(crate::startup::StartupError::DatabaseTooNew { found, .. }) if *found == newer
+        ));
+        assert!(!dir.join(PRE_MIGRATION_DIR).exists());
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn only_the_latest_copies_are_kept() {
+        let dir = scratch();
+        let pool = database_at(&dir, 5).await;
+        for from in 1..=5 {
+            keep_copy_before_update(&pool, &dir, from, 25).await.unwrap();
+        }
+        let mut names: Vec<String> = std::fs::read_dir(dir.join(PRE_MIGRATION_DIR))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names.len(), PRE_MIGRATION_COPIES);
+        assert!(names[0].contains("-v003-"), "the oldest were removed: {names:?}");
+        pool.close().await;
     }
 }
