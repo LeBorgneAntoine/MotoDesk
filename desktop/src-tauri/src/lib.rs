@@ -1,5 +1,6 @@
 mod background;
 mod local_server;
+mod logs;
 mod previous_install;
 
 use local_server::{local_auth, LocalApiInfo, LOCAL_API_URL};
@@ -30,15 +31,22 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
+/// Where the log files are, for the settings page.
+#[tauri::command]
+fn logs_dir() -> Option<String> {
+    logs::dir().map(|d| d.display().to_string())
+}
+
+/// Show the log files in the file manager, to attach them to a support request.
+#[tauri::command]
+fn open_logs_folder() -> Result<(), String> {
+    logs::open_dir()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .compact()
-        .init();
+    logs::init();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "Motodesk starting");
 
     // Before anything reads the data folder: an install made under the former product
     // name hands its data over to the current folder.
@@ -61,7 +69,13 @@ pub fn run() {
             Some(vec![background::BACKGROUND_ARG]),
         ))
         .on_window_event(|window, event| background::on_window_event(window, event))
-        .invoke_handler(tauri::generate_handler![get_local_api_url, restart_app, quit_app])
+        .invoke_handler(tauri::generate_handler![
+            get_local_api_url,
+            restart_app,
+            quit_app,
+            logs_dir,
+            open_logs_folder
+        ])
         .setup(move |app| {
             app.manage(api_info);
 

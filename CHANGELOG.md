@@ -7,4 +7,5 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 
 ### Ajouté
 - Installateur Windows (NSIS, sans droits administrateur) produit par l'intégration continue.
+- Journaux : un fichier par jour (14 conservés) dans `%LOCALAPPDATA%\Motodesk\logs`, avec les plantages (panic) et leur origine ; carte « Diagnostic » dans Paramètres › Sauvegardes pour ouvrir le dossier.
 - Workflow de publication : un tag `vX.Y.Z` construit l'installateur et prépare une version brouillon.

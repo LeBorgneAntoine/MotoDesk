@@ -35,6 +35,7 @@
   import CompanySettings from "./CompanySettings.svelte";
   import PosSettings from "./pos/PosSettings.svelte";
   import BackupSettings from "./BackupSettings.svelte";
+  import DiagnosticsCard from "./DiagnosticsCard.svelte";
   import AssistantSettings from "./assistant/AssistantSettings.svelte";
   import { router } from "$lib/router/router.svelte";
 
@@ -237,6 +238,7 @@
       {:else if activeCategory === "system"}
         {#if isAdmin}
           <BackupSettings />
+          <DiagnosticsCard />
         {:else}
           <Alert variant="info">Les sauvegardes sont réservées aux administrateurs.</Alert>
         {/if}
