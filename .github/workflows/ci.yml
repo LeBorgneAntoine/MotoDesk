@@ -1,8 +1,10 @@
 name: CI
 
+# A branch is checked once, through its pull request; only master is checked on push.
+# (Both triggers on every branch ran each check twice, and the Windows build is slow.)
 on:
   push:
-    branches: ["**"]
+    branches: [master]
   pull_request:
 
 concurrency:
