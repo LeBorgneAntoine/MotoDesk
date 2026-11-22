@@ -35,6 +35,8 @@
   import { applyAppearance, watchAppearance } from "$lib/theme";
   import { handleMenuShortcut } from "$lib/shortcuts";
   import { checkProfile, pendingClosures, type ProfileCheck } from "$lib/api/fiscal";
+  import { getBackupStatus } from "$lib/api/backup";
+  import { backupReminder, type BackupReminder } from "$lib/backupReminder";
   import { formatDate, humanizeError, setDateFormat } from "$lib/format";
   import { toast } from "$lib/stores/toast.svelte";
   import { setLowStockAlerts } from "$lib/api/products";
@@ -132,6 +134,40 @@
     await dismissRestoreGap().catch(() => {});
     restoreGap = 0;
   }
+  // The shop's data is only as safe as its last backup, and automatic backups write nothing until
+  // a password has been chosen: say so, once a day, to the people who can fix it.
+  const REMINDER_KEY = "motodesk.backupReminderSnoozedUntil";
+  let backupNote = $state<BackupReminder | null>(null);
+
+  function reminderSnoozed(): boolean {
+    try {
+      return Number(localStorage.getItem(REMINDER_KEY) ?? 0) > Date.now();
+    } catch {
+      return false;
+    }
+  }
+
+  async function refreshBackupReminder(): Promise<void> {
+    if (!authStore.isAdmin) {
+      backupNote = null;
+      return;
+    }
+    try {
+      backupNote = reminderSnoozed() ? null : backupReminder(await getBackupStatus());
+    } catch {
+      backupNote = null;
+    }
+  }
+
+  function snoozeBackupReminder(): void {
+    backupNote = null;
+    try {
+      localStorage.setItem(REMINDER_KEY, String(Date.now() + 24 * 60 * 60 * 1000));
+    } catch {
+      /* ignore */
+    }
+  }
+
   let hideCaisseHint = $state(
     typeof localStorage !== "undefined" &&
       localStorage.getItem("motodesk.dismissCaisseHint") === "1",
@@ -299,6 +335,7 @@
   $effect(() => {
     void router.current;
     void refreshLateClosures();
+    void refreshBackupReminder();
   });
 
   onMount(() => {
@@ -377,6 +414,31 @@
               <span class="shell__banner-actions">
                 <Button variant="link" size="sm" onclick={() => navigate("settings")}>Configurer</Button>
                 <Button variant="link" size="sm" onclick={dismissCaisseHint}>Plus tard</Button>
+              </span>
+            </Alert>
+          </div>
+        {/if}
+        {#if backupNote && activeSidebarId !== "settings"}
+          <div class="shell__banner">
+            <Alert flush variant="warning" title="Données non sauvegardées">
+              {#if backupNote.kind === "no_automatic"}
+                {#if backupNote.days === null}
+                  Aucune sauvegarde n'a jamais été faite et aucune sauvegarde automatique n'est
+                  active : un incident sur ce poste ferait perdre les données de l'atelier.
+                {:else}
+                  La dernière sauvegarde date de {backupNote.days} jours et aucune sauvegarde
+                  automatique n'est active.
+                {/if}
+                Choisissez un mot de passe de sauvegarde pour les activer.
+              {:else}
+                La dernière sauvegarde automatique date de {backupNote.days} jours : elles semblent
+                s'être arrêtées. Vérifiez Réglages › Sauvegardes.
+              {/if}
+              <span class="shell__banner-actions">
+                <Button variant="primary" size="sm" onclick={() => router.go("settings", { cat: "system" })}>
+                  Ouvrir les sauvegardes
+                </Button>
+                <Button variant="link" size="sm" onclick={snoozeBackupReminder}>Demain</Button>
               </span>
             </Alert>
           </div>
