@@ -425,6 +425,7 @@ async fn stage_and_queue(
             fs::copy(entry.path(), dest.join(entry.file_name())).map_err(io_err)?;
         }
     }
+    adopt_secrets(&staged_db, &secrets, manifest.as_ref().map(|m| m.created_at.as_str())).await?;
     let pending = state.data_dir.join(PENDING_DB);
     rename_patiently(&staged_db, &pending)
         .await
@@ -457,7 +458,7 @@ fn unpack_v2(
 ) -> LocalResult<(SecretsPayload, Option<BackupManifest>)> {
     let file = BufReader::new(File::open(path).map_err(io_err)?);
     let dec = DecryptReader::open(file, password).map_err(|e| match e {
-        OpenError::BadPassword => LocalError::BadRequest("mot de passe de restauration incorrect".into()),
+        OpenError::BadPassword => LocalError::BadRequest("mot de passe de restauration incorrect, ou fichier de sauvegarde endommagé".into()),
         OpenError::NotABackup => LocalError::BadRequest(e.to_string()),
         OpenError::Corrupt(_) => LocalError::BadRequest(e.to_string()),
         OpenError::Io(err) => io_err(err),
@@ -540,7 +541,7 @@ fn unpack_legacy_zip(
         buf
     };
     let secrets = legacy::decrypt_secrets(password, &blob)
-        .map_err(|_| LocalError::BadRequest("mot de passe de restauration incorrect".into()))?;
+        .map_err(|_| LocalError::BadRequest("mot de passe de restauration incorrect, ou fichier de sauvegarde endommagé".into()))?;
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| LocalError::BadRequest(e.to_string()))?;
@@ -570,14 +571,17 @@ async fn verify_database(path: &Path, secrets: &SecretsPayload) -> LocalResult<(
         .map_err(|e| LocalError::BadRequest(format!("base de données illisible : {e}")))?;
 
     let outcome = verify_open_database(&pool, secrets).await;
+    close_into_one_file(pool, path).await;
+    outcome
+}
 
-    // Fold the write-ahead log into the file so a single file is what gets queued.
+/// Fold the write-ahead log into the file so a single file is what gets queued.
+async fn close_into_one_file(pool: sqlx::SqlitePool, path: &Path) {
     let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(&pool).await;
     pool.close().await;
     for suffix in ["-wal", "-shm"] {
         let _ = fs::remove_file(format!("{}{suffix}", path.display()));
     }
-    outcome
 }
 
 async fn verify_open_database(pool: &sqlx::SqlitePool, secrets: &SecretsPayload) -> LocalResult<()> {
@@ -613,21 +617,10 @@ async fn verify_open_database(pool: &sqlx::SqlitePool, secrets: &SecretsPayload)
         }
     }
 
-    // Keys go to the OS keychain; where there is none, into the restored database
-    // itself, which is where the app looks next.
+    // A key must be the one whose public half the restored journal names. Nothing is stored
+    // here: this runs before the restore is certain, and the keychain holds the keys of the
+    // data that is still live.
     for (code, hex) in &secrets.fiscal_keys {
-        if let Err(e) = crate::local_server::secrets::store_fiscal_key(code, hex) {
-            tracing::warn!(error = %e, register = %code, "keychain unavailable; fiscal key stored in the database");
-            sqlx::query(
-                "INSERT OR REPLACE INTO fiscal_key_fallback (register_code, secret_key, created_at) VALUES ($1, $2, $3)",
-            )
-            .bind(code)
-            .bind(hex)
-            .bind(Utc::now().to_rfc3339())
-            .execute(pool)
-            .await?;
-        }
-        // The key must be the one whose public half the restored journal names.
         let recorded: Option<(String,)> =
             sqlx::query_as("SELECT public_key FROM fiscal_registers WHERE code = $1")
                 .bind(code)
@@ -639,6 +632,45 @@ async fn verify_open_database(pool: &sqlx::SqlitePool, secrets: &SecretsPayload)
                     "la clé de signature de la caisse {code} ne correspond pas au journal de la sauvegarde"
                 )));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Hand the backup's keys to this computer: the OS keychain, or where there is none, the
+/// restored database itself (which is where the app looks next). Done last, once nothing
+/// can fail any more, so a restore that is refused never replaces a key.
+async fn adopt_secrets(path: &Path, secrets: &SecretsPayload, made_at: Option<&str>) -> LocalResult<()> {
+    let pool = crate::local_server::db::init_pool(path)
+        .await
+        .map_err(|e| LocalError::BadRequest(format!("base de données illisible : {e}")))?;
+    let outcome = store_secrets(&pool, secrets).await;
+    // The copy was taken before "last backup" was written down, so the restored data would
+    // claim it was never backed up. It is exactly as recent as the backup it came from.
+    if outcome.is_ok() {
+        if let Some(made_at) = made_at {
+            let _ = sqlx::query("UPDATE sync_state SET last_backup_at = $1 WHERE id = 1")
+                .bind(made_at)
+                .execute(&pool)
+                .await;
+        }
+    }
+    close_into_one_file(pool, path).await;
+    outcome
+}
+
+async fn store_secrets(pool: &sqlx::SqlitePool, secrets: &SecretsPayload) -> LocalResult<()> {
+    for (code, hex) in &secrets.fiscal_keys {
+        if let Err(e) = crate::local_server::secrets::store_fiscal_key(code, hex) {
+            tracing::warn!(error = %e, register = %code, "keychain unavailable; fiscal key stored in the database");
+            sqlx::query(
+                "INSERT OR REPLACE INTO fiscal_key_fallback (register_code, secret_key, created_at) VALUES ($1, $2, $3)",
+            )
+            .bind(code)
+            .bind(hex)
+            .bind(Utc::now().to_rfc3339())
+            .execute(pool)
+            .await?;
         }
     }
     if let Some(secret) = &secrets.mesh_secret {
@@ -984,6 +1016,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(name, "Martin");
+        // The restored data knows how recent its backup is (it was copied before that was written).
+        let (last,): (Option<String>,) = sqlx::query_as("SELECT last_backup_at FROM sync_state WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(last.is_some_and(|t| t.starts_with("20")), "last_backup_at should name the backup's own time");
         pool.close().await;
 
         // No half-written files are left in the backups folder.
@@ -1058,6 +1096,43 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1);
         pool.close().await;
+    }
+
+    /// A backup carrying a signing key that does not belong to its own journal is refused,
+    /// and refusing it must not have replaced the key this computer is using.
+    #[tokio::test]
+    async fn a_key_that_does_not_match_the_journal_is_refused_before_it_is_stored() {
+        let state = shop().await;
+        let code = format!("TEST-ORDER-{}", uuid::Uuid::new_v4());
+        let journal_key = motodesk_fiscal::SecretKey::generate();
+        sqlx::query(
+            "INSERT INTO fiscal_registers (id, code, public_key, software_version, opened_at)
+             VALUES ('r1', $1, $2, 'test', '2026-01-01T00:00:00Z')",
+        )
+        .bind(&code)
+        .bind(journal_key.public().to_hex())
+        .execute(&state.db)
+        .await
+        .unwrap();
+        let dir = backups_dir(&state.data_dir);
+        fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join("mismatch.db");
+        vacuum_into(&state.db, &copy).await.unwrap();
+
+        let someone_elses_key = motodesk_fiscal::SecretKey::generate().to_hex();
+        let secrets = SecretsPayload { mesh_secret: None, fiscal_keys: vec![(code.clone(), someone_elses_key)] };
+        let refused = verify_database(&copy, &secrets).await;
+        assert!(matches!(refused, Err(LocalError::BadRequest(m)) if m.contains("ne correspond pas")));
+        assert_eq!(
+            crate::local_server::secrets::load_fiscal_key(&code).unwrap(),
+            None,
+            "the keychain was written to by a restore that was then refused"
+        );
+
+        // The matching key passes the same check (and still stores nothing).
+        let secrets = SecretsPayload { mesh_secret: None, fiscal_keys: vec![(code.clone(), journal_key.to_hex())] };
+        verify_database(&copy, &secrets).await.unwrap();
+        assert_eq!(crate::local_server::secrets::load_fiscal_key(&code).unwrap(), None);
     }
 
     #[tokio::test]

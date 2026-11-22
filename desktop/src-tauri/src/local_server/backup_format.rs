@@ -149,7 +149,7 @@ impl std::fmt::Display for OpenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OpenError::NotABackup => write!(f, "ce fichier n'est pas une sauvegarde Motodesk"),
-            OpenError::BadPassword => write!(f, "mot de passe de restauration incorrect"),
+            OpenError::BadPassword => write!(f, "mot de passe de restauration incorrect, ou fichier de sauvegarde endommagé"),
             OpenError::Corrupt(m) => write!(f, "sauvegarde corrompue : {m}"),
             OpenError::Io(e) => write!(f, "lecture impossible : {e}"),
         }

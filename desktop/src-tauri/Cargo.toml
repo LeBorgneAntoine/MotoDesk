@@ -41,6 +41,8 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-stream = "0.1"
+# Listening sockets must not be inherited by a relaunched copy of the app (see local_server::bind_listener).
+socket2 = { version = "0.5", features = ["all"] }
 mdns-sd = "0.11"
 sqlparser = "0.51"
 hmac = "0.12"
