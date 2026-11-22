@@ -67,9 +67,11 @@ jobs:
       - name: Frontend dependencies
         working-directory: desktop
         run: npm ci
+      # Checks the installer still packages. It is not signed for updates: the signing key
+      # belongs to releases (release.yml) and must never reach the code of a pull request.
       - name: Build the installer
         working-directory: desktop
-        run: npx tauri build
+        run: npm run tauri:build:unsigned
       - uses: actions/upload-artifact@v4
         with:
           name: motodesk-windows-installer

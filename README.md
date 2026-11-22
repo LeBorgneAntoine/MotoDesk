@@ -178,6 +178,8 @@ npm run tauri:build
 
 L'installateur est produit dans `target/release/bundle/`.
 
+`tauri:build` produit aussi les fichiers de mise à jour et exige donc la clé de signature (`TAURI_SIGNING_PRIVATE_KEY`, voir [`docs/mises-a-jour.md`](docs/mises-a-jour.md)) ; pour un essai local sans cette clé, utilisez `npm run tauri:build:unsigned`.
+
 Publier une version aux installations existantes (installateur signé, notes de version, bandeau « Nouvelle version disponible ») : [`docs/mises-a-jour.md`](docs/mises-a-jour.md).
 
 ## Exploitation
