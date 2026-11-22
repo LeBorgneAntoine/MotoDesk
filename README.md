@@ -217,6 +217,7 @@ Le serveur cloud n'est pas dans ce dépôt : c'est un projet séparé qui réuti
 | Mentions du ticket de caisse | [`docs/caisse/TICKET.md`](docs/caisse/TICKET.md) |
 | Assistant | [`docs/assistant/ARCHITECTURE.md`](docs/assistant/ARCHITECTURE.md) |
 | Réseau local sans cloud, mise en ligne | [`docs/standalone.md`](docs/standalone.md) |
+| Dossier partagé (fichiers sensibles chiffrés, copiés entre postes) | [`docs/dossier-partage.md`](docs/dossier-partage.md) |
 | Bascule depuis un ancien logiciel, nouveau poste | [`docs/migration/CUTOVER.md`](docs/migration/CUTOVER.md) |
 | Réparation d'une clé de signature | [`docs/KEY-REPAIR.md`](docs/KEY-REPAIR.md) |
 
