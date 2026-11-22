@@ -2694,6 +2694,7 @@ dependencies = [
  "chrono",
  "flate2",
  "hex",
+ "hkdf",
  "hmac",
  "keyring",
  "mdns-sd",

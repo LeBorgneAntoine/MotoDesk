@@ -16,6 +16,7 @@ pub mod mesh;
 pub mod network_accounts;
 pub mod pos;
 pub mod sales;
+pub mod shared;
 pub mod stock;
 pub mod sync;
 pub mod workshop;
@@ -48,6 +49,7 @@ pub fn business_router(state: SharedState) -> Router<SharedState> {
         .merge(background::router())
         .merge(sync::router())
         .merge(backup::router())
+        .merge(shared::router())
         .merge(dashboard::router())
         .merge(workshop::router())
         .merge(stock::router())

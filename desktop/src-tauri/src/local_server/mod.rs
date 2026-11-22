@@ -17,6 +17,7 @@ pub mod mesh_auth;
 pub mod pos;
 pub mod routes;
 pub mod secrets;
+pub mod shared_folder;
 pub mod state;
 pub mod sync_engine;
 pub mod sync_log;
