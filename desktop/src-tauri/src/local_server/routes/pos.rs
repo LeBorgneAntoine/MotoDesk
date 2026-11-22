@@ -1126,6 +1126,52 @@ mod tests {
         assert_eq!(stock, 10_000);
     }
 
+    /// Labour has no shelf: selling it must leave the stock history alone, while a product
+    /// sold on the same ticket is recorded.
+    #[tokio::test]
+    async fn a_service_on_a_ticket_leaves_no_stock_movement() {
+        let state = shop().await;
+        let oil = insert_product(&state, "Huile", Some("HUI-2"), 10, false, 1_200, 2_000).await;
+        let labour = insert_product(&state, "Main d'oeuvre", None, 0, true, 6_000, 2_000).await;
+        let line = |pid: Uuid, qty: i64| LineInputBody {
+            product_id: Some(pid.to_string()),
+            label: None,
+            quantity_milli: qty,
+            unit_price_ht_cents: 1_000,
+            vat_rate_bp: 2_000,
+            discount_bp: 0,
+            unit_price_ttc_cents: None,
+        };
+        let lines = vec![line(oil, 2_000), line(labour, 1_500)];
+        let totals = crate::local_server::routes::sales::compute(&lines).unwrap();
+        checkout(
+            State(state.clone()),
+            Json(CheckoutBody {
+                client_id: None,
+                kind: None,
+                notes: None,
+                lines,
+                payments: vec![cash(totals.total_ttc_cents)],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let moved = |pid: Uuid| {
+            let db = state.db.clone();
+            async move {
+                let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM stock_movements WHERE product_id = $1")
+                    .bind(pid.to_string())
+                    .fetch_one(&db)
+                    .await
+                    .unwrap();
+                n
+            }
+        };
+        assert_eq!(moved(oil).await, 1, "the product sold is in the stock history");
+        assert_eq!(moved(labour).await, 0, "labour is not");
+    }
+
     #[tokio::test]
     async fn a_mistaken_ticket_is_credited_not_deleted() {
         let state = shop().await;

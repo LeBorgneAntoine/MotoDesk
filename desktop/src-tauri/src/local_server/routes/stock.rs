@@ -308,7 +308,7 @@ async fn create_movement(
     Ok((StatusCode::CREATED, Json(payload)))
 }
 
-/// Ledger row for a sealed sale / credit note. Does not change quantity —
+/// Ledger row for a sealed sale / credit note (none for a service). Does not change quantity —
 /// the caller already applied `apply_stock_movements`.
 pub async fn record_sale_lines(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -324,10 +324,12 @@ pub async fn record_sale_lines(
         if line.quantity_milli == 0 {
             continue;
         }
+        // A service (labour, a diagnostic) has no shelf: it must not appear in the stock history.
         sqlx::query(
             r#"INSERT INTO stock_movements (
                 id, product_id, kind, quantity_milli, sale_id, created_at, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$6)"#,
+            ) SELECT $1,$2,$3,$4,$5,$6,$6
+               WHERE EXISTS (SELECT 1 FROM products WHERE id = $2 AND is_service = 0)"#,
         )
         .bind(Uuid::new_v4().to_string())
         .bind(pid)
