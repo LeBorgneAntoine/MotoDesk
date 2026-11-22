@@ -31,8 +31,9 @@ CREATE TABLE IF NOT EXISTS shared_files (
     -- The file's own key, wrapped by the shop key (nonce || ciphertext).
     wrapped_key  BLOB NOT NULL,
     key_version  INTEGER NOT NULL DEFAULT 1,
-    -- 'uploading' until every chunk has arrived; only 'ready' files are listed.
-    state        TEXT NOT NULL DEFAULT 'uploading' CHECK (state IN ('uploading', 'ready')),
+    -- 'uploading': being sent here, not finished. 'syncing': known from another PC, whose
+    -- content is still being copied over. Only 'ready' files are listed and can be opened.
+    state        TEXT NOT NULL DEFAULT 'uploading' CHECK (state IN ('uploading', 'syncing', 'ready')),
     created_by   TEXT,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
