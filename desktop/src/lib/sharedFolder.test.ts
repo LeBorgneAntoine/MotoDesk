@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { auditLabel, chunkRanges, formatFileSize, percent, visibilityLabel } from "./sharedFolder";
+import {
+  auditLabel,
+  chunkRanges,
+  formatFileSize,
+  percent,
+  storageSentence,
+  syncingSentence,
+  visibilityLabel,
+} from "./sharedFolder";
 
 describe("chunkRanges", () => {
   it("cuts a file into full chunks and a shorter last one", () => {
@@ -58,5 +66,19 @@ describe("labels", () => {
     expect(visibilityLabel("everyone")).toBe("Tous les employés");
     expect(auditLabel("file_opened")).toBe("a ouvert");
     expect(auditLabel("something_new")).toBe("something_new");
+  });
+});
+
+describe("where the files live", () => {
+  it("only claims copies on other PCs when they are made", () => {
+    expect(storageSentence(true)).toContain("postes de votre réseau");
+    expect(storageSentence(false)).toContain("sur ce poste");
+    expect(storageSentence(false)).not.toContain("réseau");
+  });
+
+  it("counts the files still arriving", () => {
+    expect(syncingSentence(0)).toBe("");
+    expect(syncingSentence(1)).toBe("1 fichier est en cours de copie depuis un autre poste.");
+    expect(syncingSentence(3)).toBe("3 fichiers sont en cours de copie depuis un autre poste.");
   });
 });

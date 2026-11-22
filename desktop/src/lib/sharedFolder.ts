@@ -70,3 +70,18 @@ export function auditLabel(action: string): string {
       return action;
   }
 }
+
+/** The line under the toolbar: where the files live. */
+export function storageSentence(replicated: boolean): string {
+  return replicated
+    ? "Vos fichiers sensibles (comptabilité, contrats, pièces d'identité), chiffrés et copiés sur les postes de votre réseau."
+    : "Vos fichiers sensibles (comptabilité, contrats, pièces d'identité), chiffrés sur ce poste.";
+}
+
+/** `2 fichiers sont en cours de copie depuis un autre poste.` (nothing when none). */
+export function syncingSentence(count: number): string {
+  if (count <= 0) return "";
+  return count === 1
+    ? "1 fichier est en cours de copie depuis un autre poste."
+    : `${count} fichiers sont en cours de copie depuis un autre poste.`;
+}

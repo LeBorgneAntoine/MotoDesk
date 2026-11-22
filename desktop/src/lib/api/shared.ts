@@ -44,7 +44,16 @@ export interface SharedStatus {
   /** False until the shop has a network (or an online account): there is no key before. */
   available: boolean;
   is_admin: boolean;
-  usage: { files: number; bytes: number; max_file_bytes: number; chunk_bytes: number } | null;
+  /** Files are copied to the other PCs of the shop's local network (not yet when online). */
+  replicated: boolean;
+  usage: {
+    files: number;
+    /** Known from another PC, content still being copied here. */
+    syncing_files: number;
+    bytes: number;
+    max_file_bytes: number;
+    chunk_bytes: number;
+  } | null;
 }
 
 export interface SharedAuditEntry {

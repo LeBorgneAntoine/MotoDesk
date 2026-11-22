@@ -39,7 +39,14 @@
   import { router } from "$lib/router/router.svelte";
   import { toast } from "$lib/stores/toast.svelte";
   import { formatDateTime, humanizeError } from "$lib/format";
-  import { formatFileSize, percent, visibilityLabel, type Visibility } from "$lib/sharedFolder";
+  import {
+    formatFileSize,
+    percent,
+    storageSentence,
+    syncingSentence,
+    visibilityLabel,
+    type Visibility,
+  } from "$lib/sharedFolder";
   import FolderDialog from "./shared/FolderDialog.svelte";
   import RenameDialog from "./shared/RenameDialog.svelte";
   import AuditDialog from "./shared/AuditDialog.svelte";
@@ -80,9 +87,9 @@
   // ----------------------------------------------------------------------------- loading ----
 
   let loadToken = 0;
-  async function load(): Promise<void> {
+  async function load(quiet = false): Promise<void> {
     const token = ++loadToken;
-    loading = true;
+    loading = !quiet;
     loadError = null;
     try {
       const s = await sharedStatus();
@@ -101,6 +108,14 @@
       if (token === loadToken) loading = false;
     }
   }
+
+  // While files are still arriving from another PC, look again every few seconds: they appear
+  // as soon as their last chunk is in.
+  $effect(() => {
+    if (!status || (status.usage?.syncing_files ?? 0) === 0) return;
+    const timer = setInterval(() => void load(true), 5000);
+    return () => clearInterval(timer);
+  });
 
   // Reload when the user moves into or out of a folder.
   $effect(() => {
@@ -295,7 +310,7 @@
 >
   <PageToolbar
     title="Dossier partagé"
-    subtitle="Vos fichiers sensibles (comptabilité, contrats, pièces d'identité), chiffrés sur ce poste."
+    subtitle={storageSentence(status?.replicated ?? false)}
     icon="folder"
   >
     {#snippet actions()}
@@ -461,6 +476,9 @@
         {/snippet}
       </DataTable>
 
+      {#if status?.usage && status.usage.syncing_files > 0}
+        <Alert variant="info">{syncingSentence(status.usage.syncing_files)}</Alert>
+      {/if}
       {#if status?.usage}
         <p class="sf__foot">
           {status.usage.files} fichier{status.usage.files > 1 ? "s" : ""} · {formatFileSize(status.usage.bytes)} · chaque fichier
