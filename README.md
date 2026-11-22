@@ -178,6 +178,8 @@ npm run tauri:build
 
 L'installateur est produit dans `target/release/bundle/`.
 
+Publier une version aux installations existantes (installateur signé, notes de version, bandeau « Nouvelle version disponible ») : [`docs/mises-a-jour.md`](docs/mises-a-jour.md).
+
 ## Exploitation
 
 - **Sauvegarde et nouveau poste.** *Réglages › Sauvegardes* (administrateur) : un fichier `.mgbak` chiffré ; les sauvegardes automatiques demandent un mot de passe que vous choisissez et conservez ailleurs. À la restauration, la base remplacée est gardée à côté. Détails dans [`docs/migration/CUTOVER.md`](docs/migration/CUTOVER.md).
@@ -218,6 +220,7 @@ Le serveur cloud n'est pas dans ce dépôt : c'est un projet séparé qui réuti
 | Assistant | [`docs/assistant/ARCHITECTURE.md`](docs/assistant/ARCHITECTURE.md) |
 | Réseau local sans cloud, mise en ligne | [`docs/standalone.md`](docs/standalone.md) |
 | Dossier partagé (fichiers sensibles chiffrés, copiés entre postes) | [`docs/dossier-partage.md`](docs/dossier-partage.md) |
+| Mises à jour (signature, publication, clé) | [`docs/mises-a-jour.md`](docs/mises-a-jour.md) |
 | Bascule depuis un ancien logiciel, nouveau poste | [`docs/migration/CUTOVER.md`](docs/migration/CUTOVER.md) |
 | Réparation d'une clé de signature | [`docs/KEY-REPAIR.md`](docs/KEY-REPAIR.md) |
 
@@ -240,6 +243,6 @@ Pour ajouter un module : créer `desktop/src/routes/<Module>.svelte`, l'ajouter 
 
 ## Licence et mentions
 
-Ce dépôt ne comporte pas encore de licence : en l'absence de licence, tous les droits sont réservés par défaut et aucun droit de réutilisation n'est accordé. Une licence sera ajoutée avant toute diffusion de version.
+Le code est publié pour que chacun puisse le lire et le vérifier (c'est ce qui permet de s'y fier), mais ce n'est **pas** un logiciel libre : tous les droits sont réservés. Voir [`LICENSE`](LICENSE).
 
 Motodesk n'est affilié à aucun éditeur de logiciel tiers. Les noms de logiciels ou de services cités dans la documentation (logiciels repris à l'import, OpenRouter, etc.) le sont à titre d'identification, et appartiennent à leurs propriétaires respectifs.

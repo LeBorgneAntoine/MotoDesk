@@ -1,0 +1,38 @@
+Motodesk - source-available licence, all rights reserved
+
+Copyright (c) 2026 Antoine LE BORGNE. All rights reserved.
+
+The source code in this repository is published so that anyone can read it, check how
+Motodesk handles a shop's data, and report problems. Publication is not a grant of the
+rights usually given by an open-source licence.
+
+You MAY:
+  - read, browse and clone this repository to study and audit the code;
+  - build the code on your own machine to verify that it matches a published installer;
+  - report vulnerabilities and propose changes to the author. A change you submit is
+    offered to the author, who may use it in Motodesk without restriction.
+
+You MAY NOT, without the author's prior written permission:
+  - copy, modify, merge, publish, distribute, sublicense or sell the code, in whole or in
+    part, or any work derived from it;
+  - use the code, or software built from it, in a product or a service, or to run a shop's
+    business, other than with an installer published by the author and under the terms
+    that accompany it;
+  - remove or alter this notice, or present the code as your own.
+
+The software is provided "as is", without warranty of any kind, express or implied. In
+no event shall the author be liable for any claim, damages or other liability arising from
+the use of the software, to the extent permitted by law.
+
+Third-party components keep their own licences; they are listed in Cargo.lock and
+desktop/package-lock.json.
+
+---
+
+Motodesk - code source consultable, tous droits réservés
+
+Le code source de ce dépôt est publié pour être lu, vérifié et audité. Sa publication ne
+vaut pas licence libre : sauf autorisation écrite de l'auteur, il est interdit de le copier,
+le modifier, le redistribuer ou l'utiliser dans un produit ou un service. Les installateurs
+publiés par l'auteur s'utilisent selon les conditions qui les accompagnent. La version
+anglaise ci-dessus fait foi en cas de différence.

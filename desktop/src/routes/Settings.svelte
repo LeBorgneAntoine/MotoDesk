@@ -36,6 +36,7 @@
   import PosSettings from "./pos/PosSettings.svelte";
   import BackupSettings from "./BackupSettings.svelte";
   import DiagnosticsCard from "./DiagnosticsCard.svelte";
+  import UpdatesCard from "./UpdatesCard.svelte";
   import AssistantSettings from "./assistant/AssistantSettings.svelte";
   import { router } from "$lib/router/router.svelte";
 
@@ -237,6 +238,7 @@
         {/if}
       {:else if activeCategory === "system"}
         {#if isAdmin}
+          <UpdatesCard />
           <BackupSettings />
           <DiagnosticsCard />
         {:else}

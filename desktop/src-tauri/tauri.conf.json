@@ -38,6 +38,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "publisher": "Motodesk",
     "shortDescription": "Gestion des ateliers et concessions moto et cycle : atelier, stock, caisse et comptabilité fiscale",
     "category": "Business",
@@ -56,6 +57,13 @@
         "compression": "lzma"
       },
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM3NkJFODE1NDg5OEE0RkEKUldUNnBKaElGZWhyeDZIVEViejdLNElKZlljcHFKRnBqV2h2VzFSNXIxdDFvVVBpMlVSQXdmSGkK",
+      "endpoints": ["https://github.com/LeBorgneAntoine/MotoDesk/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
     }
   }
 }

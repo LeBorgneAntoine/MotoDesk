@@ -6,6 +6,8 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 ## [Non publié]
 
 ### Ajouté
+- Mises à jour : un bandeau « Nouvelle version disponible » (administrateurs) avec les notes de la version, installation en un clic, recherche manuelle ou automatique dans Réglages › Sauvegardes. Les installateurs sont signés ; l'application refuse tout installateur dont la signature ne correspond pas à sa clé publique. Voir `docs/mises-a-jour.md`.
+- Licence : code source consultable, tous droits réservés (`LICENSE`).
 - Audit des dépendances : un contrôle des failles connues (`cargo audit`, `npm audit`) à chaque changement de dépendances et chaque semaine. Les deux exceptions acceptées sont justifiées dans `.cargo/audit.toml`.
 - Dossier partagé : un espace de fichiers sensibles (comptabilité, contrats, pièces d'identité) chiffrés sur le disque, copiés sur chaque poste du réseau local, avec un accès choisi dossier par dossier (administrateurs ou tous les employés) et un historique des accès. Voir `docs/dossier-partage.md`.
 - Rappel de sauvegarde pour les administrateurs : bandeau « Données non sauvegardées » tant qu'aucune sauvegarde automatique n'est active (elles n'écrivent rien sans mot de passe) ou qu'elles se sont arrêtées.

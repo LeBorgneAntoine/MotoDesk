@@ -3,6 +3,7 @@ mod local_server;
 mod logs;
 mod previous_install;
 mod startup;
+mod updates;
 
 use local_server::{local_auth, LocalApiInfo, LOCAL_API_URL};
 use startup::{StartupFailure, StartupStatus};
@@ -72,6 +73,7 @@ pub fn run() {
             background::show_main(app);
         }))
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![background::BACKGROUND_ARG]),
@@ -83,10 +85,13 @@ pub fn run() {
             quit_app,
             logs_dir,
             open_logs_folder,
-            startup_failure
+            startup_failure,
+            updates::update_check,
+            updates::update_install
         ])
         .setup(move |app| {
             app.manage(api_info);
+            app.manage(updates::PendingUpdate::default());
             let startup_status = std::sync::Arc::new(StartupStatus::default());
             app.manage(startup_status.clone());
 

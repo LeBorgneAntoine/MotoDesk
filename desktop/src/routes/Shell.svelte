@@ -37,6 +37,9 @@
   import { checkProfile, pendingClosures, type ProfileCheck } from "$lib/api/fiscal";
   import { getBackupStatus } from "$lib/api/backup";
   import { backupReminder, type BackupReminder } from "$lib/backupReminder";
+  import { updates } from "$lib/stores/updates.svelte";
+  import { noticeVisible, snooze as snoozeUpdate } from "$lib/updates";
+  import UpdateDialog from "./UpdateDialog.svelte";
   import { formatDate, humanizeError, setDateFormat } from "$lib/format";
   import { toast } from "$lib/stores/toast.svelte";
   import { setLowStockAlerts } from "$lib/api/products";
@@ -160,6 +163,18 @@
     } catch {
       backupNote = null;
     }
+  }
+
+  // A new version waits for an administrator to install it; the others are not interrupted.
+  let updateOpen = $state(false);
+  let updateHidden = $state(0);
+  const updateNote = $derived(
+    authStore.isAdmin && noticeVisible(updates.available) && updateHidden >= 0 ? updates.available : null,
+  );
+  function laterUpdate(): void {
+    if (updates.available) snoozeUpdate(updates.available.version);
+    updateHidden += 1;
+    updateOpen = false;
   }
 
   function snoozeBackupReminder(): void {
@@ -343,6 +358,7 @@
   });
 
   onMount(() => {
+    updates.start();
     void settingsStore.load().then(() => applyAppearance()).catch(() => {});
     void checkProfile().then((p) => (profile = p)).catch(() => {});
     const onProfile = (e: Event): void => {
@@ -418,6 +434,17 @@
               <span class="shell__banner-actions">
                 <Button variant="link" size="sm" onclick={() => navigate("settings")}>Configurer</Button>
                 <Button variant="link" size="sm" onclick={dismissCaisseHint}>Plus tard</Button>
+              </span>
+            </Alert>
+          </div>
+        {/if}
+        {#if updateNote}
+          <div class="shell__banner">
+            <Alert flush variant="info" title={`Nouvelle version disponible : Motodesk ${updateNote.version}`}>
+              Une mise à jour est prête. Voyez ce qu'elle apporte avant de l'installer.
+              <span class="shell__banner-actions">
+                <Button variant="primary" size="sm" onclick={() => (updateOpen = true)}>Voir les nouveautés</Button>
+                <Button variant="link" size="sm" onclick={laterUpdate}>Plus tard</Button>
               </span>
             </Alert>
           </div>
@@ -560,6 +587,7 @@
   </StatusBar>
 
   <PanelHost />
+  <UpdateDialog open={updateOpen} onClose={() => (updateOpen = false)} />
   <ToastHost />
 </div>
 

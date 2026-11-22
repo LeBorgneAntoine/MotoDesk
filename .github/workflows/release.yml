@@ -51,6 +51,18 @@ jobs:
             *) echo "::error::Set the repository variable MOTODESK_CLOUD_URL to the server's https address."; exit 1 ;;
           esac
 
+      # Installed copies only accept updates signed with this key (see docs/mises-a-jour.md).
+      # Without it the installer could not be updated, so refuse to produce one.
+      - name: The signing key must be set
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::Add the repository secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD (docs/mises-a-jour.md)."
+            exit 1
+          fi
+
       - name: Tests
         run: cargo test --workspace
       - name: Frontend dependencies
@@ -60,6 +72,8 @@ jobs:
         working-directory: desktop
         env:
           MOTODESK_CLOUD_URL: ${{ vars.MOTODESK_CLOUD_URL }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
 
       - name: Checksums
@@ -69,12 +83,28 @@ jobs:
           sha256sum *.exe > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # The release notes are this version's section of the changelog; the application shows
+      # the same text before the update is installed.
+      - name: Release notes and update manifest
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \[" v "\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $version."
+            exit 1
+          fi
+          installer=$(ls target/release/bundle/nsis/*-setup.exe)
+          node .github/scripts/updater-manifest.mjs "$version" "$installer" "$GITHUB_REPOSITORY" release-notes.md target/release/bundle/nsis/latest.json
+
+      # A draft is invisible to installed copies: they see `latest.json` only once the release
+      # is published, which is the moment someone has read it. A pre-release (v1.2.0-rc.1) is
+      # never served as "latest".
       - name: Draft release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            target/release/bundle/nsis/*.exe target/release/bundle/nsis/SHA256SUMS.txt \
-            --draft --verify-tag --title "Motodesk ${GITHUB_REF_NAME#v}" \
-            --notes-file <(awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## \[" v "\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md)
+          flags=""
+          case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME"             target/release/bundle/nsis/*-setup.exe target/release/bundle/nsis/*-setup.exe.sig             target/release/bundle/nsis/latest.json target/release/bundle/nsis/SHA256SUMS.txt             --draft $flags --verify-tag --title "Motodesk ${GITHUB_REF_NAME#v}"             --notes-file release-notes.md
