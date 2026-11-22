@@ -38,6 +38,8 @@ pub struct LocalState {
     pub catchup_signal: Notify,
     /// Keeps catch-up runs from overlapping.
     pub catchup_lock: tokio::sync::Mutex<()>,
+    /// Notified when the shared folder changes here, so the other PCs are told to come and look.
+    pub shared_signal: Notify,
 }
 
 impl LocalState {
@@ -72,6 +74,7 @@ impl LocalState {
             join: Default::default(),
             catchup_signal: Notify::new(),
             catchup_lock: tokio::sync::Mutex::new(()),
+            shared_signal: Notify::new(),
         }
     }
 
@@ -84,6 +87,11 @@ impl LocalState {
     }
 
     /// Wake the sync engine so it drains the outbox after a local write.
+    /// The shared folder changed on this PC.
+    pub fn shared_changed(&self) {
+        self.shared_signal.notify_one();
+    }
+
     pub fn notify_sync(&self) {
         self.sync_signal.notify_one();
     }

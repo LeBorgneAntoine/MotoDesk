@@ -73,7 +73,7 @@ pub async fn serve_accounts(state: &SharedState, incoming: Vec<Account>) -> Loca
 
 // ---- Asking -------------------------------------------------------------------------------------------
 
-fn url(peer: &PeerInfo, path: &str) -> String {
+pub(crate) fn url(peer: &PeerInfo, path: &str) -> String {
     let host = if peer.host.contains(':') && !peer.host.starts_with('[') {
         format!("[{}]", peer.host)
     } else {
@@ -83,7 +83,7 @@ fn url(peer: &PeerInfo, path: &str) -> String {
 }
 
 /// A request body signed with the mesh secret: the fields, plus `nonce`, `ts` and `sig`.
-fn signed(secret: &str, mut fields: serde_json::Map<String, Value>) -> Value {
+pub(crate) fn signed(secret: &str, mut fields: serde_json::Map<String, Value>) -> Value {
     let (nonce, ts, sig) = mesh_auth::sign_value(secret, &Value::Object(fields.clone()));
     fields.insert("nonce".into(), nonce.into());
     fields.insert("ts".into(), ts.into());
@@ -92,7 +92,7 @@ fn signed(secret: &str, mut fields: serde_json::Map<String, Value>) -> Value {
 }
 
 /// Check a signed response and return its fields without the signature.
-fn verified(secret: &str, mut body: Value) -> LocalResult<serde_json::Map<String, Value>> {
+pub(crate) fn verified(secret: &str, mut body: Value) -> LocalResult<serde_json::Map<String, Value>> {
     let Some(map) = body.as_object_mut() else {
         return Err(LocalError::Unauthorized);
     };
@@ -108,7 +108,7 @@ fn verified(secret: &str, mut body: Value) -> LocalResult<serde_json::Map<String
     Ok(std::mem::take(map))
 }
 
-async fn secret_of(state: &SharedState) -> LocalResult<String> {
+pub(crate) async fn secret_of(state: &SharedState) -> LocalResult<String> {
     state
         .mesh_secret
         .read()
@@ -118,7 +118,7 @@ async fn secret_of(state: &SharedState) -> LocalResult<String> {
         .ok_or(LocalError::Unauthorized)
 }
 
-async fn post(state: &SharedState, peer: &PeerInfo, path: &str, body: Value) -> LocalResult<Value> {
+pub(crate) async fn post(state: &SharedState, peer: &PeerInfo, path: &str, body: Value) -> LocalResult<Value> {
     let res = state
         .http
         .post(url(peer, path))
@@ -187,6 +187,13 @@ pub async fn catch_up_all(state: &SharedState) {
             Ok(n) if n > 0 => tracing::info!(peer = %peer.host, accounts = n, "accounts updated from a peer"),
             Ok(_) => {}
             Err(e) => tracing::debug!(peer = %peer.host, error = %e, "account exchange failed"),
+        }
+        match crate::local_server::shared_folder::replication::sync_with(state, &peer).await {
+            Ok(n) if n.changed() => {
+                tracing::info!(peer = %peer.host, folders = n.folders, files = n.files, chunks = n.chunks, "shared folder updated from a peer");
+            }
+            Ok(_) => {}
+            Err(e) => tracing::debug!(peer = %peer.host, error = %e, "shared folder sync failed"),
         }
         match pull_from(state, &peer).await {
             Ok(n) if n > 0 => {

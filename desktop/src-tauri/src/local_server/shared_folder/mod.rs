@@ -11,6 +11,7 @@
 //! - **Audit.** Opening, adding and removing files is recorded, on this PC.
 
 pub mod crypto;
+pub mod replication;
 
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -323,6 +324,7 @@ pub async fn create_folder(
     .execute(&state.db)
     .await?;
     audit(state, actor, "folder_created", None, Some(&id), Some(&name)).await;
+    state.shared_changed();
     Ok(FolderView {
         id,
         parent_id: parent_id.map(str::to_string),
@@ -395,9 +397,11 @@ pub async fn update_folder(
         .bind(&now)
         .execute(&state.db)
         .await?;
+    state.shared_changed();
     if visibility != current.visibility {
         audit(state, actor, "folder_visibility", None, Some(id), Some(&format!("{} -> {visibility}", current.visibility))).await;
     }
+        state.shared_changed();
     Ok(FolderView {
         id: id.to_string(),
         parent_id,
@@ -477,6 +481,7 @@ pub async fn delete_folder(state: &SharedState, actor: &Actor, id: &str) -> Loca
     }
     tx.commit().await?;
     audit(state, actor, "folder_deleted", None, Some(id), Some(&name)).await;
+    state.shared_changed();
     Ok(())
 }
 
@@ -643,6 +648,7 @@ pub async fn finish_upload(state: &SharedState, actor: &Actor, file_id: &str) ->
             .execute(&state.db)
             .await?;
         audit(state, actor, "file_added", Some(file_id), Some(&row.folder_id), Some(&row.name)).await;
+        state.shared_changed();
     }
     sqlx::query_as(&format!("SELECT {FILE_COLS} FROM shared_files WHERE id = $1"))
         .bind(file_id)
@@ -776,6 +782,7 @@ pub async fn update_file(
         .bind(&now)
         .execute(&state.db)
         .await?;
+    state.shared_changed();
     sqlx::query_as(&format!("SELECT {FILE_COLS} FROM shared_files WHERE id = $1"))
         .bind(file_id)
         .fetch_one(&state.db)
@@ -810,6 +817,7 @@ pub async fn delete_file(state: &SharedState, actor: &Actor, file_id: &str) -> L
     tx.commit().await?;
     if row.state == "ready" {
         audit(state, actor, "file_deleted", Some(file_id), Some(&row.folder_id), Some(&row.name)).await;
+        state.shared_changed();
     }
     Ok(())
 }
@@ -869,6 +877,8 @@ pub async fn recent_audit(state: &SharedState, actor: &Actor, limit: i64) -> Loc
 #[derive(Debug, Serialize)]
 pub struct Usage {
     pub files: i64,
+    /// Files known from another PC whose content is still being copied here.
+    pub syncing_files: i64,
     pub bytes: i64,
     pub max_file_bytes: u64,
     pub chunk_bytes: usize,
@@ -880,7 +890,11 @@ pub async fn usage(state: &SharedState) -> LocalResult<Usage> {
     )
     .fetch_one(&state.db)
     .await?;
-    Ok(Usage { files, bytes, max_file_bytes: MAX_FILE_BYTES, chunk_bytes: CHUNK_BYTES })
+    let (syncing_files,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM shared_files WHERE deleted_at IS NULL AND state = 'syncing'")
+            .fetch_one(&state.db)
+            .await?;
+    Ok(Usage { files, syncing_files, bytes, max_file_bytes: MAX_FILE_BYTES, chunk_bytes: CHUNK_BYTES })
 }
 
 #[cfg(test)]

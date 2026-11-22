@@ -95,6 +95,7 @@ pub async fn adopt_peer(state: &SharedState, peer: PeerInfo) {
 /// Boot mDNS discovery + the prune loop + reload static peers.
 pub fn start_discovery(state: SharedState, port: u16) {
     catchup::start(state.clone());
+    crate::local_server::shared_folder::replication::start(state.clone());
     tokio::spawn(async move {
         if let Err(e) = run_discovery(state.clone(), port).await {
             tracing::warn!(error = %e, "mdns discovery exited");

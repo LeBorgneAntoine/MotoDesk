@@ -22,6 +22,10 @@ pub fn lan_router() -> Router<SharedState> {
         .route("/mesh/join/finish", post(join_finish))
         .route("/mesh/pull", post(pull))
         .route("/mesh/accounts", post(accounts))
+        .route("/mesh/shared/summary", post(shared_summary))
+        .route("/mesh/shared/rows", post(shared_rows))
+        .route("/mesh/shared/chunk", post(shared_chunk))
+        .route("/mesh/shared/nudge", post(shared_nudge))
 }
 
 async fn join_start(
@@ -40,7 +44,7 @@ async fn join_finish(
 
 /// A request signed with the mesh secret: its fields without `nonce`, `ts` and `sig`, if the
 /// signature is genuine, recent and unused.
-async fn authenticated_fields(
+pub(crate) async fn authenticated_fields(
     state: &SharedState,
     mut body: serde_json::Value,
 ) -> LocalResult<serde_json::Map<String, serde_json::Value>> {
@@ -69,7 +73,7 @@ async fn authenticated_fields(
     Ok(std::mem::take(map))
 }
 
-async fn sign_reply(state: &SharedState, fields: serde_json::Map<String, serde_json::Value>) -> LocalResult<Json<serde_json::Value>> {
+pub(crate) async fn sign_reply(state: &SharedState, fields: serde_json::Map<String, serde_json::Value>) -> LocalResult<Json<serde_json::Value>> {
     let secret = state.mesh_secret.read().await.clone().ok_or(LocalError::Unauthorized)?;
     let (nonce, ts, sig) = mesh_auth::sign_value(&secret, &serde_json::Value::Object(fields.clone()));
     let mut out = fields;
@@ -115,6 +119,45 @@ async fn accounts(
     let mut out = serde_json::Map::new();
     out.insert("accounts".into(), serde_json::to_value(&all).map_err(|e| LocalError::Internal(e.into()))?);
     sign_reply(&state, out).await
+}
+
+/// The shared folder: what this PC holds (or just that it matches the asker), the full rows
+/// asked for, one encrypted chunk, and a tap on the shoulder saying "something changed".
+async fn shared_summary(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> LocalResult<Json<serde_json::Value>> {
+    let fields = authenticated_fields(&state, body).await?;
+    let digest = fields.get("digest").and_then(|v| v.as_str()).unwrap_or("");
+    let out = crate::local_server::shared_folder::replication::serve_summary(&state, digest).await?;
+    sign_reply(&state, out).await
+}
+
+async fn shared_rows(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> LocalResult<Json<serde_json::Value>> {
+    let fields = authenticated_fields(&state, body).await?;
+    let out = crate::local_server::shared_folder::replication::serve_rows(&state, &fields).await?;
+    sign_reply(&state, out).await
+}
+
+async fn shared_chunk(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> LocalResult<Json<serde_json::Value>> {
+    let fields = authenticated_fields(&state, body).await?;
+    let out = crate::local_server::shared_folder::replication::serve_chunk(&state, &fields).await?;
+    sign_reply(&state, out).await
+}
+
+async fn shared_nudge(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> LocalResult<Json<serde_json::Value>> {
+    authenticated_fields(&state, body).await?;
+    mesh::catchup::request(&state);
+    sign_reply(&state, serde_json::Map::new()).await
 }
 
 /// Loopback admin routes for mesh status / static peers.

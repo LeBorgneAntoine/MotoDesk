@@ -55,6 +55,7 @@ hex = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 aes-gcm = "0.10"
 hkdf = "0.12"
+base64 = "0.22"
 flate2 = "1"
 motodesk-core = { path = "../../crates/motodesk-core" }
 motodesk-fiscal = { path = "../../crates/motodesk-fiscal" }
