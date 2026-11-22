@@ -37,6 +37,20 @@ jobs:
             exit 1
           fi
 
+      # The cloud address is fixed at build time. An installer built without it
+      # points at the machine it runs on and can never sign in online, so refuse to
+      # produce one. Set it in the repository's Settings > Secrets and variables >
+      # Actions > Variables.
+      - name: The cloud address must be set
+        shell: bash
+        env:
+          MOTODESK_CLOUD_URL: ${{ vars.MOTODESK_CLOUD_URL }}
+        run: |
+          case "$MOTODESK_CLOUD_URL" in
+            https://*) echo "Cloud address: $MOTODESK_CLOUD_URL" ;;
+            *) echo "::error::Set the repository variable MOTODESK_CLOUD_URL to the server's https address."; exit 1 ;;
+          esac
+
       - name: Tests
         run: cargo test --workspace
       - name: Frontend dependencies
@@ -44,6 +58,8 @@ jobs:
         run: npm ci
       - name: Build the installer
         working-directory: desktop
+        env:
+          MOTODESK_CLOUD_URL: ${{ vars.MOTODESK_CLOUD_URL }}
         run: npx tauri build
 
       - name: Checksums
