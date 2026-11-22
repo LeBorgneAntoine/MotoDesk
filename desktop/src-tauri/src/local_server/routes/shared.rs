@@ -34,7 +34,14 @@ async fn status(State(state): State<SharedState>) -> LocalResult<Json<Value>> {
     let actor = shared::actor(&state).await?;
     let available = shared::available(&state).await;
     let usage = if available { serde_json::to_value(shared::usage(&state).await?).ok() } else { None };
-    Ok(Json(json!({ "available": available, "is_admin": actor.is_admin, "usage": usage })))
+    // Files are copied between PCs only on a shop's local network for now.
+    let replicated = crate::local_server::local_accounts::is_standalone(&state.db).await;
+    Ok(Json(json!({
+        "available": available,
+        "is_admin": actor.is_admin,
+        "replicated": replicated,
+        "usage": usage,
+    })))
 }
 
 #[derive(Debug, Deserialize)]
