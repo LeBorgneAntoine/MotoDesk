@@ -52,7 +52,7 @@ keyring = "3"
 argon2 = "0.5"
 srp = "0.6"
 hex = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 aes-gcm = "0.10"
 hkdf = "0.12"
 base64 = "0.22"

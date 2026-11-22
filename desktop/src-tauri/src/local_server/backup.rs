@@ -545,7 +545,7 @@ fn unpack_legacy_zip(
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| LocalError::BadRequest(e.to_string()))?;
-        let name = entry.name().replace('\\', "/");
+        let name = entry.name().map_err(|e| LocalError::BadRequest(e.to_string()))?.replace('\\', "/");
         if name == DB_ENTRY {
             let db_path = staging.join(DB_ENTRY);
             let mut out = BufWriter::new(File::create(&db_path).map_err(io_at("création de la base", &db_path))?);

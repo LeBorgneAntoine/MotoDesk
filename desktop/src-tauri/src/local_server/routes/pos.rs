@@ -1002,7 +1002,7 @@ mod tests {
             unit_price_ttc_cents: None,
         };
         let totals = crate::local_server::routes::sales::compute(std::slice::from_ref(&line)).unwrap();
-        checkout(
+        let _ = checkout(
             State(state.clone()),
             Json(CheckoutBody {
                 client_id: None,
@@ -1044,7 +1044,7 @@ mod tests {
                 unit_price_ttc_cents: None,
             };
             let totals = crate::local_server::routes::sales::compute(std::slice::from_ref(&line)).unwrap();
-            checkout(
+            let _ = checkout(
                 State(state.clone()),
                 Json(CheckoutBody {
                     client_id: None,
@@ -1144,7 +1144,7 @@ mod tests {
         };
         let lines = vec![line(oil, 2_000), line(labour, 1_500)];
         let totals = crate::local_server::routes::sales::compute(&lines).unwrap();
-        checkout(
+        let _ = checkout(
             State(state.clone()),
             Json(CheckoutBody {
                 client_id: None,
@@ -1349,7 +1349,7 @@ mod tests {
                 .unwrap()
                 .total_ttc_cents;
         for _ in 0..2 {
-            checkout(
+            let _ = checkout(
                 State(state.clone()),
                 Json(CheckoutBody {
                     client_id: None,
@@ -1362,7 +1362,7 @@ mod tests {
             .await
             .unwrap();
         }
-        checkout(
+        let _ = checkout(
             State(state.clone()),
             Json(CheckoutBody {
                 client_id: None,

@@ -1076,7 +1076,7 @@ mod tests {
             "label": "Plaquettes", "quantity_milli": 1_000, "unit_price_ht_cents": 4_000, "vat_rate_bp": 2_000
         }))
         .unwrap();
-        credit_note(
+        let _ = credit_note(
             State(state.clone()),
             Path(sale_id),
             Json(CreditNoteBody { lines: vec![one], reason: None }),

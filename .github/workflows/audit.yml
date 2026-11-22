@@ -1,0 +1,47 @@
+name: Dependency audit
+
+# Known vulnerabilities in what the application ships with. It is not part of the
+# regular checks: a new advisory must not block an unrelated change. It runs when the
+# dependencies change, once a week, and on demand.
+on:
+  pull_request:
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - desktop/package-lock.json
+      - desktop/package.json
+      - .cargo/audit.toml
+      - .github/workflows/audit.yml
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      # Vulnerabilities fail the job; the accepted ones are listed, with reasons, in
+      # .cargo/audit.toml. Warnings (unmaintained crates) are reported, not failing.
+      - run: cargo audit
+
+  npm:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      # Everything, development tools included: they run on the build machine.
+      - run: npm audit

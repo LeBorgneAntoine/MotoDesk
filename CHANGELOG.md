@@ -6,6 +6,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 ## [Non publié]
 
 ### Ajouté
+- Audit des dépendances : un contrôle des failles connues (`cargo audit`, `npm audit`) à chaque changement de dépendances et chaque semaine. Les deux exceptions acceptées sont justifiées dans `.cargo/audit.toml`.
 - Dossier partagé : un espace de fichiers sensibles (comptabilité, contrats, pièces d'identité) chiffrés sur le disque, copiés sur chaque poste du réseau local, avec un accès choisi dossier par dossier (administrateurs ou tous les employés) et un historique des accès. Voir `docs/dossier-partage.md`.
 - Rappel de sauvegarde pour les administrateurs : bandeau « Données non sauvegardées » tant qu'aucune sauvegarde automatique n'est active (elles n'écrivent rien sans mot de passe) ou qu'elles se sont arrêtées.
 - Installateur Windows (NSIS, sans droits administrateur) produit par l'intégration continue.
@@ -13,6 +14,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Workflow de publication : un tag `vX.Y.Z` construit l'installateur et prépare une version brouillon.
 
 ### Corrigé
+- Dépendances : mise à jour des bibliothèques réseau et TLS (rustls, quinn, url…) et de la lecture des anciennes sauvegardes ZIP, ainsi que des outils de développement (vite 6, vitest 4) : plus aucune faille connue côté application, ni côté outils.
 - Restauration : le redémarrage qui applique une sauvegarde laissait la nouvelle instance sans service de données (elle héritait du port 17300 de l'ancienne). Les sockets d'écoute ne sont plus héritables, et le démarrage attend la libération des ports.
 - Restauration : les clés de signature et le secret du réseau d'une sauvegarde étaient écrits dans le trousseau avant d'être vérifiés : une sauvegarde refusée pouvait remplacer la clé en service. Ils ne le sont plus qu'une fois la restauration certaine.
 - Restauration : un fichier endommagé disait « mot de passe incorrect » ; le message cite maintenant les deux causes.

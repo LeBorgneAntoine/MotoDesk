@@ -1,0 +1,17 @@
+# Advisories we have looked at and accepted. Each one says why it does not apply and
+# what would end the exception; review this list whenever sqlx or tauri is upgraded.
+[advisories]
+ignore = [
+  # SQLite before 3.54 can return stale memory when a database is opened together with a
+  # `-wal` file of a different page size. sqlx 0.8 and 0.9 both pin libsqlite3-sys 0.30,
+  # so there is no fixed version to move to yet.
+  # Not reachable here: Motodesk only opens its own database, and a restored backup is
+  # unpacked as a single file into a fresh folder, so no foreign `-wal` can sit next to it.
+  # Ends when a sqlx release depends on libsqlite3-sys >= 0.39.
+  "RUSTSEC-2026-0459",
+
+  # Marvin attack on `rsa`. The crate is in Cargo.lock only because sqlx lists its MySQL
+  # driver; nothing in this workspace enables that driver, so it is never compiled
+  # (`cargo tree -i rsa` finds nothing).
+  "RUSTSEC-2023-0071",
+]
