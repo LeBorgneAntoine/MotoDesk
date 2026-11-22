@@ -107,6 +107,12 @@ fn io_err(e: impl Into<anyhow::Error>) -> LocalError {
     LocalError::Internal(e.into())
 }
 
+/// Same, but says which operation and file failed: "in use by another process"
+/// alone does not tell anyone what to look at.
+fn io_at<'a>(what: &'a str, path: &'a Path) -> impl FnOnce(std::io::Error) -> LocalError + 'a {
+    move |e| LocalError::Internal(anyhow::anyhow!("{what} ({}) : {e}", path.display()))
+}
+
 // ------------------------------------------------------------- start-up -----
 
 /// Swap a restored database in before the pool opens.
@@ -335,6 +341,22 @@ pub async fn restore_path(
     result
 }
 
+/// Move a file, trying again for a moment when Windows says it is still in use
+/// (a scanner or indexer holding a file that was just written or closed).
+async fn rename_patiently(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut attempt = 0;
+    loop {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt >= 20 => return Err(e),
+            Err(_) => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
 /// Remove a scratch folder, trying again for a moment when Windows says a file
 /// is still in use: an antivirus or the search indexer often holds a freshly
 /// written file for a few hundred milliseconds.
@@ -403,7 +425,10 @@ async fn stage_and_queue(
             fs::copy(entry.path(), dest.join(entry.file_name())).map_err(io_err)?;
         }
     }
-    fs::rename(&staged_db, state.data_dir.join(PENDING_DB)).map_err(io_err)?;
+    let pending = state.data_dir.join(PENDING_DB);
+    rename_patiently(&staged_db, &pending)
+        .await
+        .map_err(|e| io_err(anyhow::anyhow!("mise en attente de la base ({} -> {}) : {e}", staged_db.display(), pending.display())))?;
 
     Ok(RestoreResult {
         restart_required: true,
@@ -461,7 +486,8 @@ fn unpack_v2(
                 }
             }
             DB_ENTRY => {
-                let mut out = BufWriter::new(File::create(staging.join(DB_ENTRY)).map_err(io_err)?);
+                let db_path = staging.join(DB_ENTRY);
+            let mut out = BufWriter::new(File::create(&db_path).map_err(io_at("création de la base", &db_path))?);
                 let copied = std::io::copy(&mut data, &mut out).map_err(bad)?;
                 out.flush().map_err(io_err)?;
                 if copied != entry.len {
@@ -520,9 +546,10 @@ fn unpack_legacy_zip(
         let mut entry = zip.by_index(i).map_err(|e| LocalError::BadRequest(e.to_string()))?;
         let name = entry.name().replace('\\', "/");
         if name == DB_ENTRY {
-            let mut out = BufWriter::new(File::create(staging.join(DB_ENTRY)).map_err(io_err)?);
-            std::io::copy(&mut entry, &mut out).map_err(io_err)?;
-            out.flush().map_err(io_err)?;
+            let db_path = staging.join(DB_ENTRY);
+            let mut out = BufWriter::new(File::create(&db_path).map_err(io_at("création de la base", &db_path))?);
+            std::io::copy(&mut entry, &mut out).map_err(io_at("écriture de la base", &db_path))?;
+            out.flush().map_err(io_at("écriture de la base", &db_path))?;
         } else if name == "secrets.enc" {
             continue;
         } else if let Some(rest) = sanitize_entry_name(&name) {
