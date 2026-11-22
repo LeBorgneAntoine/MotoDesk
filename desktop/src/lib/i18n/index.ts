@@ -21,6 +21,7 @@ export const fr = {
     sales: "Ventes",
     billing: "Comptabilité",
     templates: "Modèles",
+    shared: "Dossier partagé",
     employees: "Employés",
     data: "Données",
     settings: "Paramètres",

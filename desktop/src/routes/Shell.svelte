@@ -52,6 +52,7 @@
   import Settings from "./Settings.svelte";
   import Templates from "./templates/Templates.svelte";
   import Employees from "./Employees.svelte";
+  import SharedFolder from "./SharedFolder.svelte";
   import DataManager from "./DataManager.svelte";
   import Assistant from "./assistant/Assistant.svelte";
 
@@ -64,6 +65,7 @@
     "sales",
     "billing",
     "templates",
+    "shared",
     "employees",
     "data",
     "settings",
@@ -79,6 +81,7 @@
     sales: t("nav.sales"),
     billing: t("nav.billing"),
     templates: t("nav.templates"),
+    shared: t("nav.shared"),
     employees: t("nav.employees"),
     data: t("nav.data"),
     settings: t("nav.settings"),
@@ -196,6 +199,7 @@
     { id: "sales", label: t("nav.sales"), icon: "shopping-cart" },
     { id: "billing", label: t("nav.billing"), icon: "scale" },
     { id: "templates", label: t("nav.templates"), icon: "layout-template" },
+    { id: "shared", label: t("nav.shared"), icon: "folder" },
     ...(authStore.isAdmin
       ? [
           { id: "employees", label: t("nav.employees"), icon: "id-card" } as SidebarItem,
@@ -493,6 +497,8 @@
           <Billing />
         {:else if activeSidebarId === "templates"}
           <Templates />
+        {:else if activeSidebarId === "shared"}
+          <SharedFolder />
         {:else if activeSidebarId === "employees" && authStore.isAdmin}
           <Employees />
         {:else if activeSidebarId === "data" && authStore.isAdmin}

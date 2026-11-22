@@ -242,6 +242,42 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+/**
+ * A request whose body or answer is not JSON (file chunks going in, a file coming out). Same
+ * headers as `api`, no retry, and the caller's own abort signal; a failure throws an `ApiError`.
+ */
+export async function rawFetch(
+  path: string,
+  init: { method: string; body?: BodyInit; signal?: AbortSignal; timeoutMs?: number },
+): Promise<Response> {
+  await ensureBaseUrlReady();
+  const headers: Record<string, string> = {};
+  const localTok = getLocalApiToken();
+  if (localTok) headers[LOCAL_TOKEN_HEADER] = localTok;
+  if (inMemoryTokens?.access_token) headers["Authorization"] = `Bearer ${inMemoryTokens.access_token}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 60_000);
+  const onAbort = () => controller.abort();
+  init.signal?.addEventListener("abort", onAbort);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { method: init.method, headers, body: init.body, signal: controller.signal });
+  } catch (err) {
+    const isAbort = err instanceof DOMException && err.name === "AbortError";
+    throw new ApiError(
+      0,
+      isAbort ? "aborted" : "network_error",
+      isAbort ? "Opération interrompue." : `Impossible de joindre l'API locale (${BASE_URL}).`,
+    );
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener("abort", onAbort);
+  }
+  if (!res.ok) throw await parseError(res);
+  return res;
+}
+
 export const api = {
   get: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     request<T>(path, { ...opts, method: "GET" }),

@@ -24,6 +24,10 @@
   import Bike from "@lucide/svelte/icons/bike";
   import Car from "@lucide/svelte/icons/car";
   import FileText from "@lucide/svelte/icons/file-text";
+  import Folder from "@lucide/svelte/icons/folder";
+  import FolderPlus from "@lucide/svelte/icons/folder-plus";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import File from "@lucide/svelte/icons/file";
   import CircleUser from "@lucide/svelte/icons/circle-user";
   import Settings from "@lucide/svelte/icons/settings";
   import Bell from "@lucide/svelte/icons/bell";
@@ -131,6 +135,10 @@
     bike: Bike,
     car: Car,
     "file-text": FileText,
+    folder: Folder,
+    "folder-plus": FolderPlus,
+    "folder-open": FolderOpen,
+    file: File,
     "circle-user": CircleUser,
     settings: Settings,
     bell: Bell,
