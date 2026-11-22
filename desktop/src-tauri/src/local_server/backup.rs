@@ -326,13 +326,30 @@ pub async fn restore_path(
         return Err(LocalError::NotFound);
     }
     let staging = state.data_dir.join(STAGING_DIR);
-    let _ = fs::remove_dir_all(&staging);
+    remove_dir_patiently(&staging).await;
     fs::create_dir_all(&staging).map_err(io_err)?;
 
     let result = stage_and_queue(state, path, password, &staging).await;
     // Whatever happened, the scratch folder does not stay behind.
-    let _ = fs::remove_dir_all(&staging);
+    remove_dir_patiently(&staging).await;
     result
+}
+
+/// Remove a scratch folder, trying again for a moment when Windows says a file
+/// is still in use: an antivirus or the search indexer often holds a freshly
+/// written file for a few hundred milliseconds.
+async fn remove_dir_patiently(dir: &Path) {
+    for attempt in 0..20 {
+        match fs::remove_dir_all(dir) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) if attempt == 19 => {
+                tracing::warn!(dir = %dir.display(), error = %e, "could not clear the restore scratch folder");
+                return;
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
 }
 
 async fn stage_and_queue(
@@ -486,7 +503,19 @@ fn unpack_legacy_zip(
     let mut zip = zip::ZipArchive::new(BufReader::new(file))
         .map_err(|_| LocalError::BadRequest("ce fichier n'est pas une sauvegarde Motodesk".into()))?;
 
-    let mut secrets_enc: Option<Vec<u8>> = None;
+    // The keys come first: a wrong password is refused before a single byte of
+    // the (possibly large) database is written anywhere.
+    let blob = {
+        let mut entry = zip
+            .by_name("secrets.enc")
+            .map_err(|_| LocalError::BadRequest("archive sans clés chiffrées".into()))?;
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).map_err(io_err)?;
+        buf
+    };
+    let secrets = legacy::decrypt_secrets(password, &blob)
+        .map_err(|_| LocalError::BadRequest("mot de passe de restauration incorrect".into()))?;
+
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| LocalError::BadRequest(e.to_string()))?;
         let name = entry.name().replace('\\', "/");
@@ -495,9 +524,7 @@ fn unpack_legacy_zip(
             std::io::copy(&mut entry, &mut out).map_err(io_err)?;
             out.flush().map_err(io_err)?;
         } else if name == "secrets.enc" {
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf).map_err(io_err)?;
-            secrets_enc = Some(buf);
+            continue;
         } else if let Some(rest) = sanitize_entry_name(&name) {
             let dir = staging.join("archives");
             fs::create_dir_all(&dir).map_err(io_err)?;
@@ -505,9 +532,6 @@ fn unpack_legacy_zip(
             std::io::copy(&mut entry, &mut out).map_err(io_err)?;
         }
     }
-    let blob = secrets_enc.ok_or_else(|| LocalError::BadRequest("archive sans clés chiffrées".into()))?;
-    let secrets = legacy::decrypt_secrets(password, &blob)
-        .map_err(|_| LocalError::BadRequest("mot de passe de restauration incorrect".into()))?;
     Ok((secrets, None))
 }
 
