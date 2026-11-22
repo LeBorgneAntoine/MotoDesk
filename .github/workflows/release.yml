@@ -1,0 +1,64 @@
+name: Release
+
+# Push a tag such as v1.0.0 to build the Windows installer and open a draft
+# release. The release stays a draft until someone reads it and publishes it.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: The tag must match the application version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for file in desktop/package.json desktop/src-tauri/tauri.conf.json; do
+            found=$(node -p "require('./$file').version")
+            if [ "$found" != "$tag" ]; then
+              echo "::error file=$file::version is $found but the tag is $tag"
+              exit 1
+            fi
+          done
+          found=$(grep -m1 '^version' desktop/src-tauri/Cargo.toml | cut -d'"' -f2)
+          if [ "$found" != "$tag" ]; then
+            echo "::error file=desktop/src-tauri/Cargo.toml::version is $found but the tag is $tag"
+            exit 1
+          fi
+
+      - name: Tests
+        run: cargo test --workspace
+      - name: Frontend dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Build the installer
+        working-directory: desktop
+        run: npx tauri build
+
+      - name: Checksums
+        shell: bash
+        run: |
+          cd target/release/bundle/nsis
+          sha256sum *.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            target/release/bundle/nsis/*.exe target/release/bundle/nsis/SHA256SUMS.txt \
+            --draft --verify-tag --title "Motodesk ${GITHUB_REF_NAME#v}" \
+            --notes-file <(awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## \[" v "\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md)

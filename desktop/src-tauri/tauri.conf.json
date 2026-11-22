@@ -37,13 +37,25 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "Motodesk",
+    "shortDescription": "Gestion des ateliers et concessions moto et cycle : atelier, stock, caisse et comptabilité fiscale",
+    "category": "Business",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["French", "English"],
+        "displayLanguageSelector": false,
+        "compression": "lzma"
+      },
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true }
+    }
   }
 }
