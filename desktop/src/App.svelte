@@ -12,6 +12,7 @@
   import { isTauriRuntime, LOCAL_API_URL, probeHealth } from "$lib/api/localApi";
   import { startupFailure, type StartupFailure } from "$lib/api/startup";
   import { restartApp } from "$lib/api/backup";
+  import { openLogsFolder } from "$lib/api/diagnostics";
   import { watchStartup } from "$lib/stores/startupWatch";
 
   import Login from "./routes/Login.svelte";
@@ -124,6 +125,8 @@
           body={failure.message}
           actionLabel="Relancer Motodesk"
           onAction={() => void restartApp()}
+          secondaryLabel="Ouvrir les journaux"
+          onSecondary={() => void openLogsFolder().catch(() => {})}
         />
       </div>
     </div>
