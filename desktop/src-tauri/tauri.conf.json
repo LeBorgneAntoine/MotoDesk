@@ -61,7 +61,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM3NkJFODE1NDg5OEE0RkEKUldUNnBKaElGZWhyeDZIVEViejdLNElKZlljcHFKRnBqV2h2VzFSNXIxdDFvVVBpMlVSQXdmSGkK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk3QUE4ODg0MzI4MDE5MjEKUldRaEdZQXloSWlxbHpZRFdhZldEbVVtVExJZkRFSU9yWlZrbzMvNmRtd04zQStrUkpyM2tJWVAK",
       "endpoints": ["https://github.com/LeBorgneAntoine/MotoDesk/releases/latest/download/latest.json"],
       "windows": { "installMode": "passive" }
     }
