@@ -105,6 +105,7 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
     let pool = db::init_pool(&db_path).await?;
     db::migrate_safely(&pool, &data_dir).await?;
     db::ensure_device_id(&pool).await?;
+    backup::finish_restore(&pool, &data_dir).await?;
     let cloud_url = db::ensure_cloud_url(&pool).await?;
     let mesh_secret = secrets::load_mesh_secret()
         .ok()
