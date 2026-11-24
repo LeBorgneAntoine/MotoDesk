@@ -27,6 +27,7 @@ use crate::local_server::local_accounts::{self, Account};
 use crate::local_server::mesh::{self, PeerInfo};
 use crate::local_server::mesh_auth;
 use crate::local_server::state::SharedState;
+use crate::local_server::recovery_key;
 use crate::local_server::sync_log;
 
 const BATCH: i64 = 500;
@@ -139,9 +140,13 @@ pub async fn exchange_accounts(state: &SharedState, peer: &PeerInfo) -> LocalRes
     let mine = local_accounts::all_accounts(&state.db).await?;
     let mut fields = serde_json::Map::new();
     fields.insert("accounts".into(), serde_json::to_value(&mine).map_err(|e| LocalError::Internal(e.into()))?);
+    let recovery = recovery_key::stored(&state.db).await?;
+    fields.insert("recovery".into(), serde_json::to_value(&recovery).map_err(|e| LocalError::Internal(e.into()))?);
     let reply = verified(&secret, post(state, peer, "/mesh/accounts", signed(&secret, fields)).await?)?;
     let theirs: Vec<Account> = serde_json::from_value(reply.get("accounts").cloned().unwrap_or(Value::Null))
         .map_err(|e| LocalError::Internal(e.into()))?;
+    let theirs_recovery = reply.get("recovery").and_then(|v| serde_json::from_value(v.clone()).ok());
+    recovery_key::merge(&state.db, theirs_recovery).await?;
     local_accounts::merge_accounts(&state.db, theirs).await
 }
 

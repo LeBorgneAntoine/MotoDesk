@@ -20,6 +20,7 @@
   import LocalLogin from "./routes/LocalLogin.svelte";
   import LocalRegister from "./routes/LocalRegister.svelte";
   import AccessSwitch from "./routes/AccessSwitch.svelte";
+  import RecoveryKeyDialog from "./routes/RecoveryKeyDialog.svelte";
   import Shell from "./routes/Shell.svelte";
   import Pos from "./routes/pos/Pos.svelte";
 
@@ -111,6 +112,8 @@
   const activeH = $derived(sizes[view as Layer]?.h ?? 0);
   const ready = $derived(Object.values(sizes).every((s) => s.w > 0 && s.h > 0));
 </script>
+
+<RecoveryKeyDialog />
 
 <div class="app">
   {#if failure}

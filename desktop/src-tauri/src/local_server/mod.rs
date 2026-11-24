@@ -13,6 +13,7 @@ pub mod local_accounts;
 pub mod local_auth;
 pub mod mesh;
 pub mod recovery;
+pub mod recovery_key;
 pub mod mesh_auth;
 pub mod pos;
 pub mod routes;
