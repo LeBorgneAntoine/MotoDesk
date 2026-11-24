@@ -183,7 +183,7 @@ async fn open_register(
     // § 273: a new software starts its counters at zero, and says so in the
     // first entry of the chain. The recovered Motogest turnover is archived
     // alongside rather than carried into the perpetual total.
-    append(
+    let opening = append(
         &mut tx,
         register,
         FiscalEventType::RegisterOpened,
@@ -201,6 +201,7 @@ async fn open_register(
     .await?;
 
     tx.commit().await?;
+    replicate(&state.db, device_id, register, &opening, &EntryLinks::default()).await?;
     Ok(())
 }
 
@@ -353,8 +354,33 @@ pub async fn replicate(
     entry: &FiscalEntry,
     links: &EntryLinks,
 ) -> LocalResult<()> {
+    log_entry(
+        pool,
+        device_id,
+        &register.id.to_string(),
+        register.company_id.as_deref(),
+        entry,
+        links,
+    )
+    .await
+}
+
+/// A journal entry is known on the network by its chain hash, so that the same entry arriving
+/// twice by different routes is recognised as one row rather than duplicated.
+fn network_id(chain_hash: &str) -> Uuid {
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, chain_hash.as_bytes())
+}
+
+async fn log_entry(
+    pool: &SqlitePool,
+    device_id: Uuid,
+    register_id: &str,
+    company_id: Option<&str>,
+    entry: &FiscalEntry,
+    links: &EntryLinks,
+) -> LocalResult<()> {
     let payload = json!({
-        "register_id": register.id.to_string(),
+        "register_id": register_id,
         "seq": entry.seq,
         "event_type": entry.event_type,
         "occurred_at": entry.occurred_at,
@@ -368,24 +394,101 @@ pub async fn replicate(
         "sale_id": links.sale_id.map(|id| id.to_string()),
         "total_ttc_cents": links.total_ttc_cents,
         "actor_id": links.actor_id,
-        "company_id": register.company_id,
+        "company_id": company_id,
     });
-
-    // Deterministic id from the chain hash, so the same entry arriving twice by
-    // different routes is recognised as one row rather than duplicated.
-    let entity_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, entry.chain_hash.as_bytes());
 
     sync_log::append(
         pool,
         device_id,
         EntityType::FiscalEntry,
-        entity_id,
+        network_id(&entry.chain_hash),
         OpKind::Insert,
         payload,
         None,
     )
     .await?;
     Ok(())
+}
+
+/// Send the entries of this PC's own registers that never reached the change log: the opening
+/// entry used not to be sent at all, and without it the other PCs hold nothing of the journal.
+pub async fn announce_unsent(state: &SharedState) -> LocalResult<usize> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        register_id: String,
+        register_code: String,
+        register_company: Option<String>,
+        seq: i64,
+        event_type: String,
+        occurred_at: String,
+        payload: String,
+        payload_hash: String,
+        prev_hash: String,
+        chain_hash: String,
+        signature: String,
+        document_ref: Option<String>,
+        sale_id: Option<String>,
+        total_ttc_cents: i64,
+        actor_id: Option<String>,
+    }
+
+    let device_id = state.device_id().await?;
+    let sent: Vec<(String,)> =
+        sqlx::query_as("SELECT entity_id FROM change_log WHERE entity_type = $1")
+            .bind(EntityType::FiscalEntry.as_str())
+            .fetch_all(&state.db)
+            .await?;
+    let sent: std::collections::HashSet<String> = sent.into_iter().map(|(id,)| id).collect();
+
+    let rows: Vec<Row> = sqlx::query_as(
+        r#"
+        SELECT j.register_id, r.code AS register_code, r.company_id AS register_company, j.seq,
+               j.event_type, j.occurred_at, j.payload, j.payload_hash, j.prev_hash, j.chain_hash,
+               j.signature, j.document_ref, j.sale_id, j.total_ttc_cents, j.actor_id
+          FROM fiscal_journal j
+          JOIN fiscal_registers r ON r.id = j.register_id
+         WHERE r.device_id = $1
+         ORDER BY j.register_id, j.seq
+        "#,
+    )
+    .bind(device_id.to_string())
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut announced = 0;
+    for row in rows {
+        if sent.contains(&network_id(&row.chain_hash).to_string()) {
+            continue;
+        }
+        let entry = FiscalEntry {
+            register_id: row.register_code,
+            seq: row.seq,
+            event_type: row.event_type,
+            occurred_at: row.occurred_at,
+            payload: serde_json::from_str(&row.payload).unwrap_or(Value::Null),
+            payload_hash: row.payload_hash,
+            prev_hash: row.prev_hash,
+            chain_hash: row.chain_hash,
+            signature: row.signature,
+        };
+        let links = EntryLinks {
+            document_ref: row.document_ref,
+            sale_id: row.sale_id.and_then(|id| Uuid::parse_str(&id).ok()),
+            total_ttc_cents: row.total_ttc_cents,
+            actor_id: row.actor_id,
+        };
+        log_entry(
+            &state.db,
+            device_id,
+            &row.register_id,
+            row.register_company.as_deref(),
+            &entry,
+            &links,
+        )
+        .await?;
+        announced += 1;
+    }
+    Ok(announced)
 }
 
 async fn load_tip(tx: &mut Transaction<'_, Sqlite>, register_id: Uuid) -> LocalResult<ChainTip> {
