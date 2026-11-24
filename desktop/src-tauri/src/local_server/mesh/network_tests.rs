@@ -16,7 +16,7 @@ use crate::local_server::sync_log::field_meta_for_patch;
 use crate::local_server::test_support::shop;
 
 /// Serve a PC's LAN routes on a free port.
-async fn serve(state: &SharedState) -> PeerInfo {
+pub(super) async fn serve(state: &SharedState) -> PeerInfo {
     let app = crate::local_server::routes::mesh::lan_router().with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
