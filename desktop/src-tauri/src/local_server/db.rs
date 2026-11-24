@@ -235,6 +235,23 @@ pub async fn ensure_cloud_url(pool: &SqlitePool) -> anyhow::Result<String> {
     Ok(url)
 }
 
+/// Continue as a new device. A restored database is a copy from the past: under its old
+/// identity this PC would issue again the invoice numbers and change numbers it has handed out
+/// since, which nothing can check without a cloud. As a new device it opens a new till (the till's
+/// code comes from the identity), with its own number series and journal, and what the old one
+/// did after the backup comes back from the other PCs like anyone else's work.
+pub async fn renew_identity(pool: &SqlitePool) -> anyhow::Result<uuid::Uuid> {
+    let id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "UPDATE sync_state SET device_id = $1, last_seq = 0, seq_gap = 0, seq_recover_from = 0
+          WHERE id = 1",
+    )
+    .bind(id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(id)
+}
+
 pub async fn device_id(pool: &SqlitePool) -> anyhow::Result<uuid::Uuid> {
     let (id,): (String,) = sqlx::query_as("SELECT device_id FROM sync_state WHERE id = 1")
         .fetch_one(pool)

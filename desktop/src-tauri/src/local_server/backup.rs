@@ -45,6 +45,9 @@ const ARCHIVES_PREFIX: &str = "archives/";
 const PENDING_DB: &str = "local.db.incoming";
 const STAGING_DIR: &str = "restore-staging";
 const SAFETY_COPY_PREFIX: &str = "local.db.before-restore-";
+/// Present while the restored database has still to be given its new identity. A file, so that
+/// a start interrupted between the swap and that step still takes it.
+const RESTORED_MARKER: &str = "restore.new-identity";
 /// Safety copies of replaced databases to keep (each is as large as the database).
 const SAFETY_COPIES_KEPT: usize = 2;
 /// Automatic backups to keep; older ones are removed after each new one.
@@ -129,6 +132,8 @@ pub fn apply_pending_restore(data_dir: &Path) -> anyhow::Result<bool> {
     let stamp = Utc::now().format("%Y%m%d-%H%M%S");
     let keep = data_dir.join(format!("{SAFETY_COPY_PREFIX}{stamp}"));
 
+    fs::write(data_dir.join(RESTORED_MARKER), b"")?;
+
     let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
     for suffix in ["", "-wal", "-shm"] {
         let from = data_dir.join(format!("local.db{suffix}"));
@@ -149,6 +154,21 @@ pub fn apply_pending_restore(data_dir: &Path) -> anyhow::Result<bool> {
     prune_safety_copies(data_dir);
     tracing::info!(kept = %keep.display(), "applied pending shop restore");
     Ok(true)
+}
+
+/// After a restore on a PC that runs without a cloud, give the restored data a new identity
+/// (`db::renew_identity`). Call once the database is open and migrated.
+pub async fn finish_restore(pool: &sqlx::SqlitePool, data_dir: &Path) -> anyhow::Result<()> {
+    let marker = data_dir.join(RESTORED_MARKER);
+    if !marker.exists() {
+        return Ok(());
+    }
+    if crate::local_server::local_accounts::is_standalone(pool).await {
+        let id = crate::local_server::db::renew_identity(pool).await?;
+        tracing::info!(device = %id, "restored data: this PC continues as a new device, with a new till");
+    }
+    fs::remove_file(marker)?;
+    Ok(())
 }
 
 fn prune_safety_copies(data_dir: &Path) {

@@ -10,7 +10,8 @@ use motodesk_core::sync::{ChangeLogEntry, OpKind};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::local_server::fiscal;
+use crate::local_server::state::LocalState;
+use crate::local_server::{backup, db, fiscal};
 use crate::local_server::local_accounts;
 use crate::local_server::mesh::network_tests::serve;
 use crate::local_server::mesh::{self, catchup, join, PeerInfo};
@@ -243,4 +244,66 @@ async fn a_deletion_that_overtakes_its_creation_still_deletes() {
 
     assert_eq!(count(&b, "SELECT COUNT(*) FROM clients WHERE deleted_at IS NULL").await, 0);
     assert_eq!(count(&b, "SELECT COUNT(*) FROM sync_deferred").await, 0);
+}
+
+async fn references(state: &SharedState) -> Vec<String> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT reference FROM sales ORDER BY reference")
+        .fetch_all(&state.db)
+        .await
+        .unwrap();
+    rows.into_iter().map(|(r,)| r).collect()
+}
+
+/// A is restored from a backup taken before its last sale. It must not give that sale's number
+/// to the next one, and gets the lost sale back from B.
+#[tokio::test]
+async fn a_restored_pc_does_not_reuse_invoice_numbers() {
+    let (a, peer_a, b) = two_pcs().await;
+    let oil = announced_product(&a, 10).await;
+    sell(&a, oil, 1_000).await;
+    let dir = std::env::temp_dir().join(format!("motodesk_restored_{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let copy = dir.join("backup.db");
+    sqlx::query("VACUUM INTO $1").bind(copy.to_string_lossy().into_owned()).execute(&a.db).await.unwrap();
+    sell(&a, oil, 1_000).await;
+    catchup::pull_from(&b, &peer_a).await.unwrap();
+    let before = references(&a).await;
+    assert_eq!(before.len(), 2);
+
+    // The restore, as the next start does it.
+    std::fs::rename(&copy, dir.join("local.db.incoming")).unwrap();
+    assert!(backup::apply_pending_restore(&dir).unwrap());
+    let pool = db::init_pool(&dir.join("local.db")).await.unwrap();
+    backup::finish_restore(&pool, &dir).await.unwrap();
+    let restored: SharedState = std::sync::Arc::new(LocalState::new(
+        pool,
+        dir.clone(),
+        a.cloud_url.clone(),
+        a.mesh_secret.read().await.clone(),
+        *a.company_id.read().await,
+        "test-local-token".into(),
+    ));
+    assert_ne!(restored.device_id().await.unwrap(), a.device_id().await.unwrap());
+
+    let peer_b = serve(&b).await;
+    catchup::pull_from(&restored, &peer_b).await.unwrap();
+    assert_eq!(references(&restored).await, before, "the sale made after the backup is back");
+
+    let oil_row = oil;
+    sell(&restored, oil_row, 1_000).await;
+    let after = references(&restored).await;
+    assert_eq!(after.len(), 3);
+    let unique: std::collections::HashSet<_> = after.iter().collect();
+    assert_eq!(unique.len(), 3, "{after:?}");
+
+    let report = fiscal::verify_all(&restored).await.unwrap();
+    assert!(report.ok, "{:?}", report.registers);
+    assert_eq!(report.registers.len(), 2, "the old till and the new one");
+
+    // And the other PC takes the new till's work without complaint.
+    let peer_restored = serve(&restored).await;
+    catchup::pull_from(&b, &peer_restored).await.unwrap();
+    assert_eq!(references(&b).await, after);
+    assert_eq!(refused(&b).await, Vec::<String>::new());
+    assert_eq!(count(&b, "SELECT stock_milli FROM products").await, 7_000);
 }
