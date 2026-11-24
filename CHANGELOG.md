@@ -16,6 +16,8 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Workflow de publication : un tag `vX.Y.Z` construit l'installateur et prépare une version brouillon.
 
 ### Corrigé
+- Réseau local : désactiver ou supprimer un compte, ou changer son mot de passe, ferme ses sessions ouvertes ; un changement de rôle s'applique sans se reconnecter.
+- Restaurer une sauvegarde ne reconnecte plus la personne qui était connectée au moment de la sauvegarde.
 - Dépendances : mise à jour des bibliothèques réseau et TLS (rustls, quinn, url…) et de la lecture des anciennes sauvegardes ZIP, ainsi que des outils de développement (vite 6, vitest 4) : plus aucune faille connue côté application, ni côté outils.
 - Restauration : le redémarrage qui applique une sauvegarde laissait la nouvelle instance sans service de données (elle héritait du port 17300 de l'ancienne). Les sockets d'écoute ne sont plus héritables, et le démarrage attend la libération des ports.
 - Restauration : les clés de signature et le secret du réseau d'une sauvegarde étaient écrits dans le trousseau avant d'être vérifiés : une sauvegarde refusée pouvait remplacer la clé en service. Ils ne le sont plus qu'une fois la restauration certaine.

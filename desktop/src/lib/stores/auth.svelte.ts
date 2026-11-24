@@ -57,6 +57,38 @@ class AuthStore {
   private keepAlive: ReturnType<typeof setInterval> | null = null;
   private static readonly KEEP_ALIVE_MS = 10 * 60 * 1000;
 
+  private sessionCheck: ReturnType<typeof setInterval> | null = null;
+  private static readonly SESSION_CHECK_MS = 15 * 1000;
+
+  /**
+   * A local account can be disabled or changed from another PC while its session is open
+   * here: ask the embedded server now and then, and follow what it says.
+   */
+  private watchLocalSession(): void {
+    if (this.sessionCheck) return;
+    this.sessionCheck = setInterval(() => void this.checkLocalSession(), AuthStore.SESSION_CHECK_MS);
+  }
+
+  private stopWatchingLocalSession(): void {
+    if (this.sessionCheck) clearInterval(this.sessionCheck);
+    this.sessionCheck = null;
+  }
+
+  async checkLocalSession(): Promise<void> {
+    if (this.status !== "authenticated" || !this.isLocal) return;
+    try {
+      const me = await api.get<PublicUser>("/api/auth/me", { auth: false });
+      if (me.role !== this.user?.role || me.full_name !== this.user?.full_name) this.user = me;
+    } catch (err) {
+      // Only a refusal ends the session: a server that does not answer says nothing.
+      if (!(err instanceof ApiError && err.status === 401)) return;
+      this.stopWatchingLocalSession();
+      await setTokens(null);
+      this.user = null;
+      this.status = "anonymous";
+    }
+  }
+
   private startKeepAlive(): void {
     if (this.keepAlive) return;
     this.keepAlive = setInterval(() => {
@@ -169,6 +201,8 @@ class AuthStore {
       if (me.auth_mode !== "local") return false;
       this.user = me;
       this.status = "authenticated";
+      this.stopKeepAlive();
+      this.watchLocalSession();
       return true;
     } catch {
       return false;
@@ -254,6 +288,7 @@ class AuthStore {
     const cached = getCachedTokens();
     await authApi.logout(cached?.refresh_token ?? null);
     this.stopKeepAlive();
+    this.stopWatchingLocalSession();
     this.user = null;
     this.status = "anonymous";
   }
@@ -261,8 +296,13 @@ class AuthStore {
   private applyBundle(bundle: TokenBundle): void {
     this.user = bundle.user;
     this.status = "authenticated";
-    if (bundle.user.auth_mode === "local") this.stopKeepAlive();
-    else this.startKeepAlive();
+    if (bundle.user.auth_mode === "local") {
+      this.stopKeepAlive();
+      this.watchLocalSession();
+    } else {
+      this.stopWatchingLocalSession();
+      this.startKeepAlive();
+    }
   }
 }
 

@@ -423,15 +423,10 @@ async fn push_identity(state: &SharedState, base: &str, token: &str) {
 }
 
 async fn me(State(state): State<SharedState>) -> LocalResult<Json<serde_json::Value>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT user_json FROM cached_session WHERE id = 1")
-            .fetch_optional(&state.db)
-            .await?;
-    if let Some((user,)) = row {
-        let user: serde_json::Value = serde_json::from_str(&user).unwrap_or_default();
-        return Ok(Json(user));
-    }
-    Err(LocalError::Unauthorized)
+    crate::local_server::local_accounts::session_user(&state.db)
+        .await?
+        .map(Json)
+        .ok_or(LocalError::Unauthorized)
 }
 
 #[cfg(test)]
