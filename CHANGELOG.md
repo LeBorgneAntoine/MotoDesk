@@ -16,6 +16,9 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Workflow de publication : un tag `vX.Y.Z` construit l'installateur et prépare une version brouillon.
 
 ### Corrigé
+- Réseau local : une vente en caisse ou un avoir déduit maintenant le stock sur les autres postes ; une fiche reçue avant ce à quoi elle se rattache (véhicule avant son client) n'est plus perdue ; un poste resté éteint récupère aussi les modifications plus anciennes que la dernière reçue.
+- Réseau local : chaque poste détient désormais une copie du journal fiscal des autres (l'ouverture de caisse n'était jamais envoyée, et tout le reste était refusé).
+- Restauration sans cloud : le poste repart avec une nouvelle caisse et une nouvelle série de numéros, pour ne jamais réattribuer un numéro de facture émis après la sauvegarde.
 - Dépendances : mise à jour des bibliothèques réseau et TLS (rustls, quinn, url…) et de la lecture des anciennes sauvegardes ZIP, ainsi que des outils de développement (vite 6, vitest 4) : plus aucune faille connue côté application, ni côté outils.
 - Restauration : le redémarrage qui applique une sauvegarde laissait la nouvelle instance sans service de données (elle héritait du port 17300 de l'ancienne). Les sockets d'écoute ne sont plus héritables, et le démarrage attend la libération des ports.
 - Restauration : les clés de signature et le secret du réseau d'une sauvegarde étaient écrits dans le trousseau avant d'être vérifiés : une sauvegarde refusée pouvait remplacer la clé en service. Ils ne le sont plus qu'une fois la restauration certaine.
