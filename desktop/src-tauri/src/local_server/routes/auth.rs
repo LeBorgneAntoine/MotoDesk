@@ -186,7 +186,8 @@ async fn refresh(
 }
 
 async fn logout(State(state): State<SharedState>) -> LocalResult<StatusCode> {
-    crate::local_server::secrets::clear_all();
+    let local_network = crate::local_server::local_accounts::is_standalone(&state.db).await;
+    crate::local_server::secrets::clear_on_sign_out(local_network);
     let _ = sqlx::query("DELETE FROM cached_session WHERE id = 1")
         .execute(&state.db)
         .await;
@@ -574,6 +575,21 @@ mod tests {
             LocalError::BadRequest(message) => assert!(message.contains("joindre"), "{message}"),
             other => panic!("{other:?}"),
         }
+        assert!(local_accounts::status(&state.db).await.unwrap().standalone);
+    }
+
+    #[tokio::test]
+    async fn signing_out_ends_the_session_and_leaves_the_pc_in_its_network() {
+        let state = standalone_shop("http://127.0.0.1:9").await;
+        let secret = state.mesh_secret.read().await.clone();
+        assert!(secret.is_some());
+
+        logout(State(state.clone())).await.unwrap();
+
+        assert!(me(State(state.clone())).await.is_err(), "nobody is signed in");
+        assert_eq!(*state.mesh_secret.read().await, secret);
+        let stored = crate::local_server::db::load_mesh_secret(&state.db).await.unwrap();
+        assert_eq!(stored, secret, "and the next start finds it");
         assert!(local_accounts::status(&state.db).await.unwrap().standalone);
     }
 
