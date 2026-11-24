@@ -31,6 +31,7 @@
     type NetworkAccount,
   } from "$lib/api/networkAccounts";
   import { validateNewLocalAccount } from "$lib/api/localAccount";
+  import RecoveryCard from "./RecoveryCard.svelte";
 
   const ROLES = [
     { value: "employee", label: "Employé" },
@@ -166,6 +167,8 @@
       <Icon name="user-plus" size={14} /> Nouveau compte
     </Button>
   </div>
+
+  <RecoveryCard />
 
   {#if loadError}
     <StateView kind="error" title="Comptes indisponibles" body={loadError} actionLabel="Réessayer" onAction={load} />

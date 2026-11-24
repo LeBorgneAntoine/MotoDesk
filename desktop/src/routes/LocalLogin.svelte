@@ -11,11 +11,13 @@
   import { router } from "$lib/router/router.svelte";
   import { ApiError } from "$lib/api/types";
   import AuthTabs from "./AuthTabs.svelte";
+  import RecoverAccess from "./RecoverAccess.svelte";
 
   let username = $state("");
   let password = $state("");
   let submitting = $state(false);
   let formError = $state<string | null>(null);
+  let recovering = $state(false);
 
   // A PC with nothing set up joins the network with these credentials instead of checking them.
   const joining = $derived(accessStore.localState === "setup");
@@ -92,6 +94,14 @@
         {joining ? "Rejoindre le réseau" : "Se connecter"}
       </Button>
 
+      {#if !joining}
+        <div class="af__alt">
+          <Button variant="link" size="sm" type="button" onclick={() => (recovering = true)}>
+            Mot de passe perdu ?
+          </Button>
+        </div>
+      {/if}
+
       {#if joining}
         <div class="af__alt">
           Pas encore de réseau dans cet atelier ?
@@ -103,6 +113,8 @@
     </form>
   {/if}
 </div>
+
+<RecoverAccess open={recovering} onClose={() => (recovering = false)} />
 
 <style>
   .af {

@@ -3,12 +3,15 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, patch},
+    routing::{get, patch, post},
     Json, Router,
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::local_server::auth_guard::AdminUser;
-use crate::local_server::error::LocalResult;
+use crate::local_server::error::{LocalError, LocalResult};
+use crate::local_server::recovery_key;
 use crate::local_server::local_accounts::{self, AccountPatch, AccountView, NewAccount};
 use crate::local_server::state::SharedState;
 
@@ -16,6 +19,57 @@ pub fn router() -> Router<SharedState> {
     Router::new()
         .route("/api/network/accounts", get(list).post(create))
         .route("/api/network/accounts/:id", patch(update).delete(remove))
+        .route("/api/network/recovery", get(recovery_status).post(recovery_issue))
+        .route("/api/network/recovery/confirm", post(recovery_confirm))
+}
+
+#[derive(Debug, Serialize)]
+struct RecoveryStatus {
+    exists: bool,
+    confirmed: bool,
+    updated_at: Option<String>,
+}
+
+async fn recovery_status(State(state): State<SharedState>, _admin: AdminUser) -> LocalResult<Json<RecoveryStatus>> {
+    let record = recovery_key::stored(&state.db).await?;
+    Ok(Json(RecoveryStatus {
+        exists: record.is_some(),
+        confirmed: record.as_ref().is_some_and(|r| r.confirmed),
+        updated_at: record.map(|r| r.updated_at),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueInput {
+    /// The administrator's own password, asked again: this replaces the key in use.
+    password: String,
+}
+
+async fn recovery_issue(
+    State(state): State<SharedState>,
+    admin: AdminUser,
+    Json(input): Json<IssueInput>,
+) -> LocalResult<Json<serde_json::Value>> {
+    if !local_accounts::is_standalone(&state.db).await {
+        return Err(LocalError::Conflict("La clé de récupération n'existe que sans cloud.".into()));
+    }
+    local_accounts::check_current_password(&state.db, &admin.user_id, &input.password).await?;
+    let key = recovery_key::issue(&state).await?;
+    Ok(Json(serde_json::json!({ "recovery_key": key })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ConfirmInput {
+    recovery_key: String,
+}
+
+async fn recovery_confirm(
+    State(state): State<SharedState>,
+    _admin: AdminUser,
+    Json(input): Json<ConfirmInput>,
+) -> LocalResult<StatusCode> {
+    recovery_key::confirm(&state, &input.recovery_key).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn list(State(state): State<SharedState>, _admin: AdminUser) -> LocalResult<Json<Vec<AccountView>>> {

@@ -21,6 +21,7 @@ pub fn router() -> Router<SharedState> {
         .route("/local/status", get(local_status))
         .route("/local/setup", post(local_setup))
         .route("/local/login", post(local_login))
+        .route("/local/recover", post(local_recover))
         .route("/promote", post(promote))
 }
 
@@ -257,6 +258,14 @@ async fn local_login(
         return Ok(Json(bundle));
     }
     Ok(Json(local_accounts::login(&state, &input.username, &input.password).await?))
+}
+
+/// "Password lost": the network's recovery key gives one account a new password.
+async fn local_recover(
+    State(state): State<SharedState>,
+    Json(input): Json<crate::local_server::recovery_key::Recover>,
+) -> LocalResult<Json<serde_json::Value>> {
+    crate::local_server::recovery_key::recover(&state, input).await.map(Json)
 }
 
 #[derive(Debug, Deserialize)]

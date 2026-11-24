@@ -3,6 +3,7 @@
    * Shell — the application chrome: sidebar, title bar, module surface,
    * status bar, and the two global overlay hosts (panels and toasts).
    */
+  import { getRecoveryStatus } from "$lib/api/recovery";
   import { onMount } from "svelte";
   import {
     Alert,
@@ -164,6 +165,27 @@
       backupNote = null;
     }
   }
+
+  // A network without a recovery key written down is one forgotten password from being stuck.
+  let recoveryMissing = $state(false);
+  async function refreshRecovery(): Promise<void> {
+    if (!authStore.isAdmin || !authStore.isLocal) {
+      recoveryMissing = false;
+      return;
+    }
+    try {
+      const s = await getRecoveryStatus();
+      recoveryMissing = !s.exists || !s.confirmed;
+    } catch {
+      recoveryMissing = false;
+    }
+  }
+  $effect(() => {
+    // Looked at again when the screen changes and when a key has just been confirmed.
+    void router.current;
+    void authStore.recoveryKey;
+    void refreshRecovery();
+  });
 
   // A new version waits for an administrator to install it; the others are not interrupted.
   let updateOpen = $state(false);
@@ -434,6 +456,16 @@
               <span class="shell__banner-actions">
                 <Button variant="link" size="sm" onclick={() => navigate("settings")}>Configurer</Button>
                 <Button variant="link" size="sm" onclick={dismissCaisseHint}>Plus tard</Button>
+              </span>
+            </Alert>
+          </div>
+        {/if}
+        {#if recoveryMissing && !authStore.recoveryKey && activeSidebarId !== "employees"}
+          <div class="shell__banner">
+            <Alert flush variant="warning" title="Clé de récupération à noter">
+              Sans elle, un mot de passe administrateur perdu bloque les comptes pour de bon.
+              <span class="shell__banner-actions">
+                <Button variant="link" size="sm" onclick={() => navigate("employees")}>Créer la clé</Button>
               </span>
             </Alert>
           </div>

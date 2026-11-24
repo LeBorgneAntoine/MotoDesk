@@ -6,6 +6,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 ## [Non publié]
 
 ### Ajouté
+- Réseau local : une clé de récupération est donnée à la création du réseau. Elle permet, depuis « Mot de passe perdu ? », de redonner l'accès à un compte ; elle est remplacée après usage et peut être renouvelée par un administrateur.
 - Mises à jour : un bandeau « Nouvelle version disponible » (administrateurs) avec les notes de la version, installation en un clic, recherche manuelle ou automatique dans Réglages › Sauvegardes. Les installateurs sont signés ; l'application refuse tout installateur dont la signature ne correspond pas à sa clé publique. Voir `docs/mises-a-jour.md`.
 - Licence : code source consultable, tous droits réservés (`LICENSE`).
 - Audit des dépendances : un contrôle des failles connues (`cargo audit`, `npm audit`) à chaque changement de dépendances et chaque semaine. Les deux exceptions acceptées sont justifiées dans `.cargo/audit.toml`.

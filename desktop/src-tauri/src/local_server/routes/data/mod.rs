@@ -47,7 +47,8 @@ const SYSTEM_TABLES: &[&str] = &["sync_state", "cached_session", "change_log"];
 /// Tables the SQL console may not even read: they hold key material and cloud
 /// credentials. Matched as whole words anywhere in the statement, so line
 /// breaks, comments, quoting or a CTE cannot hide the name.
-const SECRET_TABLES: &[&str] = &["fiscal_key_fallback", "cached_session"];
+const SECRET_TABLES: &[&str] =
+    &["fiscal_key_fallback", "cached_session", "local_accounts", "network_recovery"];
 
 /// Tables the SQL console may read but never write: the fiscal record, its
 /// counters, the audit trail and the sync plumbing.
