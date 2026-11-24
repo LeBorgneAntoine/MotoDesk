@@ -11,6 +11,8 @@
     onClose: () => void;
     width?: string;
     closeOnOverlay?: boolean;
+    /** `false` for a dialog that must be completed: no close button is shown. */
+    closable?: boolean;
     children?: Snippet;
     footer?: Snippet;
   }
@@ -21,6 +23,7 @@
     onClose,
     width = "520px",
     closeOnOverlay = true,
+    closable = true,
     children,
     footer,
   }: Props = $props();
@@ -70,9 +73,11 @@
       {#if title}
         <header class="modal__head">
           <Heading level={2} size="lg">{title}</Heading>
-          <IconButton title="Fermer" size="sm" onclick={onClose}>
-            <Icon name="x" size={14} />
-          </IconButton>
+          {#if closable}
+            <IconButton title="Fermer" size="sm" onclick={onClose}>
+              <Icon name="x" size={14} />
+            </IconButton>
+          {/if}
         </header>
       {/if}
 
