@@ -757,9 +757,19 @@ async fn cross_checks(
     .bind(register_id)
     .fetch_optional(db)
     .await?;
+    // A till this PC no longer writes (retired by a restore) gets its later entries from the
+    // other PCs, while its counters stay where the backup left them. Behind them is still a loss.
+    let retired: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM fiscal_registers r, sync_state s
+          WHERE r.id = $1 AND s.id = 1 AND r.device_id IS NOT s.device_id",
+    )
+    .bind(register_id)
+    .fetch_optional(db)
+    .await?;
     if let Some((seq, hash)) = counters {
         let tip_hash = entries.last().map(|e| e.chain_hash.as_str()).unwrap_or(GENESIS_HASH);
-        if seq != journal_last_seq || hash != tip_hash {
+        let grown_elsewhere = retired.is_some() && journal_last_seq > seq;
+        if (seq != journal_last_seq || hash != tip_hash) && !grown_elsewhere {
             findings.push(format!(
                 "le journal s'arrête à l'entrée n° {journal_last_seq} alors que la caisse en est à la n° {seq} : des écritures ont été supprimées, ou une sauvegarde plus ancienne a été restaurée."
             ));
