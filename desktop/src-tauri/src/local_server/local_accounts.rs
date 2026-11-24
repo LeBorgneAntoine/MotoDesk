@@ -217,6 +217,64 @@ async fn insert_account<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
     Ok(())
 }
 
+/// Write an account over the one with its id, in a single statement: if it cannot be written
+/// (its username is taken), the account that was there is still there.
+async fn save_account<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    executor: E,
+    a: &Account,
+) -> LocalResult<()> {
+    sqlx::query(&format!(
+        "INSERT INTO local_accounts ({ACCOUNT_COLUMNS}) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT(id) DO UPDATE SET
+             username = excluded.username, password_hash = excluded.password_hash,
+             kdf_salt = excluded.kdf_salt, srp_verifier = excluded.srp_verifier,
+             role = excluded.role, full_name = excluded.full_name, is_active = excluded.is_active,
+             created_at = excluded.created_at, updated_at = excluded.updated_at,
+             deleted_at = excluded.deleted_at"
+    ))
+    .bind(&a.id)
+    .bind(&a.username)
+    .bind(&a.password_hash)
+    .bind(&a.kdf_salt)
+    .bind(&a.srp_verifier)
+    .bind(&a.role)
+    .bind(&a.full_name)
+    .bind(a.is_active)
+    .bind(&a.created_at)
+    .bind(&a.updated_at)
+    .bind(&a.deleted_at)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+// ---- Usernames ----------------------------------------------------------------------------------
+
+/// How usernames are compared: without regard to case, accented letters included. SQLite's own
+/// case-insensitive comparison stops at ASCII, so `Élodie` and `élodie` were two people to it.
+pub fn fold_username(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+/// The account of a username among these: the one spelled exactly so, else the first that
+/// matches without regard to case.
+fn pick<'a>(accounts: &'a [Account], username: &str) -> Option<&'a Account> {
+    let wanted = fold_username(username);
+    accounts
+        .iter()
+        .find(|a| a.username == username.trim())
+        .or_else(|| accounts.iter().find(|a| fold_username(&a.username) == wanted))
+}
+
+/// The accounts that have not been deleted, disabled ones included.
+async fn live_accounts<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(executor: E) -> LocalResult<Vec<Account>> {
+    Ok(sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM local_accounts WHERE deleted_at IS NULL ORDER BY created_at, id"
+    ))
+    .fetch_all(executor)
+    .await?)
+}
+
 /// Every account, tombstones included: this is what is replicated.
 pub async fn all_accounts(db: &SqlitePool) -> LocalResult<Vec<Account>> {
     Ok(sqlx::query_as::<_, Account>(&format!(
@@ -226,15 +284,10 @@ pub async fn all_accounts(db: &SqlitePool) -> LocalResult<Vec<Account>> {
     .await?)
 }
 
-/// The live account of a username, if there is one.
+/// The account of a username that can sign in, if there is one.
 pub async fn find_account(db: &SqlitePool, username: &str) -> LocalResult<Option<Account>> {
-    Ok(sqlx::query_as::<_, Account>(&format!(
-        "SELECT {ACCOUNT_COLUMNS} FROM local_accounts
-          WHERE username = $1 AND deleted_at IS NULL AND is_active = 1"
-    ))
-    .bind(username.trim())
-    .fetch_optional(db)
-    .await?)
+    let active: Vec<Account> = live_accounts(db).await?.into_iter().filter(|a| a.is_active).collect();
+    Ok(pick(&active, username).cloned())
 }
 
 fn plausible(a: &Account) -> bool {
@@ -252,8 +305,14 @@ fn plausible(a: &Account) -> bool {
 /// A new account whose username is already taken by another live account is set aside rather
 /// than allowed to shadow it. Returns how many accounts changed here.
 pub async fn merge_accounts(db: &SqlitePool, incoming: Vec<Account>) -> LocalResult<usize> {
-    let mut changed = 0;
     let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
+    let changed = merge_into(&mut tx, incoming).await?;
+    tx.commit().await?;
+    Ok(changed)
+}
+
+async fn merge_into(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, incoming: Vec<Account>) -> LocalResult<usize> {
+    let mut changed = 0;
     for a in incoming {
         if !plausible(&a) {
             tracing::warn!(id = %a.id, "ignored an implausible account from a peer");
@@ -261,38 +320,28 @@ pub async fn merge_accounts(db: &SqlitePool, incoming: Vec<Account>) -> LocalRes
         }
         let held: Option<(String,)> = sqlx::query_as("SELECT updated_at FROM local_accounts WHERE id = $1")
             .bind(&a.id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await?;
         match held {
-            Some((mine,)) if mine >= a.updated_at => {}
-            Some(_) => {
-                sqlx::query("DELETE FROM local_accounts WHERE id = $1")
-                    .bind(&a.id)
-                    .execute(&mut *tx)
-                    .await?;
-                match insert_account(&mut *tx, &a).await {
-                    Ok(()) => changed += 1,
-                    Err(e) => tracing::warn!(error = %e, username = %a.username, "an updated account could not be stored"),
-                }
-            }
+            Some((mine,)) if mine >= a.updated_at => continue,
+            Some(_) => {}
             None => {
-                let taken: Option<(String,)> = sqlx::query_as(
-                    "SELECT id FROM local_accounts WHERE username = $1 AND deleted_at IS NULL AND id <> $2",
-                )
-                .bind(&a.username)
-                .bind(&a.id)
-                .fetch_optional(&mut *tx)
-                .await?;
-                if taken.is_some() && a.deleted_at.is_none() {
+                let wanted = fold_username(&a.username);
+                let taken = live_accounts(&mut **tx)
+                    .await?
+                    .iter()
+                    .any(|other| other.id != a.id && fold_username(&other.username) == wanted);
+                if taken && a.deleted_at.is_none() {
                     tracing::warn!(username = %a.username, "an account from a peer reuses a username already taken; set aside");
                     continue;
                 }
-                insert_account(&mut *tx, &a).await?;
-                changed += 1;
             }
         }
+        match save_account(&mut **tx, &a).await {
+            Ok(()) => changed += 1,
+            Err(e) => tracing::warn!(error = %e, username = %a.username, "an account from a peer could not be stored"),
+        }
     }
-    tx.commit().await?;
     Ok(changed)
 }
 
@@ -378,13 +427,17 @@ pub async fn setup(
         ));
     }
     insert_account(&mut *tx, &account).await?;
-    sqlx::query("UPDATE sync_state SET company_id = $1, standalone = 1 WHERE id = 1")
+    // The secret goes in with the account, so that no crash can leave a network without one;
+    // it moves to the credential store once the whole thing is written.
+    let secret = new_mesh_secret();
+    sqlx::query("UPDATE sync_state SET company_id = $1, standalone = 1, mesh_secret = $2 WHERE id = 1")
         .bind(company_id.to_string())
+        .bind(&secret)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
 
-    install_mesh_secret(state, &new_mesh_secret()).await?;
+    install_mesh_secret(state, &secret).await?;
     // A network PC stays on in the background by default.
     crate::local_server::routes::background::refresh(state).await;
     let mut bundle = open_session(state, &account, company_id).await?;
@@ -416,8 +469,9 @@ pub async fn adopt_network(state: &SharedState, username: &str, joined: Joined) 
     if accounts > 0 || !company.unwrap_or_default().is_empty() {
         return Err(LocalError::Conflict("Ce poste est déjà configuré : connectez-vous.".into()));
     }
-    sqlx::query("UPDATE sync_state SET company_id = $1, standalone = 1 WHERE id = 1")
+    sqlx::query("UPDATE sync_state SET company_id = $1, standalone = 1, mesh_secret = $2 WHERE id = 1")
         .bind(joined.company_id.to_string())
+        .bind(&joined.mesh_secret)
         .execute(&mut *tx)
         .await?;
     sqlx::query(
@@ -433,17 +487,43 @@ pub async fn adopt_network(state: &SharedState, username: &str, joined: Joined) 
     .bind(Utc::now().to_rfc3339())
     .execute(&mut *tx)
     .await?;
+    merge_into(&mut tx, joined.accounts).await?;
+    crate::local_server::recovery_key::merge_into(&mut tx, joined.recovery).await?;
+    let active: Vec<Account> = live_accounts(&mut *tx).await?.into_iter().filter(|a| a.is_active).collect();
+    // Leaving here drops the transaction: the PC stays as it was, free to try again.
+    let account = pick(&active, username)
+        .cloned()
+        .ok_or_else(|| LocalError::Internal(anyhow::anyhow!("the joined network does not hold the account")))?;
     tx.commit().await?;
 
-    merge_accounts(&state.db, joined.accounts).await?;
-    crate::local_server::recovery_key::merge(&state.db, joined.recovery).await?;
     install_mesh_secret(state, &joined.mesh_secret).await?;
     crate::local_server::routes::background::refresh(state).await;
-
-    let account = find_account(&state.db, username)
-        .await?
-        .ok_or_else(|| LocalError::Internal(anyhow::anyhow!("the joined network does not hold the account")))?;
     open_session(state, &account, joined.company_id).await
+}
+
+/// Undo a join that stopped halfway (an earlier version could): a PC marked as part of a network
+/// with no account at all and nothing recorded. It could neither sign in nor join again. Returns
+/// whether there was anything to undo. Run before the application starts using the database.
+pub async fn repair_half_joined(db: &SqlitePool) -> LocalResult<bool> {
+    if !is_standalone(db).await {
+        return Ok(false);
+    }
+    let (traces,): (i64,) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM local_accounts) + (SELECT COUNT(*) FROM change_log)
+              + (SELECT COUNT(*) FROM clients) + (SELECT COUNT(*) FROM fiscal_journal)",
+    )
+    .fetch_one(db)
+    .await?;
+    if traces > 0 {
+        return Ok(false);
+    }
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("UPDATE sync_state SET company_id = NULL, standalone = 0, mesh_secret = NULL WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM company_cache WHERE id = 1").execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(true)
 }
 
 /// Sign in with an account this PC holds.
@@ -652,11 +732,7 @@ async fn require_network(state: &SharedState) -> LocalResult<()> {
 }
 
 async fn store(state: &SharedState, account: &Account) -> LocalResult<()> {
-    sqlx::query("DELETE FROM local_accounts WHERE id = $1")
-        .bind(&account.id)
-        .execute(&state.db)
-        .await?;
-    insert_account(&state.db, account).await?;
+    save_account(&state.db, account).await?;
     // Tell the other PCs now rather than at the next round.
     crate::local_server::mesh::catchup::request(state);
     Ok(())
@@ -679,8 +755,13 @@ pub async fn create_account(state: &SharedState, input: NewAccount) -> LocalResu
     check_role(&input.role)?;
     check_new_password(&input.password, &input.confirm)?;
     let name = clean_username(&input.username)?;
-    if find_account(&state.db, &name).await?.is_some() {
-        return Err(LocalError::BadRequest("Cet identifiant est déjà utilisé.".into()));
+    let existing = live_accounts(&state.db).await?;
+    if let Some(other) = pick(&existing, &name) {
+        return Err(LocalError::BadRequest(if other.is_active {
+            "Cet identifiant est déjà utilisé.".into()
+        } else {
+            "Cet identifiant appartient à un compte désactivé : réactivez-le.".into()
+        }));
     }
     let full_name = input.full_name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
     let account = new_account(&name, &input.password, &input.role, full_name).await?;
@@ -757,11 +838,9 @@ pub async fn restore_administrator(
     password: &str,
 ) -> LocalResult<String> {
     require_network(state).await?;
-    let name = username.trim().to_lowercase();
-    let mut account = all_accounts(&state.db)
-        .await?
-        .into_iter()
-        .find(|a| a.deleted_at.is_none() && a.username.to_lowercase() == name)
+    let accounts = live_accounts(&state.db).await?;
+    let mut account = pick(&accounts, username)
+        .cloned()
         .ok_or_else(|| LocalError::BadRequest("Aucun compte ne porte cet identifiant.".into()))?;
     let fresh = new_account(&account.username, password, "admin", None).await?;
     account.password_hash = fresh.password_hash;
@@ -1150,5 +1229,84 @@ mod tests {
         let user = session_user(&state.db).await.unwrap().expect("still signed in");
         assert_eq!(user["role"], "employee");
         assert!(!crate::local_server::auth_guard::is_admin(&state).await);
+    }
+
+    #[tokio::test]
+    async fn an_account_that_cannot_be_saved_leaves_the_old_one_in_place() {
+        let (state, _) = network_with_admin().await;
+        create_account(&state, new_employee("lea")).await.unwrap();
+        let mut clash = find_account(&state.db, "lea").await.unwrap().unwrap();
+        clash.username = "camille".into();
+        clash.updated_at = (Utc::now() + chrono::Duration::seconds(5)).to_rfc3339();
+
+        assert_eq!(merge_accounts(&state.db, vec![clash.clone()]).await.unwrap(), 0);
+        assert!(find_account(&state.db, "lea").await.unwrap().is_some(), "lea is still there");
+        assert!(store(&state, &clash).await.is_err());
+        assert!(find_account(&state.db, "lea").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn accented_names_are_one_person_whatever_the_case() {
+        let state = shop().await;
+        setup(&state, "Élodie", "mot de passe", "mot de passe").await.unwrap();
+        for typed in ["Élodie", "élodie", "ÉLODIE"] {
+            assert!(login(&state, typed, "mot de passe").await.is_ok(), "{typed}");
+        }
+        assert!(create_account(&state, new_employee("élodie")).await.is_err(), "the name is taken");
+        let rival = new_account("élodie", "encore un autre", "employee", None).await.unwrap();
+        assert_eq!(merge_accounts(&state.db, vec![rival]).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_disabled_accounts_name_is_refused_with_the_reason() {
+        let (state, admin) = network_with_admin().await;
+        let lea = create_account(&state, new_employee("lea")).await.unwrap();
+        let off = AccountPatch { is_active: Some(false), ..Default::default() };
+        update_account(&state, &admin, &lea.id, off).await.unwrap();
+        let again = create_account(&state, new_employee("Lea")).await;
+        assert!(matches!(again, Err(LocalError::BadRequest(m)) if m.contains("désactivé")));
+    }
+
+    #[tokio::test]
+    async fn the_network_secret_is_written_with_the_first_account() {
+        let (state, _) = network_with_admin().await;
+        let stored = crate::local_server::db::current_mesh_secret(&state.db).await.unwrap();
+        assert!(stored.is_some());
+        assert_eq!(*state.mesh_secret.read().await, stored);
+    }
+
+    #[tokio::test]
+    async fn a_join_that_fails_leaves_the_pc_free_to_try_again() {
+        let state = shop().await;
+        let lea = new_account("lea", "un autre mot de passe", "employee", None).await.unwrap();
+        let joined = Joined {
+            company_id: Uuid::new_v4(),
+            mesh_secret: "secret du réseau".into(),
+            company_name: Some("Garage".into()),
+            legal_name: None,
+            accounts: vec![lea],
+            recovery: None,
+        };
+        assert!(adopt_network(&state, "personne", joined).await.is_err());
+        assert!(status(&state.db).await.unwrap().can_setup);
+        assert!(all_accounts(&state.db).await.unwrap().is_empty());
+        assert_eq!(crate::local_server::db::load_mesh_secret(&state.db).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_pc_stuck_halfway_through_a_join_is_freed() {
+        let state = shop().await;
+        sqlx::query("UPDATE sync_state SET company_id = $1, standalone = 1 WHERE id = 1")
+            .bind(Uuid::new_v4().to_string())
+            .execute(&state.db)
+            .await
+            .unwrap();
+        assert!(!status(&state.db).await.unwrap().can_setup, "stuck");
+        assert!(repair_half_joined(&state.db).await.unwrap());
+        assert!(status(&state.db).await.unwrap().can_setup);
+
+        // A working network is left alone.
+        let (working, _) = network_with_admin().await;
+        assert!(!repair_half_joined(&working.db).await.unwrap());
     }
 }

@@ -155,6 +155,15 @@ pub async fn ensure_device_id(pool: &SqlitePool) -> anyhow::Result<uuid::Uuid> {
 
 /// Load the cloud-issued company mesh secret (the LAN trust root). `None` until
 /// the user has logged in and the secret has been fetched from the cloud.
+/// The network's secret. A copy in the database is there only until the credential store has
+/// taken it (or because it cannot), so when there is one it is the newer of the two.
+pub async fn current_mesh_secret(pool: &SqlitePool) -> anyhow::Result<Option<String>> {
+    Ok(match load_mesh_secret(pool).await?.filter(|s| !s.is_empty()) {
+        Some(secret) => Some(secret),
+        None => crate::local_server::secrets::load_mesh_secret().ok().flatten(),
+    })
+}
+
 pub async fn load_mesh_secret(pool: &SqlitePool) -> anyhow::Result<Option<String>> {
     let row: Option<(Option<String>,)> =
         sqlx::query_as("SELECT mesh_secret FROM sync_state WHERE id = 1")

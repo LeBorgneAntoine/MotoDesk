@@ -153,15 +153,23 @@ impl JoinState {
         }
     }
 
-    async fn record_failure(&self, username: &str) {
+    /// Judge a proof under the lock that counts the failures: handshakes opened side by side
+    /// cannot then all be tried before any failure is counted.
+    async fn judge(&self, username: &str, proof_holds: impl FnOnce() -> bool) -> LocalResult<bool> {
         let mut failures = self.failures.lock().await;
-        let entry = failures.entry(username.to_string()).or_insert((0, Instant::now()));
-        entry.0 += 1;
-        entry.1 = Instant::now();
-    }
-
-    async fn clear_failures(&self, username: &str) {
-        self.failures.lock().await.remove(username);
+        failures.retain(|_, (_, at)| at.elapsed() < LOCK_WINDOW);
+        if failures.get(username).is_some_and(|(n, _)| *n >= LOCK_AFTER_FAILURES) {
+            return Err(LocalError::TooManyAttempts);
+        }
+        let holds = proof_holds();
+        if holds {
+            failures.remove(username);
+        } else {
+            let entry = failures.entry(username.to_string()).or_insert((0, Instant::now()));
+            entry.0 += 1;
+            entry.1 = Instant::now();
+        }
+        Ok(holds)
     }
 }
 
@@ -244,13 +252,15 @@ pub async fn finish(state: &SharedState, req: JoinFinish) -> LocalResult<JoinFin
         .ok_or(LocalError::Unauthorized)?;
     let m1 = unhex(&req.m1)?;
 
-    let proven = session.verifier.verify_client(&m1).is_ok();
+    let known = session.account.is_some();
+    let proven = state
+        .join
+        .judge(&session.username, || session.verifier.verify_client(&m1).is_ok() && known)
+        .await?;
     let Some(account) = session.account.filter(|_| proven) else {
-        state.join.record_failure(&session.username).await;
         tokio::time::sleep(WRONG_PROOF_DELAY).await;
         return Err(LocalError::InvalidCredentials);
     };
-    state.join.clear_failures(&session.username).await;
 
     let company_id = state
         .company_id

@@ -109,13 +109,10 @@ impl LocalState {
     /// Reload the company id + mesh secret from the DB (after login / sync) and
     /// signal the mDNS task to re-advertise.
     pub async fn reload_company(&self) {
-        let secret = crate::local_server::secrets::load_mesh_secret()
+        let secret = crate::local_server::db::current_mesh_secret(&self.db)
+            .await
             .ok()
-            .flatten()
-            .or(crate::local_server::db::load_mesh_secret(&self.db)
-                .await
-                .ok()
-                .flatten());
+            .flatten();
         *self.mesh_secret.write().await = secret;
         if let Ok(cid) = crate::local_server::db::load_company_id(&self.db).await {
             *self.company_id.write().await = cid;

@@ -18,6 +18,9 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Workflow de publication : un tag `vX.Y.Z` construit l'installateur et prépare une version brouillon.
 
 ### Corrigé
+- Réseau local : une coupure pendant la création du réseau ou l'adhésion d'un poste ne laisse plus le poste ni le réseau à moitié configurés ; un enregistrement de compte qui échoue ne le fait plus disparaître.
+- Réseau local : un identifiant accentué (« Élodie ») fonctionne quelle que soit la casse saisie, y compris depuis un nouveau poste.
+- Réseau local : ouvrir de nombreuses tentatives d'adhésion en même temps ne contourne plus le verrouillage après cinq essais.
 - Réseau local : se déconnecter n'efface plus le secret du réseau (le poste cessait d'en faire partie au redémarrage suivant).
 - Réseau local : désactiver ou supprimer un compte, ou changer son mot de passe, ferme ses sessions ouvertes ; un changement de rôle s'applique sans se reconnecter.
 - Restaurer une sauvegarde ne reconnecte plus la personne qui était connectée au moment de la sauvegarde.

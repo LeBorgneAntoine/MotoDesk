@@ -106,15 +106,29 @@ fn next_stamp(previous: Option<&Stored>) -> String {
 
 /// Take a peer's copy if it is newer. Returns whether it changed anything.
 pub async fn merge(db: &SqlitePool, incoming: Option<Stored>) -> LocalResult<bool> {
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
+    let changed = merge_into(&mut tx, incoming).await?;
+    tx.commit().await?;
+    Ok(changed)
+}
+
+/// [`merge`] as part of a larger change (joining a network).
+pub async fn merge_into(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    incoming: Option<Stored>,
+) -> LocalResult<bool> {
     let Some(incoming) = incoming else { return Ok(false) };
     if !incoming.key_hash.starts_with("$argon2") || when(&incoming.updated_at) == i64::MIN {
         tracing::warn!("ignored an implausible recovery record from a peer");
         return Ok(false);
     }
-    if stored(db).await?.is_some_and(|mine| when(&mine.updated_at) >= when(&incoming.updated_at)) {
+    let mine = sqlx::query_as::<_, Stored>("SELECT key_hash, confirmed, updated_at FROM network_recovery WHERE id = 1")
+        .fetch_optional(&mut **tx)
+        .await?;
+    if mine.is_some_and(|mine| when(&mine.updated_at) >= when(&incoming.updated_at)) {
         return Ok(false);
     }
-    write(db, &incoming).await?;
+    write(&mut **tx, &incoming).await?;
     Ok(true)
 }
 
