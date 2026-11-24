@@ -40,11 +40,9 @@ pub struct Actor {
 
 /// The signed-in user. Fails when nobody is signed in.
 pub async fn actor(state: &SharedState) -> LocalResult<Actor> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT user_json FROM cached_session WHERE id = 1")
-        .fetch_optional(&state.db)
-        .await?;
-    let user: serde_json::Value = serde_json::from_str(&row.ok_or(LocalError::Unauthorized)?.0)
-        .map_err(|e| LocalError::Internal(e.into()))?;
+    let user = crate::local_server::local_accounts::session_user(&state.db)
+        .await?
+        .ok_or(LocalError::Unauthorized)?;
     let text = |k: &str| user.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let user_id = text("id");
     if user_id.is_empty() {

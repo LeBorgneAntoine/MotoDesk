@@ -19,7 +19,7 @@ use chrono::Utc;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
@@ -484,14 +484,16 @@ async fn open_session(state: &SharedState, account: &Account, company_id: Uuid) 
         "created_at": account.created_at,
         "auth_mode": "local",
     });
+    // A local session holds no cloud token: what it holds is which password opened it.
     sqlx::query(
         r#"
         INSERT INTO cached_session (id, user_json, tokens_json, cached_at)
-        VALUES (1, $1, '{}', $2)
-        ON CONFLICT(id) DO UPDATE SET user_json = $1, tokens_json = '{}', cached_at = $2
+        VALUES (1, $1, $2, $3)
+        ON CONFLICT(id) DO UPDATE SET user_json = $1, tokens_json = $2, cached_at = $3
         "#,
     )
     .bind(user.to_string())
+    .bind(json!({ "credential": credential_mark(account) }).to_string())
     .bind(Utc::now().to_rfc3339())
     .execute(&state.db)
     .await?;
@@ -503,6 +505,62 @@ async fn open_session(state: &SharedState, account: &Account, company_id: Uuid) 
         "refresh_expires_in": 0,
         "user": user,
     }))
+}
+
+// ---- The open session --------------------------------------------------------------------------
+
+/// Which password opened a session, without keeping anything that helps guess it: a digest of
+/// the (salted) hash, which changes with every new password.
+fn credential_mark(account: &Account) -> String {
+    hex::encode(&Sha256::digest(account.password_hash.as_bytes())[..16])
+}
+
+/// The signed-in user, if the session still stands.
+///
+/// A session of a local network is only as good as the account behind it, which an
+/// administrator may have changed from another PC since: disabled or deleted, or given a new
+/// password, ends the session; a new role or name takes effect at once. A cloud session is the
+/// cloud's to judge and is returned as it is.
+pub async fn session_user(db: &SqlitePool) -> LocalResult<Option<Value>> {
+    let row: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT user_json, tokens_json FROM cached_session WHERE id = 1")
+            .fetch_optional(db)
+            .await?;
+    let Some((user_json, held)) = row else {
+        return Ok(None);
+    };
+    let mut user: Value = serde_json::from_str(&user_json).map_err(|e| LocalError::Internal(e.into()))?;
+    if !is_standalone(db).await {
+        return Ok(Some(user));
+    }
+
+    let id = user.get("id").and_then(Value::as_str).unwrap_or_default();
+    let account = sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM local_accounts WHERE id = $1 AND deleted_at IS NULL AND is_active = 1"
+    ))
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+    let mark = held
+        .and_then(|h| serde_json::from_str::<Value>(&h).ok())
+        .and_then(|h| h.get("credential").and_then(Value::as_str).map(str::to_string));
+    let Some(account) = account.filter(|a| mark.as_deref() == Some(credential_mark(a).as_str())) else {
+        sqlx::query("DELETE FROM cached_session WHERE id = 1").execute(db).await?;
+        return Ok(None);
+    };
+
+    let full_name = account.full_name.clone().unwrap_or_else(|| account.username.clone());
+    let current = [("role", account.role.as_str()), ("username", account.username.as_str()), ("full_name", full_name.as_str())];
+    if current.iter().any(|(key, value)| user.get(*key).and_then(Value::as_str) != Some(*value)) {
+        for (key, value) in current {
+            user[key] = value.into();
+        }
+        sqlx::query("UPDATE cached_session SET user_json = $1 WHERE id = 1")
+            .bind(user.to_string())
+            .execute(db)
+            .await?;
+    }
+    Ok(Some(user))
 }
 
 // ---- Managing the network's accounts (an administrator) -------------------------------------
@@ -672,6 +730,17 @@ pub async fn update_account(
 
     account.updated_at = later_than(&account.updated_at);
     store(state, &account).await?;
+    // Changing one's own password must not sign one out of the PC it was changed on.
+    if id == actor_id && patch.password.is_some() {
+        sqlx::query(
+            "UPDATE cached_session SET tokens_json = $1
+              WHERE id = 1 AND json_extract(user_json, '$.id') = $2",
+        )
+        .bind(json!({ "credential": credential_mark(&account) }).to_string())
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    }
     Ok((&account).into())
 }
 
@@ -964,5 +1033,73 @@ mod tests {
         sqlx::query("UPDATE sync_state SET standalone = 0 WHERE id = 1").execute(&state.db).await.unwrap();
         let refused = create_account(&state, new_employee("lea")).await;
         assert!(matches!(refused, Err(LocalError::Conflict(_))), "{refused:?}");
+    }
+
+    /// Signs `lea` in on this PC, the administrator having created the account.
+    async fn lea_signed_in() -> (SharedState, String, String) {
+        let (state, admin) = network_with_admin().await;
+        let lea = create_account(&state, new_employee("lea")).await.unwrap();
+        login(&state, "lea", "mot de passe lea").await.unwrap();
+        (state, admin, lea.id)
+    }
+
+    #[tokio::test]
+    async fn a_session_ends_when_its_account_is_disabled_or_deleted() {
+        for delete in [false, true] {
+            let (state, admin, lea) = lea_signed_in().await;
+            assert!(session_user(&state.db).await.unwrap().is_some());
+            if delete {
+                delete_account(&state, &admin, &lea).await.unwrap();
+            } else {
+                let off = AccountPatch { is_active: Some(false), ..Default::default() };
+                update_account(&state, &admin, &lea, off).await.unwrap();
+            }
+            assert!(session_user(&state.db).await.unwrap().is_none(), "delete={delete}");
+            let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM cached_session")
+                .fetch_one(&state.db)
+                .await
+                .unwrap();
+            assert_eq!(left, 0, "gone for good, not only hidden");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_password_reset_ends_the_sessions_it_did_not_open() {
+        let (state, admin, lea) = lea_signed_in().await;
+        let reset = AccountPatch {
+            password: Some("un nouveau mot de passe".into()),
+            confirm: Some("un nouveau mot de passe".into()),
+            ..Default::default()
+        };
+        update_account(&state, &admin, &lea, reset).await.unwrap();
+        assert!(session_user(&state.db).await.unwrap().is_none());
+        login(&state, "lea", "un nouveau mot de passe").await.unwrap();
+        assert!(session_user(&state.db).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn changing_ones_own_password_keeps_one_signed_in() {
+        let (state, admin) = network_with_admin().await;
+        let own = AccountPatch {
+            password: Some("un nouveau mot de passe".into()),
+            confirm: Some("un nouveau mot de passe".into()),
+            ..Default::default()
+        };
+        update_account(&state, &admin, &admin, own).await.unwrap();
+        assert!(session_user(&state.db).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_role_changed_on_another_pc_applies_to_the_open_session() {
+        let (state, _) = network_with_admin().await;
+        assert!(crate::local_server::auth_guard::is_admin(&state).await);
+        let mut demoted = find_account(&state.db, "camille").await.unwrap().unwrap();
+        demoted.role = "employee".into();
+        demoted.updated_at = (Utc::now() + chrono::Duration::seconds(5)).to_rfc3339();
+        merge_accounts(&state.db, vec![demoted]).await.unwrap();
+
+        let user = session_user(&state.db).await.unwrap().expect("still signed in");
+        assert_eq!(user["role"], "employee");
+        assert!(!crate::local_server::auth_guard::is_admin(&state).await);
     }
 }
