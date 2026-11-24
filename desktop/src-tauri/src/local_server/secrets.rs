@@ -160,6 +160,10 @@ pub async fn session_access_token(db: &SqlitePool) -> anyhow::Result<Option<Stri
 }
 
 pub fn clear_tokens() -> anyhow::Result<()> {
+    // Opted out (tests, headless runs): the real credential store is never touched.
+    if !keychain_allowed() {
+        return Ok(());
+    }
     match delete_everywhere(TOKENS_USER) {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
@@ -200,6 +204,9 @@ pub fn load_mesh_secret() -> anyhow::Result<Option<String>> {
 }
 
 pub fn clear_mesh_secret() -> anyhow::Result<()> {
+    if !keychain_allowed() {
+        return Ok(());
+    }
     match delete_everywhere(MESH_USER) {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
@@ -321,9 +328,19 @@ fn fiscal_user(register_code: &str) -> String {
     format!("fiscal-key-{register_code}")
 }
 
-pub fn clear_all() {
+/// Whether signing out forgets the network's secret. It does for a cloud account, which hands
+/// it over again at the next sign-in. It must not on a local network: the secret is what makes
+/// the PC a member, nothing can give it back, and without it the PC silently stops sharing.
+fn sign_out_forgets_network(local_network: bool) -> bool {
+    !local_network
+}
+
+/// What signing out removes from the credential store.
+pub fn clear_on_sign_out(local_network: bool) {
     let _ = clear_tokens();
-    let _ = clear_mesh_secret();
+    if sign_out_forgets_network(local_network) {
+        let _ = clear_mesh_secret();
+    }
     // Fiscal keys are deliberately not cleared: a sign-out must not destroy the
     // ability to verify signatures on entries already written.
 }
@@ -332,6 +349,12 @@ pub fn clear_all() {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn signing_out_of_a_local_network_keeps_its_secret() {
+        assert!(!sign_out_forgets_network(true));
+        assert!(sign_out_forgets_network(false));
+    }
 
     #[test]
     fn reads_access_token_from_bundle() {
