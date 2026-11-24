@@ -698,7 +698,6 @@ pub(crate) async fn credit_note(
     .await?;
     let reopened = reopen_orders_if_cancelled(&mut tx, id, &original, &now).await?;
     tx.commit().await?;
-    emit_stock_movements(&state, note_id).await?;
 
     fiscal::replicate(&state.db, device_id, &register, &lot.entry, &lot.links).await?;
     let sealed = load_sale(&state, note_id).await?;
@@ -712,6 +711,8 @@ pub(crate) async fn credit_note(
         None,
     )
     .await?;
+    // After the credit note itself, which the movements refer to.
+    emit_stock_movements(&state, note_id).await?;
     for order_id in reopened {
         if let Ok(payload) = crate::local_server::routes::workshop::show_payload(&state, order_id).await {
             let _ = sync_log::append(
