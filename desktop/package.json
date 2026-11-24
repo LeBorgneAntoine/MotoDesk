@@ -20,6 +20,7 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@lucide/svelte": "^1.16.0",
     "@tauri-apps/api": "^2.12.5",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tauri-apps/plugin-store": "^2.5.1",
     "konva": "^10.3.0",
     "lottie-web": "^5.13.0",
