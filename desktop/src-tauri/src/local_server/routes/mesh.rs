@@ -98,8 +98,17 @@ async fn pull(
                 .collect()
         })
         .unwrap_or_default();
+    let gaps: crate::local_server::sync_log::Gaps = fields
+        .get("gaps")
+        .and_then(|v| v.as_object())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| Some((Uuid::parse_str(k).ok()?, serde_json::from_value(v.clone()).ok()?)))
+                .collect()
+        })
+        .unwrap_or_default();
     let limit = fields.get("limit").and_then(|v| v.as_i64()).unwrap_or(500);
-    let (ops, more) = mesh::catchup::serve_pull(&state, &vv, limit).await?;
+    let (ops, more) = mesh::catchup::serve_pull(&state, &vv, &gaps, limit).await?;
     let mut out = serde_json::Map::new();
     out.insert("ops".into(), serde_json::to_value(&ops).map_err(|e| LocalError::Internal(e.into()))?);
     out.insert("more".into(), more.into());

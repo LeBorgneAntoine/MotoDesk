@@ -28,7 +28,7 @@ use crate::local_server::mesh::{self, PeerInfo};
 use crate::local_server::mesh_auth;
 use crate::local_server::state::SharedState;
 use crate::local_server::recovery_key;
-use crate::local_server::sync_log;
+use crate::local_server::sync_log::{self, Gaps};
 
 const BATCH: i64 = 500;
 const MAX_BATCHES_PER_PEER: usize = 400;
@@ -44,18 +44,32 @@ fn vv_json(vv: &HashMap<Uuid, i64>) -> Value {
     Value::Object(vv.iter().map(|(d, s)| (d.to_string(), json!(s))).collect())
 }
 
+fn gaps_json(gaps: &Gaps) -> Value {
+    Value::Object(gaps.iter().map(|(d, ranges)| (d.to_string(), json!(ranges))).collect())
+}
+
 // ---- Serving ---------------------------------------------------------------------------------------
 
-/// The changes beyond `vv`, at most `limit`, and whether there may be more.
+/// The changes the asker lacks (inside its `gaps`, then beyond `vv`), at most `limit`, and
+/// whether there may be more.
 pub async fn serve_pull(
     state: &SharedState,
     vv: &HashMap<Uuid, i64>,
+    gaps: &Gaps,
     limit: i64,
 ) -> LocalResult<(Vec<ChangeLogEntry>, bool)> {
     let limit = limit.clamp(1, BATCH);
     let mut remaining = limit;
     let mut out = Vec::new();
     for device in sync_log::known_devices(&state.db).await? {
+        for &(from, to) in gaps.get(&device).into_iter().flatten() {
+            if remaining <= 0 {
+                break;
+            }
+            let ops = sync_log::ops_between(&state.db, device, from, to, remaining).await?;
+            remaining -= ops.len() as i64;
+            out.extend(ops);
+        }
         if remaining <= 0 {
             break;
         }
@@ -156,8 +170,10 @@ pub async fn pull_from(state: &SharedState, peer: &PeerInfo) -> LocalResult<usiz
     let mut received = 0;
     for _ in 0..MAX_BATCHES_PER_PEER {
         let vv = version_vector(state).await?;
+        let gaps = sync_log::gaps(&state.db).await?;
         let mut fields = serde_json::Map::new();
         fields.insert("vv".into(), vv_json(&vv));
+        fields.insert("gaps".into(), gaps_json(&gaps));
         fields.insert("limit".into(), json!(BATCH));
         let reply = verified(&secret, post(state, peer, "/mesh/pull", signed(&secret, fields)).await?)?;
         let ops: Vec<ChangeLogEntry> = serde_json::from_value(reply.get("ops").cloned().unwrap_or(Value::Null))
@@ -169,7 +185,7 @@ pub async fn pull_from(state: &SharedState, peer: &PeerInfo) -> LocalResult<usiz
         received += ops.len();
         mesh::apply_batch(state, ops).await?;
         // Nothing new after applying means asking again would get the same batch.
-        if !more || version_vector(state).await? == vv {
+        if !more || (version_vector(state).await? == vv && sync_log::gaps(&state.db).await? == gaps) {
             break;
         }
     }

@@ -319,6 +319,62 @@ pub async fn version_vector(pool: &SqlitePool) -> LocalResult<std::collections::
         .collect())
 }
 
+/// Ranges of sequence numbers (inclusive) missing below the highest one held, per device.
+pub type Gaps = std::collections::HashMap<Uuid, Vec<(i64, i64)>>;
+
+/// How many missing ranges one request names; the rest follow once these are filled.
+const MAX_GAPS: i64 = 500;
+
+/// What is missing inside each device's history. The highest number alone does not say what a
+/// PC holds: one recent change pushed to a PC that was off would hide everything before it.
+pub async fn gaps(pool: &SqlitePool) -> LocalResult<Gaps> {
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        r#"
+        SELECT device_id, previous + 1, seq - 1 FROM (
+            SELECT device_id, seq,
+                   LAG(seq, 1, 0) OVER (PARTITION BY device_id ORDER BY seq) AS previous
+              FROM change_log
+        )
+        WHERE seq > previous + 1
+        ORDER BY device_id, seq
+        LIMIT $1
+        "#,
+    )
+    .bind(MAX_GAPS)
+    .fetch_all(pool)
+    .await?;
+    let mut out = Gaps::new();
+    for (device, from, to) in rows {
+        if let Ok(device) = Uuid::parse_str(&device) {
+            out.entry(device).or_default().push((from, to));
+        }
+    }
+    Ok(out)
+}
+
+/// The changes of one device numbered within `from..=to`, oldest first.
+pub async fn ops_between(
+    pool: &SqlitePool,
+    device: Uuid,
+    from: i64,
+    to: i64,
+    limit: i64,
+) -> LocalResult<Vec<ChangeLogEntry>> {
+    let rows = sqlx::query_as::<_, ChangelogRow>(
+        r#"
+        SELECT id, device_id, seq, entity_type, entity_id, op, payload, field_meta, created_at, synced_to_cloud, relayed
+        FROM change_log WHERE device_id = $1 AND seq >= $2 AND seq <= $3 ORDER BY seq ASC LIMIT $4
+        "#,
+    )
+    .bind(device.to_string())
+    .bind(from)
+    .bind(to)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().filter_map(|r| r.into_entry()).collect())
+}
+
 /// Every device that has a change in this log.
 pub async fn known_devices(pool: &SqlitePool) -> LocalResult<Vec<Uuid>> {
     let rows: Vec<(String,)> = sqlx::query_as("SELECT DISTINCT device_id FROM change_log ORDER BY device_id")
