@@ -7,9 +7,12 @@
 //! mesh works even on networks where multicast is blocked.
 
 pub mod catchup;
+mod deferred;
 pub mod join;
 #[cfg(test)]
 mod network_tests;
+#[cfg(test)]
+mod two_pc_tests;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -456,20 +459,29 @@ pub async fn apply_batch(
         // Each op in its own savepoint. One that cannot be applied (a UNIQUE clash,
         // a missing parent row) used to abort the whole batch and the cursor never
         // moved: the same batch was fetched and failed again every 30 seconds, and
-        // nothing after it was ever applied. It is now set aside, recorded for
-        // review, and the rest goes through.
-        let mut rejected = false;
-        let mut savepoint = sqlx::Acquire::begin(&mut tx).await?;
-        match apply_op_to_sqlite(&mut savepoint, &op).await {
-            Ok(()) => savepoint.commit().await?,
-            Err(err) => {
-                rejected = true;
-                savepoint.rollback().await?;
+        // nothing after it was ever applied. It is set aside, recorded for review,
+        // tried again later (`deferred`), and the rest goes through.
+        let mut waits = false;
+        let mut failure = None;
+        if deferred::is_waiting(&mut tx, op.entity_type, op.entity_id).await? {
+            waits = true;
+        } else {
+            let mut savepoint = sqlx::Acquire::begin(&mut tx).await?;
+            match apply_op_to_sqlite(&mut savepoint, &op).await {
+                Ok(Applied::Done) => savepoint.commit().await?,
+                Ok(Applied::WaitsForRow) => {
+                    waits = true;
+                    savepoint.rollback().await?;
+                }
+                Err(err) => {
+                    waits = true;
+                    failure = Some(err.to_string());
+                    savepoint.rollback().await?;
                 tracing::warn!(
                     entity = %op.entity_type.as_str(),
                     entity_id = %op.entity_id,
                     error = %err,
-                    "sync: an incoming change could not be applied and was set aside"
+                    "sync: an incoming change could not be applied yet and was set aside"
                 );
                 sqlx::query(
                     "INSERT INTO audit_log (id, action, entity_type, entity_id, payload, created_at)
@@ -491,7 +503,11 @@ pub async fn apply_batch(
                 .bind(chrono::Utc::now().to_rfc3339())
                 .execute(&mut *tx)
                 .await?;
+                }
             }
+        }
+        if waits {
+            deferred::keep(&mut tx, &op, failure.as_deref()).await?;
         }
 
         sqlx::query(
@@ -512,12 +528,15 @@ pub async fn apply_batch(
         .execute(&mut *tx)
         .await?;
 
-        if rejected {
+        if waits {
             skipped += 1;
         } else {
             applied += 1;
         }
     }
+
+    // What this batch brought may be what earlier changes were waiting for.
+    applied += deferred::retry(&mut tx).await?;
 
     tx.commit().await?;
 
@@ -528,10 +547,18 @@ pub async fn apply_batch(
     Ok(MeshApplyResponse { applied, skipped })
 }
 
+/// What became of a change that raised no error.
+enum Applied {
+    Done,
+    /// A deletion of a row this PC has not received yet. Forgetting it would bring the row
+    /// back when its creation arrives.
+    WaitsForRow,
+}
+
 async fn apply_op_to_sqlite(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     op: &ChangeLogEntry,
-) -> LocalResult<()> {
+) -> LocalResult<Applied> {
     use motodesk_core::sync::OpKind;
     use motodesk_sync::{apply_operation, ApplyOutcome};
 
@@ -540,7 +567,7 @@ async fn apply_op_to_sqlite(
         .map_err(|e| LocalError::Internal(anyhow::anyhow!(e)))?;
 
     if !matches!(result.outcome, ApplyOutcome::Applied) {
-        return Ok(());
+        return Ok(Applied::Done);
     }
 
     let known_locally = snapshot.is_some();
@@ -550,10 +577,11 @@ async fn apply_op_to_sqlite(
         // come back to life. A delete for a row we never had has nothing to
         // delete and must not invent an empty one.
         Some(snap) if snap.deleted_at.is_some() => {
-            if known_locally {
-                soft_delete_entity(tx, op.entity_type, op.entity_id, snap.deleted_at.unwrap_or(op.created_at))
-                    .await?;
+            if !known_locally {
+                return Ok(Applied::WaitsForRow);
             }
+            soft_delete_entity(tx, op.entity_type, op.entity_id, snap.deleted_at.unwrap_or(op.created_at))
+                .await?;
         }
         Some(snap) => persist_snapshot(tx, &snap).await?,
         None if op.op == OpKind::Delete => {
@@ -562,7 +590,7 @@ async fn apply_op_to_sqlite(
         None => {}
     }
 
-    Ok(())
+    Ok(Applied::Done)
 }
 
 #[cfg(test)]
