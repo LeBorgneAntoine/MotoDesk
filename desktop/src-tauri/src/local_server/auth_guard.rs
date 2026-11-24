@@ -21,14 +21,9 @@ pub async fn is_admin(state: &SharedState) -> bool {
 }
 
 pub async fn require_admin(state: &SharedState) -> LocalResult<AdminUser> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT user_json FROM cached_session WHERE id = 1")
-            .fetch_optional(&state.db)
-            .await?;
-
-    let user_json = row.ok_or(LocalError::Unauthorized)?.0;
-    let user: Value =
-        serde_json::from_str(&user_json).map_err(|e| LocalError::Internal(e.into()))?;
+    let user: Value = crate::local_server::local_accounts::session_user(&state.db)
+        .await?
+        .ok_or(LocalError::Unauthorized)?;
 
     let role = user.get("role").and_then(|v| v.as_str()).unwrap_or("");
     if role != "admin" && role != "staff" {

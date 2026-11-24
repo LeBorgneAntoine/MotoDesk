@@ -644,7 +644,16 @@ async fn adopt_secrets(path: &Path, secrets: &SecretsPayload, made_at: Option<&s
     let pool = crate::local_server::db::init_pool(path)
         .await
         .map_err(|e| LocalError::BadRequest(format!("base de données illisible : {e}")))?;
-    let outcome = store_secrets(&pool, secrets).await;
+    let mut outcome = store_secrets(&pool, secrets).await;
+    // The copy also holds whoever was signed in when it was made. Restoring must not sign
+    // anyone in without their password.
+    if outcome.is_ok() {
+        outcome = sqlx::query("DELETE FROM cached_session")
+            .execute(&pool)
+            .await
+            .map(|_| ())
+            .map_err(LocalError::from);
+    }
     // The copy was taken before "last backup" was written down, so the restored data would
     // claim it was never backed up. It is exactly as recent as the backup it came from.
     if outcome.is_ok() {
@@ -988,6 +997,14 @@ mod tests {
         .await
         .unwrap();
 
+        sqlx::query(
+            "INSERT INTO cached_session (id, user_json, tokens_json, cached_at)
+             VALUES (1, '{\"id\":\"u1\",\"role\":\"admin\"}', '{}', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&state.db)
+        .await
+        .unwrap();
+
         // A fast key derivation would be nicer, but the production path is what
         // must work: the cost is a second or two in a test.
         let file = export(&state, "un-mot-de-passe-solide").await.unwrap();
@@ -1016,6 +1033,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(name, "Martin");
+        // Whoever was signed in when the copy was made is not signed in by restoring it.
+        let (sessions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM cached_session")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(sessions, 0);
         // The restored data knows how recent its backup is (it was copied before that was written).
         let (last,): (Option<String>,) = sqlx::query_as("SELECT last_backup_at FROM sync_state WHERE id = 1")
             .fetch_one(&pool)
