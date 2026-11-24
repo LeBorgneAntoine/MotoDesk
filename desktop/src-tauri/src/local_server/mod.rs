@@ -108,12 +108,13 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
     db::ensure_device_id(&pool).await?;
     backup::finish_restore(&pool, &data_dir).await?;
     let cloud_url = db::ensure_cloud_url(&pool).await?;
-    let mesh_secret = secrets::load_mesh_secret()
-        .ok()
-        .flatten()
-        .or(db::load_mesh_secret(&pool).await?);
+    if local_accounts::repair_half_joined(&pool).await? {
+        tracing::warn!("a join that stopped halfway was undone: this PC can create or join a network again");
+        let _ = secrets::clear_mesh_secret();
+    }
+    let mesh_secret = db::current_mesh_secret(&pool).await?;
     if let Some(ref secret) = mesh_secret {
-        // Move a legacy database copy into the keychain, and only forget the
+        // Move a database copy into the keychain, and only forget the
         // database copy once the keychain has demonstrably kept it.
         match secrets::store_mesh_secret(secret) {
             Ok(()) => {

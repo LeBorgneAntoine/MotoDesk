@@ -178,6 +178,60 @@ async fn guessing_a_password_locks_the_username_for_a_while() {
     assert!(matches!(r, Err(LocalError::TooManyAttempts)), "{r:?}");
 }
 
+/// Handshakes opened side by side, then proved one after another: only the first five proofs
+/// are looked at, and after that not even the right password gets through.
+#[tokio::test]
+async fn opening_many_handshakes_at_once_does_not_get_past_the_lock() {
+    use sha2::Sha256;
+    use srp::groups::G_2048;
+
+    let (a, _peer, _) = network_of_one().await;
+    let client = srp::client::SrpClient::<Sha256>::new(&G_2048);
+    let ephemeral = [7u8; 64];
+    let start = || join::JoinStart {
+        username: "lea".into(),
+        a_pub: hex::encode(client.compute_public_ephemeral(&ephemeral)),
+    };
+
+    let mut open = Vec::new();
+    for _ in 0..8 {
+        open.push(join::start(&a, start()).await.unwrap());
+    }
+    let right = open.pop().unwrap();
+    for (i, reply) in open.into_iter().enumerate() {
+        let guess = join::JoinFinish { session: reply.session, m1: "00".repeat(32) };
+        let refused = join::finish(&a, guess).await.unwrap_err();
+        if i < 5 {
+            assert!(matches!(refused, LocalError::InvalidCredentials), "{i}: {refused:?}");
+        } else {
+            assert!(matches!(refused, LocalError::TooManyAttempts), "{i}: {refused:?}");
+        }
+    }
+
+    let salt = hex::decode(&right.salt).unwrap();
+    let secret = local_accounts::derive_secret("mot de passe lea", &salt).unwrap();
+    let proof = client
+        .process_reply(&ephemeral, b"lea", &secret, &salt, &hex::decode(&right.b_pub).unwrap())
+        .unwrap();
+    let answer = join::finish(&a, join::JoinFinish { session: right.session, m1: hex::encode(proof.proof()) }).await;
+    assert!(matches!(answer, Err(LocalError::TooManyAttempts)));
+}
+
+#[tokio::test]
+async fn an_accented_name_joins_however_it_is_typed() {
+    let (a, peer_a, _) = network_of_one().await;
+    let elodie = local_accounts::new_account("Élodie", "mot de passe elodie", "employee", None)
+        .await
+        .unwrap();
+    local_accounts::merge_accounts(&a.db, vec![elodie]).await.unwrap();
+
+    let b = shop().await;
+    let bundle = join::join_network(&b, "élodie", "mot de passe elodie", std::slice::from_ref(&peer_a))
+        .await
+        .expect("the PC joins");
+    assert_eq!(bundle["user"]["username"], "Élodie");
+}
+
 #[tokio::test]
 async fn a_pc_that_is_not_part_of_a_network_cannot_be_joined() {
     let fresh = shop().await;
