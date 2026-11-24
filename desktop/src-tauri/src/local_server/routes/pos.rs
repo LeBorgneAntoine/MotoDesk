@@ -62,7 +62,7 @@ pub struct CheckoutBody {
     pub payments: Vec<CheckoutPayment>,
 }
 
-async fn checkout(
+pub(crate) async fn checkout(
     State(state): State<SharedState>,
     Json(body): Json<CheckoutBody>,
 ) -> LocalResult<(StatusCode, Json<Value>)> {
@@ -248,7 +248,6 @@ async fn checkout(
     tx.commit().await?;
 
     fiscal::replicate(&state.db, device_id, &register, &lot.entry, &lot.links).await?;
-    let _ = after_sale_sealed(&state, id).await;
     for (entry, links) in &payment_entries {
         fiscal::replicate(&state.db, device_id, &register, entry, links).await?;
     }
@@ -263,6 +262,9 @@ async fn checkout(
         None,
     )
     .await?;
+    // Only now: the stock movements and order updates this makes refer to the sale, and
+    // the other PCs apply changes in the order they were logged.
+    let _ = after_sale_sealed(&state, id).await;
     // The takings travel with the ticket. Only the journal entry used to, so the
     // other PCs saw a paid ticket with no payment behind it.
     for payment_id in payment_ids {
