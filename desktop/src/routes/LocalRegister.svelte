@@ -10,12 +10,14 @@
   import { ApiError } from "$lib/api/types";
   import { validateNewLocalAccount } from "$lib/api/localAccount";
   import AuthTabs from "./AuthTabs.svelte";
+  import RestoreFirstRun from "./RestoreFirstRun.svelte";
 
   let username = $state("");
   let password = $state("");
   let confirm = $state("");
   let submitting = $state(false);
   let formError = $state<string | null>(null);
+  let restoring = $state(false);
   // Another network of the shop is visible on the LAN: the user must say they mean a new one.
   let networkSeen = $state(false);
   let confirmNew = $state(false);
@@ -131,9 +133,14 @@
       >
         Créer le réseau local
       </Button>
+      <Button variant="link" size="sm" type="button" onclick={() => (restoring = true)}>
+        Restaurer une sauvegarde
+      </Button>
     </form>
   {/if}
 </div>
+
+<RestoreFirstRun open={restoring} onClose={() => (restoring = false)} />
 
 <style>
   .af {

@@ -22,6 +22,7 @@ pub fn router() -> Router<SharedState> {
         .route("/local/setup", post(local_setup))
         .route("/local/login", post(local_login))
         .route("/local/recover", post(local_recover))
+        .route("/local/restore", post(local_restore))
         .route("/promote", post(promote))
 }
 
@@ -266,6 +267,28 @@ async fn local_recover(
     Json(input): Json<crate::local_server::recovery_key::Recover>,
 ) -> LocalResult<Json<serde_json::Value>> {
     crate::local_server::recovery_key::recover(&state, input).await.map(Json)
+}
+
+#[derive(Debug, Deserialize)]
+struct FirstRunRestore {
+    path: String,
+    password: String,
+}
+
+/// Bring the shop back from a backup on a PC with nothing set up. No session to ask for: there
+/// is none to be had, and nothing here to protect. Anywhere else, restoring is an
+/// administrator's (`routes::backup`).
+async fn local_restore(
+    State(state): State<SharedState>,
+    Json(input): Json<FirstRunRestore>,
+) -> LocalResult<Json<crate::local_server::backup::RestoreResult>> {
+    if !crate::local_server::local_accounts::status(&state.db).await?.can_setup {
+        return Err(LocalError::Conflict(
+            "Ce poste est déjà configuré : la restauration se fait dans Réglages › Sauvegardes.".into(),
+        ));
+    }
+    let path = std::path::PathBuf::from(input.path);
+    crate::local_server::backup::restore_path(&state, &path, &input.password).await.map(Json)
 }
 
 #[derive(Debug, Deserialize)]
@@ -595,6 +618,22 @@ mod tests {
         let stored = crate::local_server::db::load_mesh_secret(&state.db).await.unwrap();
         assert_eq!(stored, secret, "and the next start finds it");
         assert!(local_accounts::status(&state.db).await.unwrap().standalone);
+    }
+
+    #[tokio::test]
+    async fn only_a_pc_with_nothing_set_up_restores_without_a_session() {
+        let old = standalone_shop("http://127.0.0.1:9").await;
+        let file = crate::local_server::backup::export(&old, "un-mot-de-passe-solide").await.unwrap();
+        let ask = |path: &str| {
+            Json(FirstRunRestore { path: path.into(), password: "un-mot-de-passe-solide".into() })
+        };
+
+        let refused = local_restore(State(old.clone()), ask(&file.path)).await;
+        assert!(matches!(refused, Err(LocalError::Conflict(_))), "a set-up PC asks for an administrator");
+
+        let fresh = shop().await;
+        let Json(done) = local_restore(State(fresh.clone()), ask(&file.path)).await.unwrap();
+        assert!(done.restart_required);
     }
 
     #[tokio::test]
