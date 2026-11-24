@@ -59,8 +59,14 @@
   }
 </script>
 
-<!-- Closing is not offered: Escape and the cross do nothing until the key is confirmed. -->
-<Modal open={key !== null} title="Votre clé de récupération" onClose={() => {}} closeOnOverlay={false}>
+<!-- Closing is not offered until the key is confirmed: no cross, and Escape does nothing. -->
+<Modal
+  open={key !== null}
+  title="Votre clé de récupération"
+  onClose={() => {}}
+  closeOnOverlay={false}
+  closable={false}
+>
   <form class="rk" onsubmit={done}>
     <p class="rk__text">
       Si un mot de passe d'administrateur est perdu, seule cette clé permet de reprendre la main.
