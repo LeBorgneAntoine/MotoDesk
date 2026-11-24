@@ -49,7 +49,7 @@ Les échanges de rattrapage et de comptes sont signés avec le secret du maillag
 |---|---|
 | Mot de passe sur le réseau | Jamais en clair : SRP-6a. La bibliothèque `srp` indique elle-même n'avoir fait l'objet d'aucun audit indépendant : à relire avant une mise en production. Un mot de passe faible reste devinable au rythme permis par le verrouillage. |
 | Un poste vierge sans pair joignable | **Refusé**, par conception. |
-| Récupération d'un mot de passe oublié | Un administrateur le réinitialise. Si c'est le seul administrateur qui l'a oublié : aucune récupération (une sauvegarde chiffrée reste le recours). |
+| Récupération d'un mot de passe oublié | Un administrateur le réinitialise. Si aucun administrateur ne peut se connecter : la **clé de récupération**, donnée une seule fois à la création du réseau (125 bits, seule son empreinte est gardée et répliquée), redonne un mot de passe et le rôle d'administrateur à un compte, sur n'importe quel poste du réseau ; elle est alors remplacée. Clé et mot de passe perdus tous deux : pas de porte dérobée. La clé n'ouvre pas les sauvegardes. |
 | Une installation déjà liée à un cloud devient-elle un réseau local ? | **Non** : ce serait mélanger deux comptabilités. |
 | Retour en arrière après la mise en ligne | **Non**, volontairement. |
 | Rattacher un réseau local à une entreprise **déjà existante** sur le cloud | **Non couvert** (fusion de deux historiques et de deux chaînes fiscales). |

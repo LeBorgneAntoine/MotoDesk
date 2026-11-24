@@ -15,6 +15,7 @@ import {
 } from "$lib/api/client";
 import * as authApi from "$lib/api/auth";
 import * as localAccount from "$lib/api/localAccount";
+import { recoverWithKey, type RecoverPayload } from "$lib/api/recovery";
 import { api } from "$lib/api/client";
 import { cloudMe, cloudRefresh } from "$lib/api/cloudClient";
 import { ApiError, type PublicUser, type TokenBundle } from "$lib/api/types";
@@ -25,6 +26,8 @@ class AuthStore {
   status = $state<"initializing" | "anonymous" | "authenticated">("initializing");
   error = $state<string | null>(null);
   lastBootstrap = $state<BootstrapResult | null>(null);
+  /** A new recovery key waiting to be written down. Kept in memory only, never stored. */
+  recoveryKey = $state<string | null>(null);
 
   get isAuthenticated() {
     return this.status === "authenticated";
@@ -217,8 +220,21 @@ class AuthStore {
     force = false,
   ): Promise<void> {
     this.error = null;
-    const bundle = await localAccount.setupLocalAccount({ username, password, confirm, force });
+    const reply = await localAccount.setupLocalAccount({ username, password, confirm, force });
+    await this.adoptWithKey(reply);
+  }
+
+  /** "Password lost": the recovery key gives an account a new password and signs it in. */
+  async recoverLocal(payload: RecoverPayload): Promise<void> {
+    this.error = null;
+    await this.adoptWithKey(await recoverWithKey(payload));
+  }
+
+  /** The key is shown, not saved with the session. */
+  private async adoptWithKey(reply: TokenBundle & { recovery_key?: string }): Promise<void> {
+    const { recovery_key, ...bundle } = reply;
     await setTokens(bundle);
+    this.recoveryKey = recovery_key ?? null;
     this.applyBundle(bundle);
   }
 
@@ -289,6 +305,7 @@ class AuthStore {
     await authApi.logout(cached?.refresh_token ?? null);
     this.stopKeepAlive();
     this.stopWatchingLocalSession();
+    this.recoveryKey = null;
     this.user = null;
     this.status = "anonymous";
   }

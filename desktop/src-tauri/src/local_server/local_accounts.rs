@@ -387,7 +387,10 @@ pub async fn setup(
     install_mesh_secret(state, &new_mesh_secret()).await?;
     // A network PC stays on in the background by default.
     crate::local_server::routes::background::refresh(state).await;
-    open_session(state, &account, company_id).await
+    let mut bundle = open_session(state, &account, company_id).await?;
+    // Shown once to the owner: the way back in if the password is ever lost.
+    bundle["recovery_key"] = crate::local_server::recovery_key::issue(state).await?.into();
+    Ok(bundle)
 }
 
 /// What a PC that joins an existing network brings home from the PC it joined.
@@ -397,6 +400,7 @@ pub struct Joined {
     pub company_name: Option<String>,
     pub legal_name: Option<String>,
     pub accounts: Vec<Account>,
+    pub recovery: Option<crate::local_server::recovery_key::Stored>,
 }
 
 /// Become a member of an existing network: adopt its company, its mesh secret and its accounts,
@@ -432,6 +436,7 @@ pub async fn adopt_network(state: &SharedState, username: &str, joined: Joined) 
     tx.commit().await?;
 
     merge_accounts(&state.db, joined.accounts).await?;
+    crate::local_server::recovery_key::merge(&state.db, joined.recovery).await?;
     install_mesh_secret(state, &joined.mesh_secret).await?;
     crate::local_server::routes::background::refresh(state).await;
 
@@ -742,6 +747,50 @@ pub async fn update_account(
         .await?;
     }
     Ok((&account).into())
+}
+
+/// What the recovery key does to the account it is used on: a new password, active, and an
+/// administrator. Returns its id. The caller has checked the key and the password rules.
+pub async fn restore_administrator(
+    state: &SharedState,
+    username: &str,
+    password: &str,
+) -> LocalResult<String> {
+    require_network(state).await?;
+    let name = username.trim().to_lowercase();
+    let mut account = all_accounts(&state.db)
+        .await?
+        .into_iter()
+        .find(|a| a.deleted_at.is_none() && a.username.to_lowercase() == name)
+        .ok_or_else(|| LocalError::BadRequest("Aucun compte ne porte cet identifiant.".into()))?;
+    let fresh = new_account(&account.username, password, "admin", None).await?;
+    account.password_hash = fresh.password_hash;
+    account.kdf_salt = fresh.kdf_salt;
+    account.srp_verifier = fresh.srp_verifier;
+    account.role = "admin".into();
+    account.is_active = true;
+    account.updated_at = later_than(&account.updated_at);
+    store(state, &account).await?;
+    Ok(account.id)
+}
+
+/// Ask the signed-in user for their password again, before something that cannot be undone.
+pub async fn check_current_password(db: &SqlitePool, user_id: &str, password: &str) -> LocalResult<()> {
+    let hash: Option<String> = sqlx::query_scalar(
+        "SELECT password_hash FROM local_accounts WHERE id = $1 AND deleted_at IS NULL AND is_active = 1",
+    )
+    .bind(user_id)
+    .fetch_optional(db)
+    .await?;
+    let ok = match hash {
+        Some(hash) => verify_password(password.to_string(), hash).await,
+        None => false,
+    };
+    if !ok {
+        tokio::time::sleep(FAILED_LOGIN_DELAY).await;
+        return Err(LocalError::BadRequest("Mot de passe incorrect.".into()));
+    }
+    Ok(())
 }
 
 /// Delete an account (it stays as a tombstone so the deletion replicates).

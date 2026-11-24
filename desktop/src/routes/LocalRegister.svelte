@@ -90,7 +90,7 @@
         label="Mot de passe"
         htmlFor="localreg-password"
         required
-        hint="Minimum 8 caractères. Il n'y a pas de récupération : notez-le."
+        hint="Minimum 8 caractères. Une clé de récupération vous sera donnée juste après."
       >
         <Input
           id="localreg-password"

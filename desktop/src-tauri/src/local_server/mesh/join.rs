@@ -93,6 +93,8 @@ struct JoinPackage {
     company_name: Option<String>,
     legal_name: Option<String>,
     accounts: Vec<Account>,
+    #[serde(default)]
+    recovery: Option<crate::local_server::recovery_key::Stored>,
 }
 
 fn unhex(s: &str) -> LocalResult<Vec<u8>> {
@@ -273,6 +275,7 @@ pub async fn finish(state: &SharedState, req: JoinFinish) -> LocalResult<JoinFin
         company_name,
         legal_name,
         accounts: local_accounts::all_accounts(&state.db).await?,
+        recovery: crate::local_server::recovery_key::stored(&state.db).await?,
     };
     tracing::info!(username = %account.username, "a PC joined the network");
     let plain = serde_json::to_vec(&package).map_err(|e| LocalError::Internal(e.into()))?;
@@ -393,6 +396,7 @@ pub async fn join_network(
                     company_name: package.company_name,
                     legal_name: package.legal_name,
                     accounts: package.accounts,
+                    recovery: package.recovery,
                 };
                 let bundle = local_accounts::adopt_network(state, username, joined).await?;
                 // The PC that let us in is a peer from now on, and has the data to give.

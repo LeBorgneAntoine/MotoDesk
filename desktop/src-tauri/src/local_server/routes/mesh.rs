@@ -116,7 +116,12 @@ async fn accounts(
         serde_json::from_value(fields.get("accounts").cloned().unwrap_or(serde_json::Value::Null))
             .map_err(|_| LocalError::BadRequest("comptes invalides".into()))?;
     let all = mesh::catchup::serve_accounts(&state, incoming).await?;
+    // The recovery key's hash travels with the accounts.
+    let theirs = fields.get("recovery").and_then(|v| serde_json::from_value(v.clone()).ok());
+    crate::local_server::recovery_key::merge(&state.db, theirs).await?;
+    let recovery = crate::local_server::recovery_key::stored(&state.db).await?;
     let mut out = serde_json::Map::new();
+    out.insert("recovery".into(), serde_json::to_value(&recovery).map_err(|e| LocalError::Internal(e.into()))?);
     out.insert("accounts".into(), serde_json::to_value(&all).map_err(|e| LocalError::Internal(e.into()))?);
     sign_reply(&state, out).await
 }

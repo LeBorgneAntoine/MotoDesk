@@ -87,6 +87,9 @@ async fn a_new_pc_joins_with_an_employees_credentials_and_catches_up() {
     assert_eq!(*b.company_id.read().await, *a.company_id.read().await);
     assert_eq!(*b.mesh_secret.read().await, *a.mesh_secret.read().await);
     assert_eq!(local_accounts::all_accounts(&b.db).await.unwrap().len(), 2);
+    let key = crate::local_server::recovery_key::stored(&a.db).await.unwrap();
+    assert!(key.is_some());
+    assert_eq!(crate::local_server::recovery_key::stored(&b.db).await.unwrap(), key, "the key works on B too");
     assert!(b.peers.read().await.iter().any(|p| p.port == peer_a.port));
     assert!(!crate::local_server::auth_guard::is_admin(&b).await, "an employee is not an admin");
 
@@ -127,7 +130,13 @@ async fn accounts_travel_in_both_directions() {
     let on_b = local_accounts::new_account("hugo", "mot de passe hugo", "employee", None).await.unwrap();
     local_accounts::merge_accounts(&b.db, vec![on_b]).await.unwrap();
 
+    crate::local_server::recovery_key::issue(&a).await.unwrap();
     catchup::exchange_accounts(&b, &peer_a).await.unwrap();
+    assert_eq!(
+        crate::local_server::recovery_key::stored(&b.db).await.unwrap(),
+        crate::local_server::recovery_key::stored(&a.db).await.unwrap(),
+        "a new key replaces the old one everywhere"
+    );
     assert!(local_accounts::find_account(&b.db, "ines").await.unwrap().is_some());
     assert!(local_accounts::find_account(&a.db, "hugo").await.unwrap().is_some());
 }
