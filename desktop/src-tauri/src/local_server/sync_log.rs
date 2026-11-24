@@ -348,6 +348,24 @@ pub async fn ops_after(
     Ok(rows.into_iter().filter_map(|r| r.into_entry()).collect())
 }
 
+/// The changes waiting to be applied (`mesh::deferred`): creations first, then by age, so a
+/// row is created before it is edited or deleted whatever the PCs' clocks say.
+pub async fn deferred_ops(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> LocalResult<Vec<ChangeLogEntry>> {
+    let rows = sqlx::query_as::<_, ChangelogRow>(
+        r#"
+        SELECT c.id, c.device_id, c.seq, c.entity_type, c.entity_id, c.op, c.payload, c.field_meta,
+               c.created_at, c.synced_to_cloud, c.relayed
+        FROM sync_deferred d JOIN change_log c ON c.id = d.change_id
+        ORDER BY c.op != 'insert', c.created_at, c.device_id, c.seq
+        "#,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows.into_iter().filter_map(|r| r.into_entry()).collect())
+}
+
 /// What a network PC still has to push to its LAN peers: everything logged after its cursor
 /// (with no cloud, nothing is ever "synced", so "not synced yet" would never shrink), and the
 /// cursor value to store once it has been sent.
