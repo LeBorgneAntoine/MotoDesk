@@ -168,6 +168,9 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
         .execute(&state.db)
         .await;
 
+    if let Err(e) = fiscal::announce_unsent(&state).await {
+        tracing::warn!(error = %e, "could not queue unsent journal entries");
+    }
     mesh::start_discovery(state.clone(), MESH_API_PORT);
     sync_engine::spawn(state.clone());
     backup::spawn_auto(state.clone());
