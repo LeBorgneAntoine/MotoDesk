@@ -124,5 +124,29 @@ async fn seed(folder: PathBuf) -> anyhow::Result<usize> {
         }
         made += 1;
     }
+
+    // Parc VN/VO: vehicles for sale, with their prices.
+    for i in 0..14usize {
+        let (make, model, kind) = BIKES[i % BIKES.len()];
+        let buy = 180_000 + (i as i64 * 73_100) % 620_000;
+        clients::create_stock_vehicle(
+            &client,
+            &VehicleInput {
+                vehicle_type: kind,
+                make: make.into(),
+                model: model.into(),
+                year: Some(2018 + (i % 8) as i32),
+                cylinder_capacity: (kind == VehicleType::Moto).then_some(650),
+                vin_or_serial: (i % 5 != 3).then(|| format!("JH2PC40A{:02}M{:06}", i, 100_123 + i * 7919)),
+                plate_number: (i % 3 == 0 && kind != VehicleType::Bicycle).then(|| format!("G{}-{:03}-VO", (b'A' + i as u8) as char, 210 + i * 31)),
+                odometer_value: Some(((i * 4_211) % 36_000) as i64),
+                odometer_unit: Some(OdometerUnit::Km),
+                purchase_price_ht_cents: (i % 6 != 5).then_some(buy),
+                selling_price_ttc_cents: (i % 7 != 6).then_some(buy * 3 / 2 + 49_000),
+                ..Default::default()
+            },
+        )
+        .await?;
+    }
     Ok(made)
 }

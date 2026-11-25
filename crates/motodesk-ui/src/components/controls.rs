@@ -209,17 +209,24 @@ pub struct Checkbox {
     id: ElementId,
     checked: bool,
     label: Option<SharedString>,
+    hint: Option<SharedString>,
     disabled: bool,
     on_change: Option<ToggleHandler>,
 }
 
 impl Checkbox {
     pub fn new(id: impl Into<ElementId>, checked: bool) -> Self {
-        Self { id: id.into(), checked, label: None, disabled: false, on_change: None }
+        Self { id: id.into(), checked, label: None, hint: None, disabled: false, on_change: None }
     }
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// A line under the label saying what ticking the box does.
+    pub fn hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.hint = Some(hint.into());
         self
     }
 
@@ -235,14 +242,20 @@ impl Checkbox {
 }
 
 impl RenderOnce for Checkbox {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         use gpui_kit::component::Disableable as _;
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
         let on_change = self.on_change;
-        KitCheckbox::new(self.id)
+        let boxed = KitCheckbox::new(self.id)
             .checked(self.checked)
             .disabled(self.disabled)
             .when_some(self.label, |this, label| this.label(label))
-            .when_some(on_change, |this, handler| this.on_click(move |checked, window, cx| handler(*checked, window, cx)))
+            .when_some(on_change, |this, handler| this.on_click(move |checked, window, cx| handler(*checked, window, cx)));
+        col().gap(px(2.)).child(boxed).when_some(self.hint, |this, hint| {
+            // Aligned with the label, past the box.
+            this.child(div().pl(m.space_6).fs(m.fs_xs).text_color(c.text_subtle).child(hint))
+        })
     }
 }
 

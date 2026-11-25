@@ -37,6 +37,21 @@ pub fn euros(cents: i64) -> String {
     format!("{sign}{grouped},{:02}\u{a0}€", cents % 100)
 }
 
+/// "1 234,50" or "1234.5" → cents. Empty or unreadable → `None`.
+pub fn euros_to_cents(text: &str) -> Option<i64> {
+    let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).map(|c| if c == ',' { '.' } else { c }).collect();
+    if cleaned.is_empty() {
+        return None;
+    }
+    let value: f64 = cleaned.parse().ok()?;
+    value.is_finite().then(|| (value * 100.).round() as i64)
+}
+
+/// Cents → what goes back into an amount field: `1234.50`, or nothing.
+pub fn cents_to_text(cents: Option<i64>) -> String {
+    cents.map(|c| format!("{:.2}", c as f64 / 100.)).unwrap_or_default()
+}
+
 /// Whole number with thousands separated: `12 500`.
 pub fn integer(value: i64) -> String {
     let text = euros(value.saturating_mul(100));
@@ -112,6 +127,18 @@ mod tests {
         error.details = vec!["Le nom est obligatoire.".into(), "L'email est invalide.".into()];
         assert_eq!(humanize_error(&error, "Erreur"), "Le nom est obligatoire.\nL'email est invalide.");
         assert_eq!(humanize_error(&ApiError::new(0, "x", ""), "Erreur"), "Erreur");
+    }
+
+    #[test]
+    fn amounts_are_read_the_way_they_are_typed_in_france() {
+        assert_eq!(euros_to_cents("1 234,50"), Some(123_450));
+        assert_eq!(euros_to_cents("1234.5"), Some(123_450));
+        assert_eq!(euros_to_cents("0,019"), Some(2));
+        assert_eq!(euros_to_cents(""), None);
+        assert_eq!(euros_to_cents("  "), None);
+        assert_eq!(euros_to_cents("douze"), None);
+        assert_eq!(cents_to_text(Some(123_450)), "1234.50");
+        assert_eq!(cents_to_text(None), "");
     }
 
     #[test]

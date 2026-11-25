@@ -5,6 +5,8 @@
 
 pub mod auth;
 pub mod clients;
+pub mod parc;
+pub mod vehicle;
 
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;

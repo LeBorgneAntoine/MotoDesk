@@ -241,6 +241,62 @@ pub async fn delete_vehicle(api: &Api, vehicle_id: &str) -> ApiResult<()> {
     api.delete(format!("/api/vehicles/{vehicle_id}")).await
 }
 
+// ---- stock vehicles (Parc VN/VO) ------------------------------------------------------------
+
+/// The vehicles for sale, optionally narrowed by VIN, plate or make.
+pub async fn list_stock_vehicles(api: &Api, q: &str) -> ApiResult<Vec<Vehicle>> {
+    let q = q.trim();
+    let search = if q.is_empty() { String::new() } else { format!("&q={}", encode(q)) };
+    api.get(format!("/api/vehicles?is_stock=true{search}")).await
+}
+
+/// Add a vehicle to the stock. It has no owner until it is sold.
+pub async fn create_stock_vehicle(api: &Api, input: &VehicleInput) -> ApiResult<Vehicle> {
+    let input = VehicleInput { is_stock: Some(true), ..input.clone() };
+    api.post("/api/vehicles", &input).await
+}
+
+/// A vehicle the buyer hands over: a negative line on the invoice, and an entry in the stock.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct Reprise {
+    pub make: String,
+    pub model: String,
+    pub vin_or_serial: Option<String>,
+    pub plate_number: Option<String>,
+    pub purchase_price_ht_cents: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct VehicleSellInput {
+    pub client_id: String,
+    pub reprise: Option<Reprise>,
+}
+
+/// The draft invoice a sale created. The Sales screen holds the rest of it.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SaleRef {
+    pub id: String,
+}
+
+/// Sell a stock vehicle: creates a draft invoice for the buyer and returns it.
+pub async fn sell_stock_vehicle(api: &Api, vehicle_id: &str, input: &VehicleSellInput) -> ApiResult<SaleRef> {
+    api.post(format!("/api/vehicles/{vehicle_id}/sell"), input).await
+}
+
+/// VN/VO margin: selling price TTC minus purchase price HT, in cents. `None` when a price is
+/// missing.
+pub fn vehicle_margin_cents(purchase_ht_cents: Option<i64>, selling_ttc_cents: Option<i64>) -> Option<i64> {
+    Some(selling_ttc_cents? - purchase_ht_cents?)
+}
+
+/// Stock prices are TTC; sale lines are HT. `vat_rate_bp` is in basis points (2000 = 20 %).
+pub fn ht_cents_from_ttc(ttc_cents: i64, vat_rate_bp: i64) -> i64 {
+    if vat_rate_bp <= 0 {
+        return ttc_cents;
+    }
+    (ttc_cents * 10_000 + (10_000 + vat_rate_bp) / 2) / (10_000 + vat_rate_bp)
+}
+
 // ---- labels ---------------------------------------------------------------------------------
 
 /// "Jean Dupont", or "Dupont" when there is no first name.
@@ -270,5 +326,18 @@ mod tests {
         assert_eq!(format_client_name(Some("  "), "Dupont"), "Dupont");
         assert_eq!(format_vehicle_label("Honda", "CBR 600", Some(2018)), "Honda CBR 600 (2018)");
         assert_eq!(format_vehicle_label("Honda", "CBR 600", None), "Honda CBR 600");
+    }
+
+    #[test]
+    fn the_margin_is_sell_ttc_minus_buy_ht() {
+        assert_eq!(vehicle_margin_cents(Some(800_000), Some(1_200_000)), Some(400_000));
+        assert_eq!(vehicle_margin_cents(None, Some(1_200_000)), None);
+        assert_eq!(vehicle_margin_cents(Some(100), None), None);
+    }
+
+    #[test]
+    fn vat_is_backed_out_of_a_ttc_price() {
+        assert_eq!(ht_cents_from_ttc(12_000, 2_000), 10_000);
+        assert_eq!(ht_cents_from_ttc(12_000, 0), 12_000);
     }
 }

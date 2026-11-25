@@ -1,6 +1,7 @@
 //! The controls. Same names as the Svelte kit (`desktop/src/lib/components`).
 
 mod button;
+mod combobox;
 mod content;
 mod controls;
 mod data;
@@ -14,6 +15,7 @@ mod text_field;
 mod tooltip;
 
 pub use button::{Button, ButtonSize, ButtonVariant};
+pub use combobox::{ComboModel, ComboOption, Combobox};
 pub use content::{Alert, Divider, Heading, HeadingSize, Spinner, StateKind, StateView, Status, Tag, Tone};
 pub use controls::{
     Checkbox, FormField, IconButton, IconButtonSize, SearchField, Select, SelectModel, SelectOption, Switch, TabItem,

@@ -1,6 +1,8 @@
 //! The typed calls, against the real handlers: a contract that drifts on either side fails here.
 
-use motodesk_client::clients::{self, ClientInput, ListQuery, OdometerUnit, VehicleInput, VehicleType};
+use motodesk_client::clients::{
+    self, ClientInput, ListQuery, OdometerUnit, Reprise, VehicleInput, VehicleSellInput, VehicleType,
+};
 use motodesk_client::{local_account, settings, sync, Client, Cloud, Local, TokenStore};
 use motodesk_server::local_server::{loopback_api, test_support};
 
@@ -112,4 +114,58 @@ async fn settings_and_sync_status_answer_in_the_shapes_the_interface_reads() {
 
     let status = sync::status(&api).await.unwrap();
     assert!(!status.device_id.is_empty());
+}
+
+#[tokio::test]
+async fn a_stock_vehicle_is_listed_then_sold_with_a_trade_in() {
+    let api = client().await;
+
+    let bike = clients::create_stock_vehicle(
+        &api,
+        &VehicleInput {
+            vehicle_type: VehicleType::Moto,
+            make: "Yamaha".into(),
+            model: "MT-07".into(),
+            vin_or_serial: Some("JYARM321000012345".into()),
+            purchase_price_ht_cents: Some(500_000),
+            selling_price_ttc_cents: Some(720_000),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(bike.is_stock && bike.client_id.is_none());
+
+    let stock = clients::list_stock_vehicles(&api, "").await.unwrap();
+    assert_eq!(stock.len(), 1);
+    assert_eq!(clients::list_stock_vehicles(&api, "jyarm321").await.unwrap().len(), 1);
+    assert!(clients::list_stock_vehicles(&api, "ducati").await.unwrap().is_empty());
+    assert_eq!(
+        clients::vehicle_margin_cents(stock[0].purchase_price_ht_cents, stock[0].selling_price_ttc_cents),
+        Some(220_000)
+    );
+
+    let buyer =
+        clients::create(&api, &ClientInput { last_name: "Kervella".into(), ..Default::default() }).await.unwrap();
+    let sale = clients::sell_stock_vehicle(
+        &api,
+        &bike.id,
+        &VehicleSellInput {
+            client_id: buyer.id.clone(),
+            reprise: Some(Reprise {
+                make: "Honda".into(),
+                model: "CB 125".into(),
+                purchase_price_ht_cents: 90_000,
+                ..Default::default()
+            }),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!sale.id.is_empty());
+
+    // The trade-in entered the stock.
+    let stock = clients::list_stock_vehicles(&api, "CB 125").await.unwrap();
+    assert_eq!(stock.len(), 1);
+    assert_eq!(stock[0].purchase_price_ht_cents, Some(90_000));
 }

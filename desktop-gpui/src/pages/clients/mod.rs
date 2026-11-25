@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use motodesk_client::clients::{
-    self, ClientDetail, ClientListItem, ListQuery, Vehicle, VehicleType, format_client_name, format_vehicle_label,
+    self, ClientDetail, ClientListItem, ListQuery, Vehicle, format_client_name, format_vehicle_label,
 };
 use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
@@ -20,7 +20,8 @@ use motodesk_ui::*;
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
 use crate::router::Router;
-use forms::{ClientForm, VehicleForm};
+use crate::pages::vehicle::{self, VehicleForm, VehicleFormHost, vehicle_icon, vehicle_meta};
+use forms::ClientForm;
 
 const PAGE_SIZE: usize = 50;
 /// How long the list waits after the last keystroke before searching.
@@ -60,7 +61,7 @@ pub struct ClientsPage {
 
     vehicle_mode: Mode,
     vehicle: Option<Vehicle>,
-    pub(self) vehicle_form: Option<VehicleForm>,
+    vehicle_form: Option<VehicleForm>,
     vehicle_saving: bool,
     vehicle_save_error: Option<SharedString>,
 
@@ -436,30 +437,16 @@ impl ClientsPage {
         cx.notify();
     }
 
-    pub(self) fn vehicle_form_changed(&mut self, cx: &mut Context<Self>) {
-        let Some(form) = self.vehicle_form.as_mut() else { return };
-        let input = form.input(cx);
-        form.make_missing &= input.make.is_empty();
-        form.model_missing &= input.model.is_empty();
-        let dirty = form.is_dirty(cx);
-        if let Some(id) = self.vehicle_layer(cx) {
-            self.update_panels(cx, |stack| stack.set_dirty(&id, dirty));
-        }
-        cx.notify();
-    }
-
-    pub(self) fn submit_vehicle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn save_vehicle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.vehicle_saving {
             return;
         }
         let Some(owner) = self.detail.as_ref().map(|d| d.client.id.clone()) else { return };
         let Some(form) = self.vehicle_form.as_mut() else { return };
-        let input = form.input(cx);
-        form.make_missing = input.make.is_empty();
-        form.model_missing = input.model.is_empty();
-        if form.make_missing || form.model_missing {
+        if !form.validate(cx) {
             return cx.notify();
         }
+        let input = form.input(cx);
         let editing = (self.vehicle_mode == Mode::Edit).then(|| self.vehicle.as_ref().map(|v| v.id.clone())).flatten();
         self.vehicle_saving = true;
         self.vehicle_save_error = None;
@@ -762,7 +749,7 @@ impl ClientsPage {
                         .primary()
                         .loading(self.vehicle_saving)
                         .label(if creating { "Ajouter le véhicule" } else { "Enregistrer" })
-                        .on_click(cx.listener(|this, _, window, cx| this.submit_vehicle(window, cx))),
+                        .on_click(cx.listener(|this, _, window, cx| this.save_vehicle(window, cx))),
                 );
         }
 
@@ -770,18 +757,8 @@ impl ClientsPage {
         if vehicle.is_stock {
             panel = panel.badge("Stock", Status::Accent);
         }
-        let identity = InfoList::new(vec![
-            InfoItem::new("Type", Some(vehicle.vehicle_type.label())),
-            InfoItem::new("Plaque", vehicle.plate_number.clone()).mono(),
-            InfoItem::new("Année", vehicle.year.map(|y| y.to_string())),
-            InfoItem::new("Cylindrée", vehicle.cylinder_capacity.filter(|c| *c > 0).map(|c| format!("{c} cm³"))),
-            InfoItem::new("VIN / série", vehicle.vin_or_serial.clone()).mono(),
-            InfoItem::new("Compteur", Some(format!("{} {}", format::integer(vehicle.odometer_value), vehicle.odometer_unit.label()))),
-            InfoItem::new("Ajouté le", Some(format::date(&vehicle.created_at))),
-        ]);
         let to_delete = vehicle.clone();
-
-        panel
+        let panel = panel
             .action(IconButton::new("vehicle-edit", IconName::Pencil).title("Modifier le véhicule").size(IconButtonSize::Md).on_click(
                 cx.listener(|this, _, window, cx| this.start_edit_vehicle(window, cx)),
             ))
@@ -789,22 +766,9 @@ impl ClientsPage {
                 IconButton::new("vehicle-delete", IconName::Trash).title("Supprimer le véhicule").size(IconButtonSize::Md).danger().on_click(
                     cx.listener(move |this, _, window, cx| this.ask_delete_vehicle(&to_delete, window, cx)),
                 ),
-            )
-            .child(PanelSection::new("Identification").icon(IconName::IdCard).child(identity))
-            .when(vehicle.is_stock, |panel| {
-                panel.child(PanelSection::new("Commercial").icon(IconName::Banknote).child(InfoList::new(vec![
-                    InfoItem::new("Prix d'achat HT", vehicle.purchase_price_ht_cents.map(format::euros)),
-                    InfoItem::new("Prix de vente TTC", vehicle.selling_price_ttc_cents.map(format::euros)),
-                ])))
-            })
-            .when_some(vehicle.notes.clone().filter(|n| !n.trim().is_empty()), |panel, notes| {
-                panel.child(PanelSection::new("Notes").icon(IconName::StickyNote).child(InfoList::new(vec![
-                    InfoItem::new("Notes", Some(notes)).block(),
-                ])))
-            })
-            .when(vehicle.client_id.is_none(), |panel| {
-                panel.child(row().child(Tag::new("Sans propriétaire").status(Status::Warning).icon(IconName::CircleAlert).medium()))
-            })
+            );
+
+        vehicle::sections(panel, vehicle)
             .footer(Button::new("vehicle-close").ghost().label("Fermer").on_click(move |_, window, cx| request_close(&stack, window, cx)))
             .footer(Button::new("vehicle-modify").primary().icon(IconName::Pencil).label("Modifier").on_click(
                 cx.listener(|this, _, window, cx| this.start_edit_vehicle(window, cx)),
@@ -812,25 +776,24 @@ impl ClientsPage {
     }
 }
 
-fn vehicle_icon(kind: VehicleType) -> IconName {
-    match kind {
-        VehicleType::Bicycle => IconName::Bike,
-        VehicleType::Electric => IconName::Zap,
-        VehicleType::Moto => IconName::Wrench,
+impl VehicleFormHost for ClientsPage {
+    fn vehicle_form_mut(&mut self) -> Option<&mut VehicleForm> {
+        self.vehicle_form.as_mut()
     }
-}
 
-/// "Moto · AB-123-CD · 12 500 km", and the price of a vehicle for sale.
-fn vehicle_meta(vehicle: &Vehicle) -> String {
-    let mut bits = vec![vehicle.vehicle_type.label().to_string()];
-    if let Some(plate) = vehicle.plate_number.as_ref().filter(|p| !p.is_empty()) {
-        bits.push(plate.clone());
+    fn vehicle_form_changed(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = self.vehicle_form.as_mut() else { return };
+        form.recheck(cx);
+        let dirty = form.is_dirty(cx);
+        if let Some(id) = self.vehicle_layer(cx) {
+            self.update_panels(cx, |stack| stack.set_dirty(&id, dirty));
+        }
+        cx.notify();
     }
-    bits.push(format!("{} {}", format::integer(vehicle.odometer_value), vehicle.odometer_unit.label()));
-    if let (true, Some(price)) = (vehicle.is_stock, vehicle.selling_price_ttc_cents) {
-        bits.push(format::euros(price));
+
+    fn submit_vehicle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_vehicle(window, cx);
     }
-    bits.join(" · ")
 }
 
 fn row_name(client: &ClientListItem, square: Hsla, ink: Hsla, gap: Pixels, size: Pixels) -> AnyElement {

@@ -14,6 +14,7 @@ use crate::appearance;
 use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::pages::clients::ClientsPage;
+use crate::pages::parc::ParcPage;
 use crate::pages::not_migrated;
 use crate::router::{self, Router};
 
@@ -39,6 +40,7 @@ const MODULES: [(&str, &str, IconName, bool); 13] = [
 
 pub struct Shell {
     clients: Option<Entity<ClientsPage>>,
+    parc: Option<Entity<ParcPage>>,
     sync: Option<SyncStatus>,
     _subscriptions: Vec<Subscription>,
 }
@@ -72,7 +74,7 @@ impl Shell {
                 });
             },
         );
-        Self { clients: None, sync: None, _subscriptions: subscriptions }
+        Self { clients: None, parc: None, sync: None, _subscriptions: subscriptions }
     }
 
     fn refresh_sync(&mut self, cx: &mut Context<Self>) {
@@ -147,9 +149,21 @@ impl Render for Shell {
             .map(|(id, label, icon, _)| SidebarItem::new(*id, *label, *icon))
             .collect();
 
+        // A screen left is a screen closed: coming back starts it afresh, panels included.
+        if current.as_ref() != router::CLIENTS {
+            self.clients = None;
+        }
+        if current.as_ref() != router::PARC {
+            self.parc = None;
+        }
+
         let screen: AnyElement = match current.as_ref() {
             router::CLIENTS => {
                 let page = self.clients.get_or_insert_with(|| cx.new(|cx| ClientsPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::PARC => {
+                let page = self.parc.get_or_insert_with(|| cx.new(|cx| ParcPage::new(window, cx))).clone();
                 page.into_any_element()
             }
             _ => not_migrated(title, cx).into_any_element(),
