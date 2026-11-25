@@ -42,6 +42,7 @@ use uuid::Uuid;
 use crate::local_server::error::{LocalError, LocalResult};
 use crate::local_server::local_accounts::{self, Account, Joined};
 use crate::local_server::mesh::PeerInfo;
+use crate::local_server::network_devices::{self, Device};
 use crate::local_server::state::SharedState;
 
 const SESSION_TTL: Duration = Duration::from_secs(30);
@@ -50,7 +51,7 @@ const LOCK_AFTER_FAILURES: u32 = 5;
 const LOCK_WINDOW: Duration = Duration::from_secs(60);
 const WRONG_PROOF_DELAY: Duration = Duration::from_millis(400);
 const PER_PEER_TIMEOUT: Duration = Duration::from_secs(6);
-const MAX_CANDIDATES: usize = 8;
+pub(crate) const MAX_CANDIDATES: usize = 8;
 
 // ---- Wire format ----------------------------------------------------------------------------
 
@@ -87,14 +88,18 @@ pub struct JoinFinishReply {
 
 /// What the PC that is joined hands over, sealed.
 #[derive(Debug, Serialize, Deserialize)]
-struct JoinPackage {
-    company_id: Uuid,
-    mesh_secret: String,
+pub(crate) struct JoinPackage {
+    pub(crate) company_id: Uuid,
+    pub(crate) mesh_secret: String,
     company_name: Option<String>,
     legal_name: Option<String>,
-    accounts: Vec<Account>,
+    pub(crate) accounts: Vec<Account>,
     #[serde(default)]
-    recovery: Option<crate::local_server::recovery_key::Stored>,
+    pub(crate) recovery: Option<crate::local_server::recovery_key::Stored>,
+    #[serde(default)]
+    pub(crate) key_epoch: i64,
+    #[serde(default)]
+    pub(crate) devices: Vec<Device>,
 }
 
 fn unhex(s: &str) -> LocalResult<Vec<u8>> {
@@ -292,6 +297,8 @@ pub async fn finish(state: &SharedState, req: JoinFinish) -> LocalResult<JoinFin
         legal_name,
         accounts: local_accounts::all_accounts(&state.db).await?,
         recovery: crate::local_server::recovery_key::stored(&state.db).await?,
+        key_epoch: network_devices::key_epoch(&state.db).await?,
+        devices: network_devices::all(&state.db).await?,
     };
     tracing::info!(username = %account.username, "a PC joined the network");
     let plain = serde_json::to_vec(&package).map_err(|e| LocalError::Internal(e.into()))?;
@@ -305,7 +312,7 @@ pub async fn finish(state: &SharedState, req: JoinFinish) -> LocalResult<JoinFin
 
 /// Why one PC could not be joined.
 #[derive(Debug)]
-enum Attempt {
+pub(crate) enum Attempt {
     /// Did not answer.
     Unreachable,
     /// Answered, but is not a PC of a network (or not one that can be joined).
@@ -328,7 +335,7 @@ fn base_url(peer: &PeerInfo) -> String {
     format!("http://{host}:{}", peer.port)
 }
 
-async fn join_via(
+pub(crate) async fn join_via(
     state: &SharedState,
     peer: &PeerInfo,
     username: &str,
@@ -396,6 +403,38 @@ async fn join_via(
     serde_json::from_slice(&plain).map_err(|_| Attempt::Protocol)
 }
 
+/// Why no PC let this one in.
+#[derive(Default)]
+pub(crate) struct Refusals {
+    wrong_password: bool,
+    locked: bool,
+    not_admin: bool,
+}
+
+impl Refusals {
+    pub(crate) fn note(&mut self, why: Attempt) {
+        match why {
+            Attempt::BadCredentials => self.wrong_password = true,
+            Attempt::NotAnAdmin => self.not_admin = true,
+            Attempt::Locked => self.locked = true,
+            other => tracing::debug!(why = ?other, "join attempt did not work"),
+        }
+    }
+
+    pub(crate) fn into_error(self) -> LocalError {
+        // A PC that took the password says more than one still holding an older one.
+        if self.not_admin {
+            LocalError::AdminRequiredToJoin
+        } else if self.wrong_password {
+            LocalError::InvalidCredentials
+        } else if self.locked {
+            LocalError::TooManyAttempts
+        } else {
+            LocalError::NoNetwork
+        }
+    }
+}
+
 /// Join the network of one of `candidates` with an account's username and password, and sign in.
 /// Tries each PC until one lets this PC in.
 pub async fn join_network(
@@ -404,9 +443,7 @@ pub async fn join_network(
     password: &str,
     candidates: &[PeerInfo],
 ) -> LocalResult<serde_json::Value> {
-    let mut wrong_password = false;
-    let mut locked = false;
-    let mut not_admin = false;
+    let mut refusals = Refusals::default();
     for peer in candidates.iter().take(MAX_CANDIDATES) {
         match join_via(state, peer, username, password).await {
             Ok(package) => {
@@ -417,30 +454,20 @@ pub async fn join_network(
                     legal_name: package.legal_name,
                     accounts: package.accounts,
                     recovery: package.recovery,
+                    key_epoch: package.key_epoch,
+                    devices: package.devices,
                 };
                 let bundle = local_accounts::adopt_network(state, username, joined).await?;
+                network_devices::touch_self(state).await?;
                 // The PC that let us in is a peer from now on, and has the data to give.
                 crate::local_server::mesh::adopt_peer(state, peer.clone()).await;
                 crate::local_server::mesh::catchup::request(state);
                 return Ok(bundle);
             }
-            Err(Attempt::BadCredentials) => wrong_password = true,
-            Err(Attempt::NotAnAdmin) => not_admin = true,
-            Err(Attempt::Locked) => locked = true,
-            Err(other) => tracing::debug!(peer = %peer.host, why = ?other, "join attempt did not work"),
+            Err(why) => refusals.note(why),
         }
     }
-    // A PC that took the password says more than one still holding an older one.
-    if not_admin {
-        return Err(LocalError::AdminRequiredToJoin);
-    }
-    if wrong_password {
-        return Err(LocalError::InvalidCredentials);
-    }
-    if locked {
-        return Err(LocalError::TooManyAttempts);
-    }
-    Err(LocalError::NoNetwork)
+    Err(refusals.into_error())
 }
 
 #[cfg(test)]

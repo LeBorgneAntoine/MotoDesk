@@ -27,7 +27,7 @@ use crate::local_server::local_accounts::{self, Account};
 use crate::local_server::mesh::{self, PeerInfo};
 use crate::local_server::mesh::transport::{self, Kind};
 use crate::local_server::state::SharedState;
-use crate::local_server::recovery_key;
+use crate::local_server::{network_devices, recovery_key};
 use crate::local_server::sync_log::{self, Gaps};
 
 const BATCH: i64 = 500;
@@ -140,11 +140,17 @@ pub async fn exchange_accounts(state: &SharedState, peer: &PeerInfo) -> LocalRes
     fields.insert("accounts".into(), serde_json::to_value(&mine).map_err(|e| LocalError::Internal(e.into()))?);
     let recovery = recovery_key::stored(&state.db).await?;
     fields.insert("recovery".into(), serde_json::to_value(&recovery).map_err(|e| LocalError::Internal(e.into()))?);
+    network_devices::touch_self(state).await?;
+    let devices = network_devices::all(&state.db).await?;
+    fields.insert("devices".into(), serde_json::to_value(&devices).map_err(|e| LocalError::Internal(e.into()))?);
     let reply = open_reply(&secret, post(state, peer, "/mesh/accounts", seal_request(&secret, fields)).await?)?;
     let theirs: Vec<Account> = serde_json::from_value(reply.get("accounts").cloned().unwrap_or(Value::Null))
         .map_err(|e| LocalError::Internal(e.into()))?;
     let theirs_recovery = reply.get("recovery").and_then(|v| serde_json::from_value(v.clone()).ok());
     recovery_key::merge(&state.db, theirs_recovery).await?;
+    if let Some(devices) = reply.get("devices").and_then(|v| serde_json::from_value(v.clone()).ok()) {
+        network_devices::merge(&state.db, devices).await?;
+    }
     local_accounts::merge_accounts(&state.db, theirs).await
 }
 

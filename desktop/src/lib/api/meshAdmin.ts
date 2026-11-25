@@ -39,6 +39,10 @@ export interface MeshStatus {
   peer_count: number;
   /** PCs of the shop seen running another version: they cannot exchange with this one. */
   other_version_count: number;
+  /** This PC holds an old network key, or none: it has to be reconnected. */
+  needs_reconnect: boolean;
+  /** PCs seen still holding an older key. */
+  behind_count: number;
 }
 
 export function getMeshStatus(): Promise<MeshStatus> {

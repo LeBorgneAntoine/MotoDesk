@@ -32,6 +32,7 @@
   } from "$lib/api/networkAccounts";
   import { validateNewLocalAccount } from "$lib/api/localAccount";
   import RecoveryCard from "./RecoveryCard.svelte";
+  import NetworkDevices from "./NetworkDevices.svelte";
 
   const ROLES = [
     { value: "employee", label: "Employé" },
@@ -225,8 +226,10 @@
 
     <Alert variant="info">
       Désactiver ou supprimer un compte l'empêche de se connecter. Un poste qui a déjà rejoint le
-      réseau garde néanmoins une copie des données : changez de réseau si un poste est perdu ou volé.
+      réseau garde néanmoins une copie des données : retirez-le ci-dessous s'il est perdu ou volé.
     </Alert>
+
+    <NetworkDevices />
   {/if}
 </div>
 

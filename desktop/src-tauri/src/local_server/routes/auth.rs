@@ -23,6 +23,7 @@ pub fn router() -> Router<SharedState> {
         .route("/local/login", post(local_login))
         .route("/local/recover", post(local_recover))
         .route("/local/restore", post(local_restore))
+        .route("/local/reconnect", post(local_reconnect))
         .route("/promote", post(promote))
 }
 
@@ -267,6 +268,16 @@ async fn local_recover(
     Json(input): Json<crate::local_server::recovery_key::Recover>,
 ) -> LocalResult<Json<serde_json::Value>> {
     crate::local_server::recovery_key::recover(&state, input).await.map(Json)
+}
+
+/// A PC left with an old network key: an administrator's password gets it the current one.
+async fn local_reconnect(
+    State(state): State<SharedState>,
+    Json(input): Json<LocalLoginInput>,
+) -> LocalResult<StatusCode> {
+    let candidates = crate::local_server::mesh::join_candidates(&state).await;
+    crate::local_server::network_devices::reconnect(&state, &input.username, &input.password, &candidates).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]

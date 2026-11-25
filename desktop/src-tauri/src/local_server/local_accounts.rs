@@ -219,7 +219,7 @@ async fn insert_account<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
 
 /// Write an account over the one with its id, in a single statement: if it cannot be written
 /// (its username is taken), the account that was there is still there.
-async fn save_account<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+pub(crate) async fn save_account<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
     executor: E,
     a: &Account,
 ) -> LocalResult<()> {
@@ -311,7 +311,7 @@ pub async fn merge_accounts(db: &SqlitePool, incoming: Vec<Account>) -> LocalRes
     Ok(changed)
 }
 
-async fn merge_into(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, incoming: Vec<Account>) -> LocalResult<usize> {
+pub(crate) async fn merge_into(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, incoming: Vec<Account>) -> LocalResult<usize> {
     let mut changed = 0;
     for a in incoming {
         if !plausible(&a) {
@@ -454,6 +454,8 @@ pub struct Joined {
     pub legal_name: Option<String>,
     pub accounts: Vec<Account>,
     pub recovery: Option<crate::local_server::recovery_key::Stored>,
+    pub key_epoch: i64,
+    pub devices: Vec<crate::local_server::network_devices::Device>,
 }
 
 /// Become a member of an existing network: adopt its company, its mesh secret and its accounts,
@@ -469,9 +471,12 @@ pub async fn adopt_network(state: &SharedState, username: &str, joined: Joined) 
     if accounts > 0 || !company.unwrap_or_default().is_empty() {
         return Err(LocalError::Conflict("Ce poste est déjà configuré : connectez-vous.".into()));
     }
-    sqlx::query("UPDATE sync_state SET company_id = $1, standalone = 1, mesh_secret = $2 WHERE id = 1")
+    sqlx::query(
+        "UPDATE sync_state SET company_id = $1, standalone = 1, mesh_secret = $2, key_epoch = $3 WHERE id = 1",
+    )
         .bind(joined.company_id.to_string())
         .bind(&joined.mesh_secret)
+        .bind(joined.key_epoch.max(1))
         .execute(&mut *tx)
         .await?;
     sqlx::query(
@@ -489,6 +494,7 @@ pub async fn adopt_network(state: &SharedState, username: &str, joined: Joined) 
     .await?;
     merge_into(&mut tx, joined.accounts).await?;
     crate::local_server::recovery_key::merge_into(&mut tx, joined.recovery).await?;
+    crate::local_server::network_devices::merge_into(&mut tx, joined.devices).await?;
     let active: Vec<Account> = live_accounts(&mut *tx).await?.into_iter().filter(|a| a.is_active).collect();
     // Leaving here drops the transaction: the PC stays as it was, free to try again.
     let account = pick(&active, username)
@@ -816,16 +822,8 @@ pub async fn update_account(
 
     account.updated_at = later_than(&account.updated_at);
     store(state, &account).await?;
-    // Changing one's own password must not sign one out of the PC it was changed on.
     if id == actor_id && patch.password.is_some() {
-        sqlx::query(
-            "UPDATE cached_session SET tokens_json = $1
-              WHERE id = 1 AND json_extract(user_json, '$.id') = $2",
-        )
-        .bind(json!({ "credential": credential_mark(&account) }).to_string())
-        .bind(id)
-        .execute(&state.db)
-        .await?;
+        keep_own_session(&state.db, &account).await?;
     }
     Ok((&account).into())
 }
@@ -869,6 +867,34 @@ pub async fn check_current_password(db: &SqlitePool, user_id: &str, password: &s
         tokio::time::sleep(FAILED_LOGIN_DELAY).await;
         return Err(LocalError::BadRequest("Mot de passe incorrect.".into()));
     }
+    Ok(())
+}
+
+/// An account as it would be with a new password, not yet saved.
+pub async fn with_new_password(db: &SqlitePool, id: &str, password: &str) -> LocalResult<Account> {
+    let mut account = live_accounts(db)
+        .await?
+        .into_iter()
+        .find(|a| a.id == id)
+        .ok_or(LocalError::NotFound)?;
+    let fresh = new_account(&account.username, password, &account.role, None).await?;
+    account.password_hash = fresh.password_hash;
+    account.kdf_salt = fresh.kdf_salt;
+    account.srp_verifier = fresh.srp_verifier;
+    account.updated_at = later_than(&account.updated_at);
+    Ok(account)
+}
+
+/// Changing one's own password must not sign one out of the PC it was changed on.
+pub async fn keep_own_session(db: &SqlitePool, account: &Account) -> LocalResult<()> {
+    sqlx::query(
+        "UPDATE cached_session SET tokens_json = $1
+          WHERE id = 1 AND json_extract(user_json, '$.id') = $2",
+    )
+    .bind(json!({ "credential": credential_mark(account) }).to_string())
+    .bind(&account.id)
+    .execute(db)
+    .await?;
     Ok(())
 }
 
@@ -1286,6 +1312,8 @@ mod tests {
             legal_name: None,
             accounts: vec![lea],
             recovery: None,
+            key_epoch: 1,
+            devices: Vec::new(),
         };
         assert!(adopt_network(&state, "personne", joined).await.is_err());
         assert!(status(&state.db).await.unwrap().can_setup);

@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::local_server::error::{LocalError, LocalResult};
 use crate::local_server::mesh;
 use crate::local_server::mesh::transport::{self, Kind};
+use crate::local_server::network_devices;
 use crate::local_server::state::SharedState;
 
 /// LAN-facing routes: no local token. All but joining are sealed with the network secret
@@ -122,7 +123,14 @@ async fn accounts(
     let theirs = fields.get("recovery").and_then(|v| serde_json::from_value(v.clone()).ok());
     crate::local_server::recovery_key::merge(&state.db, theirs).await?;
     let recovery = crate::local_server::recovery_key::stored(&state.db).await?;
+    // So does the list of PCs.
+    network_devices::touch_self(&state).await?;
+    if let Some(theirs) = fields.get("devices").and_then(|v| serde_json::from_value(v.clone()).ok()) {
+        network_devices::merge(&state.db, theirs).await?;
+    }
+    let devices = network_devices::all(&state.db).await?;
     let mut out = serde_json::Map::new();
+    out.insert("devices".into(), serde_json::to_value(&devices).map_err(|e| LocalError::Internal(e.into()))?);
     out.insert("recovery".into(), serde_json::to_value(&recovery).map_err(|e| LocalError::Internal(e.into()))?);
     out.insert("accounts".into(), serde_json::to_value(&all).map_err(|e| LocalError::Internal(e.into()))?);
     sealed_reply(&state, out).await
@@ -192,6 +200,8 @@ async fn status(State(state): State<SharedState>) -> LocalResult<Json<serde_json
         "peer_count": peers.len(),
         "peers": peers.clone(),
         "other_version_count": mesh::other_version_count().await,
+        "needs_reconnect": mesh::needs_reconnect(&state).await,
+        "behind_count": mesh::behind_count(&state).await,
     })))
 }
 

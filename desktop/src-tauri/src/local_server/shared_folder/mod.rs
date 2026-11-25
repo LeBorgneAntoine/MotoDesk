@@ -68,6 +68,36 @@ async fn shop_key(state: &SharedState) -> LocalResult<ShopKey> {
     })
 }
 
+/// Wrap every file key under the key of a new network secret. The files themselves are not
+/// touched. A key that does not open under the old secret is left as it is.
+pub async fn rewrap_keys(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    old_secret: &str,
+    new_secret: &str,
+) -> LocalResult<usize> {
+    let derive = |secret: &str| {
+        ShopKey::from_network_secret(secret).map_err(|e| LocalError::Internal(anyhow::anyhow!("shop key: {e}")))
+    };
+    let (old, new) = (derive(old_secret)?, derive(new_secret)?);
+    let rows: Vec<(String, String, Vec<u8>)> =
+        sqlx::query_as("SELECT id, content_id, wrapped_key FROM shared_files")
+            .fetch_all(&mut **tx)
+            .await?;
+    let mut done = 0;
+    for (id, content_id, wrapped) in rows {
+        let Ok(file_key) = crypto::unwrap_file_key(&old, &content_id, &wrapped) else {
+            continue;
+        };
+        sqlx::query("UPDATE shared_files SET wrapped_key = $2 WHERE id = $1")
+            .bind(id)
+            .bind(crypto::wrap_file_key(&new, &content_id, &file_key))
+            .execute(&mut **tx)
+            .await?;
+        done += 1;
+    }
+    Ok(done)
+}
+
 /// Whether the shared folder can be used on this PC right now.
 pub async fn available(state: &SharedState) -> bool {
     shop_key(state).await.is_ok()

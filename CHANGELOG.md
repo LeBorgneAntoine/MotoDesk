@@ -6,6 +6,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 ## [Non publié]
 
 ### Ajouté
+- Réseau local : liste des postes et « Retirer ce poste » pour un poste perdu ou volé. La clé du réseau change, l'administrateur choisit un nouveau mot de passe, et chaque autre poste est reconnecté par un administrateur (ses données sont conservées). Un poste qui a perdu sa clé se reconnecte de la même façon.
 - Sur un poste neuf, « Restaurer une sauvegarde » dès l'écran d'accès, sans créer d'abord un réseau.
 - Réseau local : une clé de récupération est donnée à la création du réseau. Elle permet, depuis « Mot de passe perdu ? », de redonner l'accès à un compte ; elle est remplacée après usage et peut être renouvelée par un administrateur.
 - Mises à jour : un bandeau « Nouvelle version disponible » (administrateurs) avec les notes de la version, installation en un clic, recherche manuelle ou automatique dans Réglages › Sauvegardes. Les installateurs sont signés ; l'application refuse tout installateur dont la signature ne correspond pas à sa clé publique. Voir `docs/mises-a-jour.md`.
