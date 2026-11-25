@@ -377,6 +377,12 @@ impl UiTheme {
             kit.mono_font_family = SharedString::new_static(FONT_MONO);
             kit.mono_font_size = m.fs_sm;
 
+            // Toasts sit bottom-left, clear of the rail and the status bar: top-right is where
+            // a page keeps its search box and its buttons.
+            kit.notification.placement = gpui_kit::Anchor::BottomLeft;
+            kit.notification.margins.left = m.sidebar_w_collapsed + m.space_4;
+            kit.notification.margins.bottom = m.statusbar_h + m.space_4;
+
             let k = &mut kit.colors;
             k.background = c.bg_surface;
             k.foreground = c.text;

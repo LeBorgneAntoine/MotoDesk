@@ -202,7 +202,10 @@ Publier une version aux installations existantes (installateur signé, notes de 
 │  ├─ motodesk-fiscal/       journal chaîné et signé, numérotation, moteur de TVA, clôtures
 │  ├─ motodesk-sync/         application des changements et fusion champ par champ
 │  ├─ motodesk-db/           accès partagé au journal de changements
-│  └─ motodesk-server/       service de données embarqué : API locale, SQLite, migrations, journal fiscal, synchronisation
+│  ├─ motodesk-server/       service de données embarqué : API locale, SQLite, migrations, journal fiscal, synchronisation
+│  ├─ motodesk-client/       accès typé à l'API locale pour l'interface native
+│  └─ motodesk-ui/           kit d'interface natif (GPUI) : jetons, thèmes, composants, galerie
+├─ desktop-gpui/             interface native en cours de migration (voir docs/migration/GPUI.md)
 ├─ desktop/
 │  ├─ src/                   interface Svelte 5 (routes, composants, système de design)
 │  └─ src-tauri/             coquille Tauri : fenêtre, zone de notification, mises à jour, outils
@@ -226,6 +229,7 @@ Le serveur cloud n'est pas dans ce dépôt : c'est un projet séparé qui réuti
 | Mises à jour (signature, publication, clé) | [`docs/mises-a-jour.md`](docs/mises-a-jour.md) |
 | Bascule depuis un ancien logiciel, nouveau poste | [`docs/migration/CUTOVER.md`](docs/migration/CUTOVER.md) |
 | Réparation d'une clé de signature | [`docs/KEY-REPAIR.md`](docs/KEY-REPAIR.md) |
+| Migration de l'interface vers GPUI (état, règles du kit, méthode) | [`docs/migration/GPUI.md`](docs/migration/GPUI.md) |
 
 ## Contribuer
 

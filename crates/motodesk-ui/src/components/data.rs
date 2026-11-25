@@ -395,6 +395,7 @@ fn relative_label() -> gpui_kit::DefiniteLength {
 // ---- ListRow --------------------------------------------------------------------------------
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type PageHandler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 /// A row of a simple list: an icon or initials, a title, a line of detail, a count, and
 /// actions that appear at the end.
@@ -565,7 +566,7 @@ pub struct Pagination {
     total: usize,
     noun: SharedString,
     disabled: bool,
-    on_page: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
+    on_page: Option<PageHandler>,
 }
 
 impl Pagination {

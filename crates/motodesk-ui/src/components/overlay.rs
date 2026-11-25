@@ -80,11 +80,12 @@ pub struct Modal {
     title: SharedString,
     width: Pixels,
     close_on_overlay: bool,
+    locked: bool,
 }
 
 impl Modal {
     pub fn new(title: impl Into<SharedString>) -> Self {
-        Self { title: title.into(), width: px(480.), close_on_overlay: true }
+        Self { title: title.into(), width: px(480.), close_on_overlay: true, locked: false }
     }
 
     pub fn width(mut self, width: Pixels) -> Self {
@@ -98,6 +99,14 @@ impl Modal {
         self
     }
 
+    /// No cross, no Escape, no click outside: it closes only when the code closes it. For the
+    /// rare step that must not be skipped.
+    pub fn locked(mut self) -> Self {
+        self.locked = true;
+        self.close_on_overlay = false;
+        self
+    }
+
     /// Show it. `body` and `footer` are drawn each frame, so they can read live state; the
     /// footer holds the buttons, right-aligned.
     pub fn open(
@@ -107,7 +116,7 @@ impl Modal {
         body: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
         footer: impl Fn(&mut Window, &mut App) -> Vec<AnyElement> + 'static,
     ) {
-        let Self { title, width, close_on_overlay } = self;
+        let Self { title, width, close_on_overlay, locked } = self;
         window.open_dialog(cx, move |dialog, window, cx| {
             let m = cx.ui().m;
             let buttons = footer(window, cx);
@@ -115,6 +124,8 @@ impl Modal {
                 .title(title.clone())
                 .width(width)
                 .overlay_closable(close_on_overlay)
+                .close_button(!locked)
+                .keyboard(!locked)
                 .child(col().gap(m.space_4).fs(m.fs_md).child(body(window, cx)))
                 .footer(div().flex().justify_end().gap(m.space_2).children(buttons))
         });

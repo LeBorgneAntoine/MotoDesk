@@ -5549,7 +5549,15 @@ dependencies = [
 name = "motodesk-gpui"
 version = "0.1.0"
 dependencies = [
- "gpui-kit",
+ "anyhow",
+ "chrono",
+ "hex",
+ "motodesk-client",
+ "motodesk-server",
+ "motodesk-ui",
+ "rand 0.8.8",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
