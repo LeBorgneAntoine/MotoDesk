@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, comptes, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, comptes, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -19,12 +19,14 @@ sont pas passés.
 |---|---|
 | Connexion et inscription (en ligne et réseau local), clé de récupération | migré |
 | Clients & Véhicules | migré |
-| Tableau de bord, Atelier, Parc, Inventaire, Ventes, Comptabilité, Modèles, Dossier partagé, Employés, Données, Paramètres, Assistant, Caisse | à faire |
+| Parc VN/VO (liste, fiche, vente avec reprise) | migré |
+| Tableau de bord, Atelier, Inventaire, Ventes, Comptabilité, Modèles, Dossier partagé, Employés, Données, Paramètres, Assistant, Caisse | à faire |
 
 Non repris pour l'instant sur les écrans migrés : « Mot de passe perdu ? » et « Restaurer une
 sauvegarde » sur la page de connexion, l'impression de la clé de récupération, les ventes et
 ordres d'atelier dans la fiche client (ils arrivent avec leurs écrans), les bandeaux d'alerte et
-les menus de la barre de titre.
+les menus de la barre de titre. Vendre un véhicule du parc crée bien la facture brouillon, mais
+l'écran Ventes qui doit l'ouvrir n'est pas encore migré.
 
 ## Lancer
 
@@ -40,7 +42,7 @@ Pour regarder les écrans sans toucher aux données du magasin, travaillez sur u
 avec un profil isolé (ses secrets vont sous un autre nom dans le trousseau) :
 
 ```powershell
-cargo run -p motodesk-gpui --example seed -- C:\Temp\motodesk-demo    # 137 clients fictifs
+cargo run -p motodesk-gpui --example seed -- C:\Temp\motodesk-demo    # 137 clients et 14 véhicules en stock, fictifs
 $env:MOTODESK_PROFILE = "demo"; $env:MOTODESK_DATA_DIR = "C:\Temp\motodesk-demo"
 cargo run -p motodesk-gpui
 ```
@@ -71,7 +73,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Parc, Employés, Tableau de bord, Inventaire, Ventes, Atelier, Comptabilité,
+Ordre prévu : Employés, Tableau de bord, Inventaire, Ventes, Atelier, Comptabilité,
 Paramètres, Import, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.

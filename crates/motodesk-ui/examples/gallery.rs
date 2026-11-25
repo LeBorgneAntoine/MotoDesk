@@ -18,6 +18,7 @@ struct Gallery {
     notes: TextModel,
     search: TextModel,
     vehicle_type: SelectModel,
+    buyer: ComboModel,
     panels: Entity<PanelStack>,
     panel_note: TextModel,
     tab: SharedString,
@@ -46,6 +47,26 @@ impl Gallery {
         let panels = cx.new(PanelStack::new);
         let on_panels = cx.observe(&panels, |_, _, cx| cx.notify());
 
+        let buyer = ComboModel::new("Nom, téléphone…", window, cx);
+        let for_query = buyer.clone();
+        buyer.on_query(cx, move |query, _, cx| {
+            // A real screen asks its service here; the gallery filters a fixed list.
+            let query = query.to_lowercase();
+            let matches = (0..ROWS)
+                .map(|row| (row, person(row)))
+                .filter(|(_, (first, last))| format!("{first} {last}").to_lowercase().contains(&query))
+                .take(8)
+                .map(|(row, (first, last))| {
+                    ComboOption::new(row.to_string(), format!("{first} {last}")).detail(format!("CL-{:05}", 1000 + row))
+                })
+                .collect();
+            for_query.set_options(matches, cx);
+        });
+        let on_buyer = cx.entity().downgrade();
+        buyer.on_pick(cx, move |_, _, cx| {
+            let _ = on_buyer.update(cx, |_, cx| cx.notify());
+        });
+
         let this = Self {
             section: section.unwrap_or_else(|| "controls".into()).into(),
             name,
@@ -62,6 +83,7 @@ impl Gallery {
                 window,
                 cx,
             ),
+            buyer,
             panels,
             panel_note: TextModel::builder().placeholder("Téléphone").build(window, cx),
             tab: "details".into(),
@@ -138,7 +160,7 @@ impl Gallery {
                     ),
             )
             .child(
-                Self::block("Input, Textarea, Select, SearchField", cx)
+                Self::block("Input, Textarea, Select, SearchField, Combobox", cx)
                     .child(
                         row()
                             .gap(m.space_3)
@@ -154,12 +176,14 @@ impl Gallery {
                             .gap(m.space_3)
                             .items_start()
                             .child(div().w(px(492.)).child(Textarea::new(&self.notes)))
-                            .child(SearchField::new(&self.search)),
+                            .child(SearchField::new(&self.search))
+                            .child(div().w(px(260.)).child(Combobox::new(&self.buyer))),
                     )
                     .child(div().fs(m.fs_sm).text_color(c.text_muted).child(format!(
-                        "Saisi : « {} » · type : {}",
+                        "Saisi : « {} » · type : {} · acheteur : {}",
                         self.name.text(cx),
-                        self.vehicle_type.value(cx).unwrap_or_default()
+                        self.vehicle_type.value(cx).unwrap_or_default(),
+                        self.buyer.value(cx).unwrap_or_else(|| "aucun".into())
                     ))),
             )
             .child(
@@ -181,7 +205,7 @@ impl Gallery {
                         .child(
                             col()
                                 .gap(m.space_3)
-                                .child(Checkbox::new("c1", self.checked).label("Bloquer le crédit").on_change(move |on, _, cx| {
+                                .child(Checkbox::new("c1", self.checked).label("Bloquer le crédit").hint("Refuse toute nouvelle vente à ce client.").on_change(move |on, _, cx| {
                                     check.update(cx, |this, cx| {
                                         this.checked = on;
                                         cx.notify();
