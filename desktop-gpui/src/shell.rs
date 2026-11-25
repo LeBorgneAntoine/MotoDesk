@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use chrono::Datelike as _;
+use motodesk_client::network::{self, MeshStatus};
 use motodesk_client::settings;
 use motodesk_client::sync::{self, SyncStatus};
 use motodesk_ui::gpui::prelude::FluentBuilder as _;
@@ -13,6 +14,7 @@ use motodesk_ui::*;
 use crate::appearance;
 use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
+use crate::format::humanize_error;
 use crate::pages::clients::ClientsPage;
 use crate::pages::parc::ParcPage;
 use crate::pages::not_migrated;
@@ -38,10 +40,23 @@ const MODULES: [(&str, &str, IconName, bool); 13] = [
     ("settings", "Paramètres", IconName::Settings, false),
 ];
 
+/// The "Reconnecter ce poste" dialog: an administrator signs in here to receive the network's
+/// current key. What this PC recorded meanwhile is kept.
+struct Reconnect {
+    username: TextModel,
+    password: TextModel,
+    busy: bool,
+    error: Option<SharedString>,
+    _subscriptions: Vec<Subscription>,
+}
+
 pub struct Shell {
     clients: Option<Entity<ClientsPage>>,
     parc: Option<Entity<ParcPage>>,
     sync: Option<SyncStatus>,
+    /// Where this PC stands among the PCs of the shop (local networks only).
+    mesh: MeshStatus,
+    reconnect: Option<Reconnect>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -53,7 +68,11 @@ impl Shell {
         ];
         cx.spawn(async move |this, cx| {
             loop {
-                if this.update(cx, |this, cx| this.refresh_sync(cx)).is_err() {
+                let alive = this.update(cx, |this, cx| {
+                    this.refresh_sync(cx);
+                    this.refresh_mesh(cx);
+                });
+                if alive.is_err() {
                     break;
                 }
                 cx.background_executor().timer(SYNC_POLL).await;
@@ -74,7 +93,14 @@ impl Shell {
                 });
             },
         );
-        Self { clients: None, parc: None, sync: None, _subscriptions: subscriptions }
+        Self {
+            clients: None,
+            parc: None,
+            sync: None,
+            mesh: MeshStatus::default(),
+            reconnect: None,
+            _subscriptions: subscriptions,
+        }
     }
 
     fn refresh_sync(&mut self, cx: &mut Context<Self>) {
@@ -85,6 +111,140 @@ impl Shell {
                 cx.notify();
             },
         );
+    }
+
+    fn refresh_mesh(&mut self, cx: &mut Context<Self>) {
+        // Only a local network has a key to fall behind on.
+        if !AuthStore::global(cx).read(cx).is_local() {
+            self.mesh = MeshStatus::default();
+            return;
+        }
+        cx.api(
+            |client| async move { network::mesh_status(&client).await },
+            |this, status, cx| {
+                match status {
+                    Ok(status) => this.mesh = status,
+                    // No answer says nothing about the key: keep that banner as it is.
+                    Err(_) => this.mesh.other_version_count = 0,
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    fn start_reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let username = TextModel::new(window, cx);
+        let password = TextModel::builder().password().build(window, cx);
+        let subscriptions = [&username, &password]
+            .into_iter()
+            .map(|field| {
+                field.on_event(window, cx, |this, event, window, cx| {
+                    if matches!(event, TextEvent::Submitted { .. }) {
+                        this.submit_reconnect(window, cx);
+                    }
+                })
+            })
+            .collect();
+        self.reconnect =
+            Some(Reconnect { username: username.clone(), password, busy: false, error: None, _subscriptions: subscriptions });
+
+        let (for_body, for_footer) = (cx.entity(), cx.entity());
+        Modal::new("Reconnecter ce poste").keep_on_overlay_click().open(
+            window,
+            cx,
+            move |_, cx| {
+                let m = cx.ui().m;
+                let Some(form) = for_body.read(cx).reconnect.as_ref() else { return element(div()) };
+                element(
+                    col()
+                        .gap(m.space_4)
+                        .child(
+                            "Un administrateur saisit son identifiant et son mot de passe actuel. Un autre poste du réseau doit être allumé. Les données de ce poste sont conservées.",
+                        )
+                        .children(form.error.clone().map(|e| Alert::danger().child(e)))
+                        .child(FormField::new("Identifiant de l'administrateur").required().child(Input::new(&form.username)))
+                        .child(FormField::new("Mot de passe").required().child(Input::new(&form.password).reveal_toggle())),
+                )
+            },
+            move |_, cx| {
+                let busy = for_footer.read(cx).reconnect.as_ref().is_some_and(|form| form.busy);
+                let shell = for_footer.clone();
+                vec![
+                    element(Button::new("reconnect-cancel").label("Annuler").disabled(busy).on_click(|_, window, cx| close_modal(window, cx))),
+                    element(Button::new("reconnect-submit").primary().label("Reconnecter").loading(busy).on_click(
+                        move |_, window, cx| shell.update(cx, |this, cx| this.submit_reconnect(window, cx)),
+                    )),
+                ]
+            },
+        );
+        // After the dialog has opened (it takes the focus when it does).
+        username.focus(window, cx);
+    }
+
+    fn submit_reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = self.reconnect.as_mut() else { return };
+        let (Some(username), password) = (form.username.trimmed(cx), form.password.text(cx)) else { return };
+        if form.busy || password.is_empty() {
+            return;
+        }
+        form.busy = true;
+        form.error = None;
+        cx.notify();
+        cx.api_in(
+            window,
+            move |client| async move { network::reconnect(&client, &username, &password).await },
+            |this, result, window, cx| {
+                match result {
+                    Ok(()) => {
+                        this.reconnect = None;
+                        this.mesh.needs_reconnect = false;
+                        close_modal(window, cx);
+                        toast::success("Poste reconnecté au réseau.", window, cx);
+                        this.refresh_mesh(cx);
+                    }
+                    Err(error) => {
+                        if let Some(form) = this.reconnect.as_mut() {
+                            form.busy = false;
+                            form.error = Some(humanize_error(&error, "La reconnexion a échoué.").into());
+                        }
+                    }
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    /// What the shop must know about its network, above every screen.
+    fn banners(&self, is_admin: bool, cx: &mut Context<Self>) -> Vec<Alert> {
+        let m = cx.ui().m;
+        let mut banners = Vec::new();
+        let (behind, other) = (self.mesh.behind_count, self.mesh.other_version_count);
+        if self.mesh.needs_reconnect {
+            banners.push(
+                Alert::warning()
+                    .flush()
+                    .title("Ce poste n'échange plus avec le réseau")
+                    .child("La clé du réseau a changé (un poste a été retiré) ou ce poste n'a plus la sienne.")
+                    .child(row().mt(m.space_1).child(
+                        Button::new("reconnect-open").primary().small().label("Reconnecter ce poste").on_click(
+                            cx.listener(|this, _, window, cx| this.start_reconnect(window, cx)),
+                        ),
+                    )),
+            );
+        } else if behind > 0 && is_admin {
+            banners.push(Alert::info().flush().title("Postes à reconnecter").child(format!(
+                "{} encore l'ancienne clé du réseau : ouvrez-y « Reconnecter ce poste ». Un poste que vous avez retiré peut aussi apparaître ici.",
+                if behind > 1 { format!("{behind} postes ont") } else { "Un poste a".to_string() }
+            )));
+        }
+        if other > 0 {
+            banners.push(Alert::warning().flush().title("Versions différentes sur le réseau").child(format!(
+                "{} une autre version de Motodesk : rien n'est échangé avec {}. Mettez tous les postes à jour.",
+                if other > 1 { format!("{other} postes utilisent") } else { "Un autre poste utilise".to_string() },
+                if other > 1 { "eux" } else { "lui" }
+            )));
+        }
+        banners
     }
 
     /// (colour of the dot, label) of the sync state.
@@ -170,6 +330,7 @@ impl Render for Shell {
         };
 
         let (dot, sync_label) = self.sync_state(cx);
+        let banners = self.banners(is_admin, cx);
 
         col()
             .size_full()
@@ -198,7 +359,14 @@ impl Render for Shell {
                         let id = id.clone();
                         Router::global(cx).update(cx, |router, cx| router.go(id, cx))
                     }))
-                    .child(div().flex_1().min_w_0().h_full().child(screen)),
+                    .child(
+                        col()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .children(banners)
+                            .child(div().flex_1().min_h_0().child(screen)),
+                    ),
             )
             .child(
                 StatusBar::new()

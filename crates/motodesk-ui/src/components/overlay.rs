@@ -126,6 +126,9 @@ impl Modal {
                 .overlay_closable(close_on_overlay)
                 .close_button(!locked)
                 .keyboard(!locked)
+                // Enter belongs to the form inside (its fields submit it): it must not close the
+                // dialog before the answer is back. Escape and the cross still close it.
+                .on_ok(|_, _, _| false)
                 .child(col().gap(m.space_4).fs(m.fs_md).child(body(window, cx)))
                 .footer(div().flex().justify_end().gap(m.space_2).children(buttons))
         });

@@ -3,7 +3,7 @@
 use motodesk_client::clients::{
     self, ClientInput, ListQuery, OdometerUnit, Reprise, VehicleInput, VehicleSellInput, VehicleType,
 };
-use motodesk_client::{local_account, settings, sync, Client, Cloud, Local, TokenStore};
+use motodesk_client::{local_account, network, settings, sync, Client, Cloud, Local, TokenStore};
 use motodesk_server::local_server::{loopback_api, test_support};
 
 /// A client over a throwaway shop. The cloud address points nowhere: these calls are local.
@@ -168,4 +168,17 @@ async fn a_stock_vehicle_is_listed_then_sold_with_a_trade_in() {
     let stock = clients::list_stock_vehicles(&api, "CB 125").await.unwrap();
     assert_eq!(stock.len(), 1);
     assert_eq!(stock[0].purchase_price_ht_cents, Some(90_000));
+}
+
+#[tokio::test]
+async fn the_network_status_is_read_and_a_pc_outside_a_local_network_cannot_reconnect() {
+    let api = client().await;
+
+    // The fixture is not a local network: nothing to reconnect to, nobody around.
+    let status = network::mesh_status(&api).await.unwrap();
+    assert_eq!(status, network::MeshStatus::default());
+
+    let refused = network::reconnect(&api, "camille", "mot de passe").await.unwrap_err();
+    assert_eq!((refused.status, refused.code.as_str()), (409, "conflict"));
+    assert!(refused.message.contains("réseau local"), "the server says why: {}", refused.message);
 }
