@@ -303,7 +303,7 @@ impl AuthPage {
                 .child(FormField::new("Mot de passe").required().child(Input::new(&self.local_password).reveal_toggle()))
                 .when(joining, |this| {
                     this.child(Self::note(
-                        "Ce poste n'a pas encore rejoint le réseau : il va chercher un poste allumé de l'atelier et s'y connecter avec ces identifiants. Un poste du réseau doit donc être allumé.",
+                        "Ce poste n'a pas encore rejoint le réseau : saisissez le compte d'un administrateur. Il va chercher un poste allumé de l'atelier et s'y connecter ; les employés pourront ensuite ouvrir leur session ici.",
                         cx,
                     ))
                 })
