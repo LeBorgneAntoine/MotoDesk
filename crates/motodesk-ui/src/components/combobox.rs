@@ -98,9 +98,12 @@ impl ListDelegate for Matches {
                 col()
                     .py(m.space_1)
                     .gap(gpui_kit::px(1.))
-                    .child(div().fs(m.fs_md).text_color(c.text).child(option.label.clone()))
+                    // One line each: a row has one height, and a detail that wrapped ran into
+                    // the row under it.
+                    .min_w_0()
+                    .child(div().one_line().fs(m.fs_md).text_color(c.text).child(option.label.clone()))
                     .when_some(option.detail.clone(), |this, detail| {
-                        this.child(div().fs(m.fs_xs).text_color(c.text_muted).child(detail))
+                        this.child(div().one_line().fs(m.fs_xs).text_color(c.text_muted).child(detail))
                     }),
             ),
         )
@@ -193,6 +196,19 @@ impl ComboModel {
     /// The value of the option picked, or `None` while nothing is chosen.
     pub fn value(&self, cx: &App) -> Option<String> {
         self.list.read(cx).delegate().picked.as_ref().map(|option| option.value.to_string())
+    }
+
+    /// Start on a choice already made: the customer of the document being edited.
+    pub fn set_picked(&self, option: ComboOption, window: &mut Window, cx: &mut App) {
+        let label = option.label.clone();
+        self.update(cx, |matches| {
+            matches.picked = Some(option);
+            matches.options.clear();
+            matches.highlighted = None;
+            matches.loading = false;
+        });
+        // The text of a choice is not a search: `perform_search` sees it is the picked label.
+        self.input.update(cx, |input, cx| input.set_value(label, window, cx));
     }
 
     /// Empty the field and forget the choice.

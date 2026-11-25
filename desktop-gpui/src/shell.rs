@@ -19,6 +19,7 @@ use crate::pages::clients::ClientsPage;
 use crate::pages::dashboard::{DashboardPage, Module};
 use crate::pages::employees;
 use crate::pages::parc::ParcPage;
+use crate::pages::sales::SalesPage;
 use crate::pages::stock::StockPage;
 use crate::pages::not_migrated;
 use crate::router::{self, Router};
@@ -58,6 +59,7 @@ pub struct Shell {
     clients: Option<Entity<ClientsPage>>,
     parc: Option<Entity<ParcPage>>,
     stock: Option<Entity<StockPage>>,
+    sales: Option<Entity<SalesPage>>,
     /// The team of an online company, or the accounts of a local network.
     employees: Option<AnyView>,
     sync: Option<SyncStatus>,
@@ -105,6 +107,7 @@ impl Shell {
             dashboard: None,
             parc: None,
             stock: None,
+            sales: None,
             employees: None,
             sync: None,
             mesh: MeshStatus::default(),
@@ -332,6 +335,9 @@ impl Render for Shell {
         if current.as_ref() != router::STOCK {
             self.stock = None;
         }
+        if current.as_ref() != router::SALES {
+            self.sales = None;
+        }
         if current.as_ref() != router::EMPLOYEES {
             self.employees = None;
         }
@@ -362,6 +368,10 @@ impl Render for Shell {
             }
             router::STOCK => {
                 let page = self.stock.get_or_insert_with(|| cx.new(|cx| StockPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::SALES => {
+                let page = self.sales.get_or_insert_with(|| cx.new(|cx| SalesPage::new(window, cx))).clone();
                 page.into_any_element()
             }
             router::EMPLOYEES => {

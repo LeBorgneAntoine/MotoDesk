@@ -11,6 +11,7 @@ pub const DASHBOARD: &str = "dashboard";
 pub const CLIENTS: &str = "clients";
 pub const PARC: &str = "parc";
 pub const STOCK: &str = "stock";
+pub const SALES: &str = "sales";
 pub const EMPLOYEES: &str = "employees";
 
 /// The screen the app opens on.
