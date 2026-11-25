@@ -6,7 +6,9 @@ use motodesk_client::clients::{
 use motodesk_client::employees::Role;
 use motodesk_client::local_account::SetupPayload;
 use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAccount};
-use motodesk_client::{local_account, network, recovery, settings, sync, Client, Cloud, Local, TokenStore};
+use motodesk_client::{
+    dashboard, local_account, network, recovery, settings, sync, Client, Cloud, Local, TokenStore,
+};
 use motodesk_server::local_server::{loopback_api, test_support};
 
 /// A client over a throwaway shop. The cloud address points nowhere: these calls are local.
@@ -171,6 +173,49 @@ async fn a_stock_vehicle_is_listed_then_sold_with_a_trade_in() {
     let stock = clients::list_stock_vehicles(&api, "CB 125").await.unwrap();
     assert_eq!(stock.len(), 1);
     assert_eq!(stock[0].purchase_price_ht_cents, Some(90_000));
+}
+
+#[tokio::test]
+async fn the_home_screen_counts_the_shop_and_lists_its_last_documents() {
+    let api = client().await;
+
+    let empty = dashboard::stats(&api).await.unwrap();
+    assert_eq!((empty.active_clients, empty.vehicles_in_workshop, empty.revenue_this_month_cents), (0, 0, 0));
+    assert!(dashboard::recent(&api, 10).await.unwrap().is_empty());
+
+    // Selling a stock vehicle writes a draft invoice: the one document there is.
+    let bike = clients::create_stock_vehicle(
+        &api,
+        &VehicleInput {
+            vehicle_type: VehicleType::Moto,
+            make: "Yamaha".into(),
+            model: "MT-07".into(),
+            selling_price_ttc_cents: Some(720_000),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let buyer = clients::create(
+        &api,
+        &ClientInput { first_name: Some("Maëlle".into()), last_name: "Kervella".into(), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    let sale =
+        clients::sell_stock_vehicle(&api, &bike.id, &VehicleSellInput { client_id: buyer.id, reprise: None }).await.unwrap();
+
+    let stats = dashboard::stats(&api).await.unwrap();
+    assert_eq!(stats.active_clients, 1);
+    assert_eq!(stats.revenue_this_month_cents, 0, "a draft is not revenue yet");
+
+    let recent = dashboard::recent(&api, 10).await.unwrap();
+    assert_eq!(recent.len(), 1);
+    let line = &recent[0];
+    assert_eq!((line.id.as_str(), line.doc_type.as_str()), (sale.id.as_str(), "FACTURE"));
+    assert_eq!(line.client_name.as_deref(), Some("Maëlle Kervella"));
+    assert!(!line.doc_number.is_empty() && !line.status.is_empty() && !line.created_at.is_empty());
+    assert_eq!(dashboard::status_label(&line.status), "Brouillon");
 }
 
 #[tokio::test]

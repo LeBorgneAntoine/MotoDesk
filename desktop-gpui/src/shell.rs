@@ -16,6 +16,7 @@ use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::format::humanize_error;
 use crate::pages::clients::ClientsPage;
+use crate::pages::dashboard::{DashboardPage, Module};
 use crate::pages::employees;
 use crate::pages::parc::ParcPage;
 use crate::pages::not_migrated;
@@ -52,6 +53,7 @@ struct Reconnect {
 }
 
 pub struct Shell {
+    dashboard: Option<Entity<DashboardPage>>,
     clients: Option<Entity<ClientsPage>>,
     parc: Option<Entity<ParcPage>>,
     /// The team of an online company, or the accounts of a local network.
@@ -98,6 +100,7 @@ impl Shell {
         );
         Self {
             clients: None,
+            dashboard: None,
             parc: None,
             employees: None,
             sync: None,
@@ -314,6 +317,9 @@ impl Render for Shell {
             .collect();
 
         // A screen left is a screen closed: coming back starts it afresh, panels included.
+        if current.as_ref() != router::DASHBOARD {
+            self.dashboard = None;
+        }
         if current.as_ref() != router::CLIENTS {
             self.clients = None;
         }
@@ -325,6 +331,21 @@ impl Render for Shell {
         }
 
         let screen: AnyElement = match current.as_ref() {
+            router::DASHBOARD => {
+                let page = self
+                    .dashboard
+                    .get_or_insert_with(|| {
+                        // The tiles lead where the rail leads: the modules this person may open.
+                        let modules = MODULES
+                            .iter()
+                            .filter(|(_, _, _, admin_only)| !admin_only || is_admin)
+                            .map(|(id, label, icon, _)| Module { id: (*id).into(), label: (*label).into(), icon: *icon })
+                            .collect();
+                        cx.new(|cx| DashboardPage::new(modules, cx))
+                    })
+                    .clone();
+                page.into_any_element()
+            }
             router::CLIENTS => {
                 let page = self.clients.get_or_insert_with(|| cx.new(|cx| ClientsPage::new(window, cx))).clone();
                 page.into_any_element()

@@ -348,6 +348,44 @@ impl Gallery {
                 ),
             )
             .child(
+                Self::block("KpiTile: a trend, a figure on its way", cx).child(
+                    row()
+                        .gap(m.space_3)
+                        .child(KpiTile::new("Clients actifs", "137").icon(IconName::Users).status(Status::Accent).trend("+3", Trend::Up))
+                        .child(KpiTile::new("Stock disponible", "812").icon(IconName::Package).trend("-12", Trend::Down))
+                        .child(KpiTile::new("CA du mois", "").icon(IconName::Banknote).status(Status::Success).loading(true)),
+                ),
+            )
+            .child(
+                Self::block("TileButton", cx).child(
+                    row()
+                        .w(px(760.))
+                        .border_1()
+                        .border_color(c.border)
+                        .bg(c.bg_surface)
+                        .child(div().flex_1().min_w_0().child(
+                            TileButton::new("tile-clients", "Clients & Véhicules")
+                                .icon(IconName::Users)
+                                .description("Recherche clients et parc véhicules.")
+                                .on_click(|_, _, _| {}),
+                        ))
+                        .child(div().flex_1().min_w_0().child(
+                            TileButton::new("tile-stock", "Inventaire")
+                                .icon(IconName::Package)
+                                .description("Inventaire, réceptions et mouvements.")
+                                .divided(true)
+                                .on_click(|_, _, _| {}),
+                        ))
+                        .child(div().flex_1().min_w_0().child(
+                            TileButton::new("tile-soon", "Caisse")
+                                .icon(IconName::ShoppingCart)
+                                .badge("Bientôt")
+                                .divided(true)
+                                .disabled(true),
+                        )),
+                ),
+            )
+            .child(
                 Self::block("DataTable, as tall as its rows, with a muted row", cx).child(
                     div().w(px(560.)).border_1().border_color(c.border).child(
                         DataTable::new(

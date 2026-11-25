@@ -7,7 +7,7 @@ use gpui_kit::base::Button as BaseButton;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClickEvent, CursorStyle, ElementId, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement, RenderOnce, SharedString, Styled as _, Window, div, px,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
     transparent_black,
 };
 
@@ -300,7 +300,16 @@ pub struct KpiTile {
     unit: Option<SharedString>,
     icon: Option<IconName>,
     hint: Option<SharedString>,
+    trend: Option<(SharedString, Trend)>,
+    loading: bool,
     status: crate::components::content::Status,
+}
+
+/// Which way a figure moved since the previous period.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trend {
+    Up,
+    Down,
 }
 
 impl KpiTile {
@@ -311,6 +320,8 @@ impl KpiTile {
             unit: None,
             icon: None,
             hint: None,
+            trend: None,
+            loading: false,
             status: crate::components::content::Status::Neutral,
         }
     }
@@ -329,6 +340,18 @@ impl KpiTile {
     /// A line under the number.
     pub fn hint(mut self, hint: impl Into<SharedString>) -> Self {
         self.hint = Some(hint.into());
+        self
+    }
+
+    /// How the figure moved, under the number, in place of the hint: "+3", "-8,2 %".
+    pub fn trend(mut self, label: impl Into<SharedString>, direction: Trend) -> Self {
+        self.trend = Some((label.into(), direction));
+        self
+    }
+
+    /// A wheel in place of the number while it is being fetched.
+    pub fn loading(mut self, loading: bool) -> Self {
+        self.loading = loading;
         self
     }
 
@@ -375,7 +398,10 @@ impl RenderOnce for KpiTile {
                         )
                     }),
             )
-            .child(
+            .child(if self.loading {
+                // As tall as the number it stands for, so the tile does not jump.
+                row().h(m.fs_3xl * line_height::TIGHT).child(crate::components::content::Spinner::new())
+            } else {
                 row()
                     .items_baseline()
                     .gap(m.space_1)
@@ -384,9 +410,125 @@ impl RenderOnce for KpiTile {
                     )
                     .when_some(self.unit, |this, unit| {
                         this.child(div().fs_tight(m.fs_sm).font_weight(FontWeight::MEDIUM).text_color(c.text_muted).child(unit))
+                    })
+            })
+            .map(|this| match (self.trend, self.hint) {
+                (Some((label, direction)), _) => {
+                    let (icon, ink) = match direction {
+                        Trend::Up => (IconName::TrendingUp, c.success),
+                        Trend::Down => (IconName::TrendingDown, c.danger),
+                    };
+                    this.child(
+                        row().gap(m.space_1).fs_tight(m.fs_xs).text_color(ink).child(Icon::new(icon).sm().color(ink)).child(label),
+                    )
+                }
+                (None, Some(hint)) => this.child(div().fs_tight(m.fs_xs).text_color(c.text_muted).child(hint)),
+                (None, None) => this,
+            })
+    }
+}
+
+// ---- TileButton -----------------------------------------------------------------------------
+
+/// A large tile that leads somewhere: an icon, a name and one line saying what is there. For
+/// launcher grids (the modules of the home screen, the tools of a page).
+#[derive(IntoElement)]
+pub struct TileButton {
+    id: ElementId,
+    label: SharedString,
+    description: Option<SharedString>,
+    icon: Option<IconName>,
+    badge: Option<SharedString>,
+    disabled: bool,
+    divided: bool,
+    on_click: Option<ClickHandler>,
+}
+
+impl TileButton {
+    pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            description: None,
+            icon: None,
+            badge: None,
+            disabled: false,
+            divided: false,
+            on_click: None,
+        }
+    }
+
+    pub fn description(mut self, description: impl Into<SharedString>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    pub fn icon(mut self, icon: IconName) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// A short chip at the end: "Bientôt".
+    pub fn badge(mut self, badge: impl Into<SharedString>) -> Self {
+        self.badge = Some(badge.into());
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// A line on its left: for every tile of a row but the first.
+    pub fn divided(mut self, divided: bool) -> Self {
+        self.divided = divided;
+        self
+    }
+
+    pub fn on_click(mut self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.on_click = Some(Rc::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for TileButton {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        use crate::components::content::{Status, Tag};
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
+        let disabled = self.disabled;
+        let (icon_bg, icon_ink) = if disabled { (c.bg_app, c.text_subtle) } else { (c.accent_soft, c.accent) };
+        row()
+            .id(self.id)
+            .min_w_0()
+            .gap(m.space_3)
+            .p(m.space_3)
+            .when(self.divided, |this| this.border_l_1().border_color(c.border_subtle))
+            .when(!disabled, |this| this.cursor(CursorStyle::PointingHand).hover(|s| s.bg(c.bg_hover)))
+            .when_some(self.icon, |this, icon| {
+                this.child(row().flex_none().justify_center().size(px(30.)).bg(icon_bg).child(Icon::new(icon).color(icon_ink)))
+            })
+            .child(
+                col()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .one_line()
+                            .fs_tight(m.fs_md)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(if disabled { c.text_muted } else { c.text_strong })
+                            .child(self.label),
+                    )
+                    .when_some(self.description, |this, description| {
+                        this.child(div().one_line().fs_tight(m.fs_xs).text_color(c.text_muted).child(description))
                     }),
             )
-            .when_some(self.hint, |this, hint| this.child(div().fs_tight(m.fs_xs).text_color(c.text_muted).child(hint)))
+            .when_some(self.badge, |this, badge| this.child(div().flex_none().child(Tag::new(badge).status(Status::Muted))))
+            .when_some(self.on_click.filter(|_| !disabled), |this, handler| {
+                this.on_click(move |event, window, cx| handler(event, window, cx))
+            })
     }
 }
 
