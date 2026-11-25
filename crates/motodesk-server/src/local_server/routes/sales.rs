@@ -177,8 +177,8 @@ async fn list(
           AND ($1 IS NULL OR s.reference LIKE $1 OR s.legacy_ref LIKE $1 OR c.last_name LIKE $1 OR c.first_name LIKE $1)
           AND ($2 IS NULL OR s.status = $2)
           AND ($3 IS NULL OR s.client_id = $3)
-          AND ($4 IS NULL OR COALESCE(s.sale_date, '') >= $4)
-          AND ($5 IS NULL OR COALESCE(s.sale_date, '') <= $5)
+          AND ($4 IS NULL OR COALESCE(NULLIF(s.sale_date, ''), substr(s.locked_at, 1, 10), '') >= $4)
+          AND ($5 IS NULL OR COALESCE(NULLIF(s.sale_date, ''), substr(s.locked_at, 1, 10), '') <= $5)
         ORDER BY COALESCE(s.locked_at, s.updated_at) DESC
         LIMIT $6 OFFSET $7
         "#,
@@ -283,10 +283,16 @@ async fn update(
     let device_id = state.device_id().await?;
     let totals = compute(&body.lines)?;
 
+    // A body without a date (a repair order refreshing its draft, a form whose
+    // date field was emptied) keeps the date the draft already has, and gets
+    // today's when it has none. Writing the absent date as NULL is how a draft
+    // lost its date and was then sealed without one.
     let mut tx = state.db.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query(
         r#"
-        UPDATE sales SET client_id = $2, vehicle_id = $3, sale_date = $4, notes = $5,
+        UPDATE sales SET client_id = $2, vehicle_id = $3,
+            sale_date = COALESCE(NULLIF(TRIM($4), ''), NULLIF(TRIM(sale_date), ''), $10),
+            notes = $5,
             total_ht_cents = $6, total_vat_cents = $7, total_ttc_cents = $8,
             updated_at = $9, row_version = row_version + 1
         WHERE id = $1 AND locked_at IS NULL
@@ -301,6 +307,7 @@ async fn update(
     .bind(totals.total_vat_cents)
     .bind(totals.total_ttc_cents)
     .bind(&now)
+    .bind(&now[..10])
     .execute(&mut *tx)
     .await?;
 
@@ -1014,11 +1021,16 @@ pub(crate) async fn seal_in_tx(
         DocumentKind::Receipt => "receipt",
         _ => "invoice",
     };
+    // A sealed document always carries a date. The one the draft was given is
+    // kept; a draft that reaches this point without one (written by an older
+    // build, an import or another PC) takes the day it is sealed, because
+    // nothing can add it afterwards: the row is frozen from here on.
     let sealed_row = sqlx::query(
         r#"
         UPDATE sales SET reference = $2, status = $3, document_kind = $4,
             total_ht_cents = $5, total_vat_cents = $6, total_ttc_cents = $7,
             fiscal_register_id = $8, fiscal_seq = $9, locked_at = $10,
+            sale_date = COALESCE(NULLIF(TRIM(sale_date), ''), substr($10, 1, 10)),
             updated_at = $10, row_version = row_version + 1
         WHERE id = $1 AND locked_at IS NULL
         "#,
@@ -2708,6 +2720,115 @@ pub(crate) mod tests {
             .execute(&state.db)
             .await
             .expect("an unsealed draft is not protected");
+    }
+
+    fn dated(sale_date: Option<&str>) -> Json<SaleInput> {
+        Json(SaleInput {
+            sale_date: sale_date.map(String::from),
+            lines: helmet_and_service(),
+            ..Default::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn a_draft_updated_without_a_date_keeps_the_one_it_had() {
+        let state = shop().await;
+        let (_, Json(sale)) = create(State(state.clone()), dated(Some("2026-10-03"))).await.unwrap();
+        let id = Uuid::parse_str(sale["id"].as_str().unwrap()).unwrap();
+
+        // Absent, and emptied in the form: neither erases the date.
+        for missing in [None, Some(""), Some("  ")] {
+            let Json(sale) = update(State(state.clone()), Path(id), dated(missing)).await.unwrap();
+            assert_eq!(sale["sale_date"], "2026-10-03", "after an update sending {missing:?}");
+        }
+
+        // A date that is sent still replaces it.
+        let Json(sale) = update(State(state.clone()), Path(id), dated(Some("2026-10-05"))).await.unwrap();
+        assert_eq!(sale["sale_date"], "2026-10-05");
+    }
+
+    #[tokio::test]
+    async fn a_draft_that_had_no_date_gets_todays_when_it_is_updated() {
+        let state = shop().await;
+        let id = new_draft(&state).await;
+        // What an older build left behind after an update without a date.
+        sqlx::query("UPDATE sales SET sale_date = NULL WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let Json(sale) = update(State(state.clone()), Path(id), dated(None)).await.unwrap();
+        assert_eq!(sale["sale_date"], sale["updated_at"].as_str().unwrap()[..10]);
+    }
+
+    #[tokio::test]
+    async fn a_document_validated_after_an_update_without_a_date_is_sealed_with_one() {
+        let state = shop().await;
+        let (_, Json(sale)) = create(State(state.clone()), dated(Some("2026-10-03"))).await.unwrap();
+        let id = Uuid::parse_str(sale["id"].as_str().unwrap()).unwrap();
+        let Json(updated) = update(State(state.clone()), Path(id), dated(None)).await.unwrap();
+        assert_eq!(updated["sale_date"], "2026-10-03");
+
+        let sealed = seal(&state, id).await;
+        assert!(sealed["locked_at"].is_string());
+        assert_eq!(sealed["sale_date"], "2026-10-03", "the date the draft was given is kept");
+    }
+
+    /// The seal is the last moment a date can be written: afterwards the database
+    /// refuses to touch it. A draft can still arrive here without one (written by
+    /// an older build, an import, another PC), so the seal fills it in itself.
+    #[tokio::test]
+    async fn a_draft_without_a_date_is_sealed_on_the_day_it_is_validated() {
+        let state = shop().await;
+        for missing in [None, Some("")] {
+            let id = new_draft(&state).await;
+            sqlx::query("UPDATE sales SET sale_date = $2 WHERE id = $1")
+                .bind(id.to_string())
+                .bind(missing)
+                .execute(&state.db)
+                .await
+                .unwrap();
+
+            let sealed = seal(&state, id).await;
+            let locked_at = sealed["locked_at"].as_str().unwrap();
+            assert_eq!(sealed["sale_date"], locked_at[..10], "sealed from a draft dated {missing:?}");
+
+            let res = sqlx::query("UPDATE sales SET sale_date = NULL WHERE id = $1")
+                .bind(id.to_string())
+                .execute(&state.db)
+                .await;
+            assert!(res.is_err(), "the date of a sealed document cannot be removed");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_date_filter_finds_a_document_that_was_sealed_without_a_date() {
+        let state = shop().await;
+        // Such rows predate the rule above and cannot be rewritten.
+        sqlx::query(
+            "INSERT INTO sales (id, status, document_kind, sale_date, total_ttc_cents, locked_at,
+                                created_at, updated_at, row_version, field_meta)
+             VALUES ($1, 'invoice', 'invoice', NULL, 1200, '2026-11-12T09:00:00Z',
+                     '2026-11-12T09:00:00Z', '2026-11-12T09:00:00Z', 1, '{}')",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let found = |from: &str, to: &str| {
+            let state = state.clone();
+            let query = ListQuery {
+                from: Some(from.into()),
+                to: Some(to.into()),
+                ..Default::default()
+            };
+            async move { list(State(state), Query(query)).await.unwrap().0.len() }
+        };
+        assert_eq!(found("2026-11-01", "2026-11-30").await, 1, "listed in the month it was sealed");
+        assert_eq!(found("2026-10-01", "2026-10-31").await, 0);
+        assert_eq!(found("2026-12-01", "2026-12-31").await, 0);
     }
 
     #[tokio::test]

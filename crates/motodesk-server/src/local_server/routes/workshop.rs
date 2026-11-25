@@ -930,6 +930,35 @@ mod tests {
         assert_eq!(second["total_ttc_cents"], (1_200 + 4_000) * 12 / 10);
     }
 
+    /// A repair order knows nothing about the invoice date, so bringing its draft
+    /// up to date sends none. That used to erase the date the draft had, and the
+    /// invoice was then validated, numbered and sealed with an empty date.
+    #[tokio::test]
+    async fn invoicing_again_leaves_the_draft_dated() {
+        let state = shop().await;
+        let id = new_order(&state, json!({ "status": "ready", "lines": [line_json()] })).await;
+        let (_, Json(first)) = invoice(State(state.clone()), Path(id)).await.unwrap();
+        assert!(first["sale_date"].is_string(), "a new draft is dated");
+
+        let (_, Json(second)) = invoice(State(state.clone()), Path(id)).await.unwrap();
+        assert_eq!(second["id"], first["id"]);
+        assert_eq!(second["sale_date"], first["sale_date"], "still dated after the refresh");
+
+        // A date the user chose on the draft survives the refresh as well.
+        sqlx::query("UPDATE sales SET sale_date = '2026-10-03' WHERE id = $1")
+            .bind(first["id"].as_str().unwrap())
+            .execute(&state.db)
+            .await
+            .unwrap();
+        let (_, Json(third)) = invoice(State(state.clone()), Path(id)).await.unwrap();
+        assert_eq!(third["sale_date"], "2026-10-03");
+
+        let sale_id = Uuid::parse_str(first["id"].as_str().unwrap()).unwrap();
+        let sealed = sales_tests::seal(&state, sale_id).await;
+        assert!(sealed["locked_at"].is_string());
+        assert_eq!(sealed["sale_date"], "2026-10-03", "and the invoice is sealed with it");
+    }
+
     #[tokio::test]
     async fn invoiced_is_only_reached_by_sealing_an_invoice() {
         let state = shop().await;
