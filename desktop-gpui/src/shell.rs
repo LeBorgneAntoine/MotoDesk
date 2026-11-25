@@ -16,6 +16,7 @@ use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::format::humanize_error;
 use crate::pages::atelier::AtelierPage;
+use crate::pages::billing::BillingPage;
 use crate::pages::clients::ClientsPage;
 use crate::pages::dashboard::{DashboardPage, Module};
 use crate::pages::employees;
@@ -62,6 +63,7 @@ pub struct Shell {
     parc: Option<Entity<ParcPage>>,
     stock: Option<Entity<StockPage>>,
     sales: Option<Entity<SalesPage>>,
+    billing: Option<Entity<BillingPage>>,
     /// The team of an online company, or the accounts of a local network.
     employees: Option<AnyView>,
     sync: Option<SyncStatus>,
@@ -111,6 +113,7 @@ impl Shell {
             parc: None,
             stock: None,
             sales: None,
+            billing: None,
             employees: None,
             sync: None,
             mesh: MeshStatus::default(),
@@ -344,6 +347,9 @@ impl Render for Shell {
         if current.as_ref() != router::SALES {
             self.sales = None;
         }
+        if current.as_ref() != router::BILLING {
+            self.billing = None;
+        }
         if current.as_ref() != router::EMPLOYEES {
             self.employees = None;
         }
@@ -382,6 +388,10 @@ impl Render for Shell {
             }
             router::SALES => {
                 let page = self.sales.get_or_insert_with(|| cx.new(|cx| SalesPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::BILLING => {
+                let page = self.billing.get_or_insert_with(|| cx.new(|cx| BillingPage::new(window, cx))).clone();
                 page.into_any_element()
             }
             router::EMPLOYEES => {

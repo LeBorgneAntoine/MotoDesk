@@ -252,11 +252,17 @@ impl RenderOnce for SectionCard {
                         .px(m.space_4)
                         .hairline_bottom(c.border_subtle)
                         .child(
+                            // The title gives way to the actions: a long subtitle wraps instead
+                            // of pushing them out of the card.
                             row()
+                                .flex_1()
+                                .min_w_0()
                                 .gap(m.space_2)
-                                .when_some(self.icon, |this, icon| this.child(Icon::new(icon).color(c.text_muted)))
+                                .when_some(self.icon, |this, icon| this.child(div().flex_none().child(Icon::new(icon).color(c.text_muted))))
                                 .child(
                                     col()
+                                        .flex_1()
+                                        .min_w_0()
                                         .gap(px(1.))
                                         .when_some(self.title, |this, title| {
                                             this.child(

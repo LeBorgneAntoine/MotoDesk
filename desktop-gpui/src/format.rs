@@ -100,6 +100,16 @@ pub fn number(value: f64) -> String {
     if decimals.is_empty() { format!("{sign}{whole}") } else { format!("{sign}{whole},{decimals}") }
 }
 
+/// The size of a file: `512 o`, `3,4 Ko`, `1,2 Mo`.
+pub fn bytes(size: i64) -> String {
+    let tenths = |unit: f64| format!("{:.1}", size as f64 / unit).replace('.', ",");
+    match size {
+        size if size < 1024 => format!("{size} o"),
+        size if size < 1024 * 1024 => format!("{} Ko", tenths(1024.)),
+        _ => format!("{} Mo", tenths(1024. * 1024.)),
+    }
+}
+
 /// Whether what was typed is the last group of the recovery key, however it was typed
 /// (lower case, spaces, O for 0, I or L for 1).
 pub fn last_group_matches(key: &str, typed: &str) -> bool {
@@ -173,6 +183,9 @@ mod tests {
         assert_eq!(integer(12_500), "12\u{202f}500");
         assert_eq!(euros_whole(1_284_550), "12\u{202f}846\u{a0}€");
         assert_eq!(euros_whole(149), "1\u{a0}€");
+        assert_eq!(bytes(512), "512 o");
+        assert_eq!(bytes(3_482), "3,4 Ko");
+        assert_eq!(bytes(1_258_291), "1,2 Mo");
         assert_eq!(number(12.), "12");
         assert_eq!(number(2.5), "2,5");
         assert_eq!(number(1250.75), "1\u{202f}250,75");

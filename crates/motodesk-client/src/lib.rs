@@ -8,6 +8,7 @@
 //! One module per area of the API, each a port of `desktop/src/lib/api/<area>.ts`:
 //! the types the server answers with, and one function per endpoint taking a [`Client`].
 
+pub mod accounting;
 pub mod auth;
 pub mod clients;
 pub mod cloud;

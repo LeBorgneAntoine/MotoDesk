@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -24,10 +24,11 @@ sont pas passés.
 | Inventaire (catalogue, catégories, fiche produit, variantes, réception fournisseur) | migré |
 | Ventes (devis, factures, validation, avoirs, règlements) | migré, sans l'impression |
 | L'Atelier (tableau des ordres de réparation, fiche, facturation) | migré |
+| Comptabilité (journaux des ventes et de caisse, TVA, balance âgée, FEC, caisse et intégrité, clôtures, archives, journal fiscal) | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Comptabilité, Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
+| Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -63,6 +64,17 @@ Svelte en portait une copie dans chaque formulaire.
 Sur L'Atelier, le champ « Technicien » propose l'équipe d'une entreprise en ligne, comme dans
 Svelte : sur un réseau local, où l'équipe n'existe pas, il reste vide. Une affectation déjà
 enregistrée est conservée et affichée « Technicien assigné ».
+
+Sur la Comptabilité, quelques écarts avec l'écran Svelte. Une clôture montre sa période par son
+nom (« octobre 2026 », « 24 novembre 2026 ») plutôt que par ses deux dates, et la confirmation
+nomme la période avant de la sceller. Les quatre boutons de clôture sont dans le corps de la
+carte, pas dans son en-tête. Le FEC s'enregistre par la fenêtre « Enregistrer sous » du système
+(`SaveExt::save_file` dans `desktop-gpui/src/backend.rs`) : ce chemin, la copie du FEC et celle
+du chemin d'une archive n'ont pas été essayés dans l'application, pour ne toucher ni au
+presse-papiers ni aux fichiers de la machine de développement. Le contrôle d'une archive est
+couvert par le test du client, pas vu à l'écran : le jeu de démonstration n'a pas d'année close.
+Le rappel de la coquille qui ouvre les clôtures (`section=closures`) arrive avec les bandeaux
+d'alerte ; l'écran lit déjà ce paramètre.
 
 Deux écarts voulus avec l'écran Svelte de l'Inventaire : la réception fournisseur s'ouvre sans
 produit choisi (Svelte présélectionnait le premier de la liste, au risque de recevoir sur le
@@ -123,8 +135,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Comptabilité,
-Paramètres, Import, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
+Ordre prévu : Paramètres, Import, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
 

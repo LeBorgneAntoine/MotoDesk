@@ -5,6 +5,7 @@
 
 pub mod atelier;
 pub mod auth;
+pub mod billing;
 pub mod clients;
 pub mod dashboard;
 pub mod employees;

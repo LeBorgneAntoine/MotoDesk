@@ -4,6 +4,7 @@ use motodesk_client::clients::{
     self, ClientInput, ListQuery, OdometerUnit, Reprise, VehicleInput, VehicleSellInput, VehicleType,
 };
 use motodesk_client::employees::Role;
+use motodesk_client::fiscal::{ClosureKind, JournalQuery};
 use motodesk_client::local_account::SetupPayload;
 use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAccount};
 use motodesk_client::products::{
@@ -13,7 +14,7 @@ use motodesk_client::sales::{self, DraftStatus, ListQuery as ListSales, PaymentI
 use motodesk_client::stock::{self, MovementInput, SupplierInput};
 use motodesk_client::workshop::{NewOrder, OrderEdit, Step, WorkshopLineInput};
 use motodesk_client::{
-    dashboard, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local, TokenStore,
+    accounting, dashboard, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local, TokenStore,
 };
 use motodesk_server::local_server::{loopback_api, test_support};
 
@@ -538,6 +539,96 @@ async fn a_repair_order_goes_through_the_workshop_and_becomes_an_invoice() {
     let mistake = workshop::create(&api, &NewOrder { label: "Erreur de saisie".into(), ..Default::default() }).await.unwrap();
     workshop::delete(&api, &mistake.id).await.unwrap();
     assert!(workshop::list_board(&api).await.unwrap().iter().all(|o| o.id != mistake.id));
+}
+
+#[tokio::test]
+async fn the_books_and_the_fiscal_controls_follow_a_sealed_invoice() {
+    // Closing a period and archiving are for administrators: a signed-in one is needed.
+    let (api, _) = local_network().await;
+    let today = chrono::Local::now().date_naive();
+    let (year, day) = (chrono::Datelike::year(&today), today.format("%Y-%m-%d").to_string());
+    let (from, to) = (format!("{year}-01-01"), format!("{year}-12-31"));
+
+    // One invoice of 120,00 TTC at 20 %, of which 50,00 are paid by card.
+    let buyer = clients::create(&api, &ClientInput { last_name: "Kervella".into(), ..Default::default() }).await.unwrap();
+    let draft = sales::create(
+        &api,
+        &SaleInput {
+            client_id: Some(buyer.id),
+            sale_date: Some(day.clone()),
+            lines: vec![SaleLineInput {
+                label: Some("Révision".into()),
+                quantity_milli: 1_000,
+                unit_price_ht_cents: 10_000,
+                vat_rate_bp: 2000,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let invoice = sales::validate(&api, &draft.id).await.unwrap();
+    sales::add_payment(&api, &draft.id, &PaymentInput { amount_cents: 5_000, method: "card".into(), ..Default::default() }).await.unwrap();
+
+    // The reports.
+    let sold = accounting::sales_journal(&api, &from, &to).await.unwrap();
+    assert_eq!((sold.rows.len(), sold.total_ht_cents, sold.total_vat_cents, sold.total_ttc_cents), (1, 10_000, 2_000, 12_000));
+    assert_eq!((sold.rows[0].reference.as_deref(), sold.rows[0].kind_label()), (invoice.reference.as_deref(), "Facture"));
+    assert_eq!((sold.rows[0].client_name.as_deref(), sold.rows[0].paid_cents), (Some("Kervella"), 5_000));
+    assert!(accounting::sales_journal(&api, "2001-01-01", "2001-12-31").await.unwrap().rows.is_empty());
+
+    let cash = accounting::cash_journal(&api, &from, &to).await.unwrap();
+    assert_eq!((cash.rows.len(), cash.total_cents, cash.methods_by_amount()), (1, 5_000, vec![("card", 5_000)]));
+
+    let vat = accounting::vat_recap(&api, &from, &to).await.unwrap();
+    assert_eq!((vat.document_count, vat.total_base_ht_cents, vat.total_vat_cents), (1, 10_000, 2_000));
+    assert_eq!(vat.rates.iter().map(|r| (r.rate_bp, r.vat_cents)).collect::<Vec<_>>(), [(2000, 2_000)]);
+
+    let owed = accounting::ageing(&api).await.unwrap();
+    assert_eq!((owed.rows.len(), owed.total_outstanding_cents, owed.buckets.not_due_cents), (1, 7_000, 7_000));
+    assert!(owed.rows[0].days_overdue < 0, "an invoice of today is within its payment terms");
+
+    let fec = accounting::fec_export(&api, year).await.unwrap();
+    assert!(fec.line_count > 0 && fec.file_name.contains("FEC"));
+    assert!(fec.content.lines().count() > fec.preview(1).len());
+
+    // The register and its journal.
+    let register = fiscal::register(&api).await.unwrap();
+    assert!(!register.code.is_empty() && register.last_seq > 0);
+    assert_eq!(register.perpetual_total_cents, 12_000);
+    assert!(invoice.reference.as_deref().unwrap_or_default().contains(&register.code));
+
+    let journal =
+        fiscal::journal(&api, &JournalQuery { from: from.clone(), to: to.clone(), limit: Some(2000), ..Default::default() }).await.unwrap();
+    let events: Vec<&str> = journal.iter().map(|e| e.event_type.as_str()).collect();
+    assert!(events.contains(&"invoice") && events.contains(&"payment"));
+    let only_invoices =
+        fiscal::journal(&api, &JournalQuery { from, to, event_type: "invoice".into(), limit: Some(2000) }).await.unwrap();
+    assert_eq!(only_invoices.len(), 1);
+    assert!(only_invoices[0].matches(invoice.reference.as_deref().unwrap_or("?")));
+
+    let report = fiscal::verify_chains(&api).await.unwrap();
+    assert!(report.ok && report.registers.iter().all(|r| r.ok && r.signatures_verified > 0));
+
+    // Closing today, then last year, then archiving it.
+    assert!(fiscal::pending_closures(&api).await.unwrap().is_empty(), "the day in progress is not a closure overdue");
+    let closed = fiscal::close_period(&api, ClosureKind::Day, Some(&day)).await.unwrap();
+    assert_eq!((closed.kind, closed.document_count, closed.total_ttc_cents), (ClosureKind::Day, 1, 12_000));
+    // A period is closed once: asking again hands back the closure that exists.
+    assert_eq!(fiscal::close_period(&api, ClosureKind::Day, Some(&day)).await.unwrap().id, closed.id);
+
+    assert!(fiscal::list_archives(&api).await.unwrap().is_empty());
+    assert!(fiscal::create_archive(&api, year).await.is_err(), "a year in progress is not archived");
+    assert!(fiscal::create_archive(&api, year - 1).await.is_err(), "nor is a year that was not closed");
+    fiscal::close_period(&api, ClosureKind::Year, None).await.unwrap();
+    let archive = fiscal::create_archive(&api, year - 1).await.unwrap();
+    assert!(archive.entry_count >= 0 && archive.file_bytes > 0);
+    assert_eq!(fiscal::list_archives(&api).await.unwrap().len(), 1);
+    assert!(fiscal::verify_archive(&api, &archive.id).await.unwrap().ok);
+
+    let closures = fiscal::list_closures(&api, 200).await.unwrap();
+    assert!(closures.iter().any(|c| c.kind == ClosureKind::Day) && closures.iter().any(|c| c.kind == ClosureKind::Year));
 }
 
 #[tokio::test]
