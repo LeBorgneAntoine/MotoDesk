@@ -5,6 +5,7 @@ members = [
     "crates/motodesk-core",
     "crates/motodesk-db",
     "crates/motodesk-fiscal",
+    "crates/motodesk-server",
     "crates/motodesk-sync",
 ]
 

@@ -2836,6 +2836,39 @@ dependencies = [
 name = "motodesk-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "motodesk-server",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-store",
+ "tauri-plugin-updater",
+ "tracing",
+]
+
+[[package]]
+name = "motodesk-fiscal"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ed25519-dalek",
+ "hex",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "motodesk-server"
+version = "0.1.0"
+dependencies = [
  "aes-gcm",
  "anyhow",
  "argon2",
@@ -2861,13 +2894,6 @@ dependencies = [
  "sqlparser",
  "sqlx",
  "srp",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-single-instance",
- "tauri-plugin-store",
- "tauri-plugin-updater",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
@@ -2877,21 +2903,6 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zip",
-]
-
-[[package]]
-name = "motodesk-fiscal"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "ed25519-dalek",
- "hex",
- "rand 0.8.8",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 1.0.69",
- "uuid",
 ]
 
 [[package]]

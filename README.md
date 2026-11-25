@@ -201,10 +201,11 @@ Publier une version aux installations existantes (installateur signé, notes de 
 │  ├─ motodesk-core/         types partagés (entités, changements, synchronisation)
 │  ├─ motodesk-fiscal/       journal chaîné et signé, numérotation, moteur de TVA, clôtures
 │  ├─ motodesk-sync/         application des changements et fusion champ par champ
-│  └─ motodesk-db/           accès partagé au journal de changements
+│  ├─ motodesk-db/           accès partagé au journal de changements
+│  └─ motodesk-server/       service de données embarqué : API locale, SQLite, migrations, journal fiscal, synchronisation
 ├─ desktop/
 │  ├─ src/                   interface Svelte 5 (routes, composants, système de design)
-│  └─ src-tauri/             coquille Tauri, API locale, SQLite, migrations, outils
+│  └─ src-tauri/             coquille Tauri : fenêtre, zone de notification, mises à jour, outils
 └─ docs/                     caisse, conformité fiscale, assistant, bascule, réseau local, réparation de clé
 ```
 
@@ -233,7 +234,7 @@ Le serveur cloud n'est pas dans ce dépôt : c'est un projet séparé qui réuti
 3. Messages de commit au format [Conventional Commits](https://www.conventionalcommits.org/fr/).
 4. Ouvrir une *pull request* vers `master` ; elle est fusionnée par rebase une fois la CI verte.
 
-Pour ajouter un module : créer `desktop/src/routes/<Module>.svelte`, l'ajouter au menu de `Shell.svelte`, puis exposer ses routes côté API locale (`desktop/src-tauri/src/local_server/routes/`). Les couleurs et tailles viennent exclusivement des jetons CSS de `desktop/src/lib/styles/` : `npm run lint:ui` refuse les valeurs en dur.
+Pour ajouter un module : créer `desktop/src/routes/<Module>.svelte`, l'ajouter au menu de `Shell.svelte`, puis exposer ses routes côté API locale (`crates/motodesk-server/src/local_server/routes/`). Les couleurs et tailles viennent exclusivement des jetons CSS de `desktop/src/lib/styles/` : `npm run lint:ui` refuse les valeurs en dur.
 
 ## Feuille de route
 

@@ -50,7 +50,7 @@ Une modification locale prévient les autres postes pour qu'ils n'attendent pas 
 
 ## Où c'est dans le code
 
-- `desktop/src-tauri/src/local_server/shared_folder/crypto.rs` : chiffrement.
+- `crates/motodesk-server/src/local_server/shared_folder/crypto.rs` : chiffrement.
 - `.../shared_folder/mod.rs` : dossiers, accès, envoi par morceaux, lecture, historique.
 - `.../shared_folder/replication.rs` : copie entre postes. Routes `/mesh/shared/*` dans `routes/mesh.rs`.
 - `.../routes/shared.rs` : API locale `/api/shared/*`.

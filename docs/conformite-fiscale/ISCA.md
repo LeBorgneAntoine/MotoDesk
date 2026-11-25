@@ -181,10 +181,10 @@ Toute modification de l'un des éléments listés ci-dessous impose de réémett
 l'attestation et de mettre ce document à jour :
 
 - `crates/motodesk-fiscal/`
-- `desktop/src-tauri/src/local_server/fiscal/`
-- `desktop/src-tauri/src/local_server/routes/sales.rs`
-- `desktop/src-tauri/src/local_server/routes/pos.rs`
-- `desktop/src-tauri/src/local_server/pos/`
-- `desktop/src-tauri/migrations/010_fiscal.sql` et migrations fiscales
+- `crates/motodesk-server/src/local_server/fiscal/`
+- `crates/motodesk-server/src/local_server/routes/sales.rs`
+- `crates/motodesk-server/src/local_server/routes/pos.rs`
+- `crates/motodesk-server/src/local_server/pos/`
+- `crates/motodesk-server/migrations/010_fiscal.sql` et migrations fiscales
   ultérieures (`011_pos.sql` pour les sessions)
 - les garde-fous d'immutabilité de `crates/motodesk-sync/src/merge/mod.rs`

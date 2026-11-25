@@ -24,13 +24,12 @@ pub mod state;
 pub mod sync_engine;
 pub mod sync_log;
 pub mod validate;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
 use std::sync::Arc;
 
 use axum::Router;
-use tauri::Manager;
 use tower_http::limit::RequestBodyLimitLayer;
 use tracing::info;
 
@@ -90,12 +89,33 @@ async fn bind_within(
     }
 }
 
-pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Result<()> {
+/// The loopback business API over `state`: what listens on 127.0.0.1, without the socket.
+pub fn loopback_api(state: state::SharedState) -> Router {
+    Router::new()
+        .merge(routes::health::router())
+        .merge(routes::business_router(state.clone()))
+        .layer(RequestBodyLimitLayer::new(16 * 1024 * 1024))
+        .layer(local_auth::cors_layer())
+        .with_state(state)
+}
+
+/// A running data service: its state, and the loopback API as a value.
+///
+/// A host that lives in the same process (the GPUI interface) calls `api` directly instead of
+/// going through the socket; the Tauri webview keeps using the socket.
+pub struct Started {
+    pub state: state::SharedState,
+    pub api: Router,
+}
+
+/// Start the data service. `default_data_dir` is where this host keeps the app's data
+/// (`%APPDATA%\com.motodesk.app` on Windows).
+pub async fn start(default_data_dir: std::path::PathBuf, local_token: String) -> anyhow::Result<Started> {
     // Before touching the database: the previous process may still have it open, and a restore
     // waiting to be applied must not be applied under it. Its ports are the sign it has left.
     drop(bind_when_free(&format!("127.0.0.1:{LOCAL_API_PORT}"), LOCAL_API_PORT).await?);
 
-    let data_dir = crate::previous_install::data_dir_in_use(app.path().app_data_dir()?);
+    let data_dir = crate::previous_install::data_dir_in_use(default_data_dir);
     std::fs::create_dir_all(&data_dir)?;
     // A restore that cannot be applied must not stop the app from starting on its
     // current data: the failure is logged and the restore stays queued.
@@ -142,14 +162,7 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
     // The background mode follows the owner's choice, or the PC's role in the network.
     routes::background::refresh(&state).await;
 
-    let cors = local_auth::cors_layer();
-
-    let loopback = Router::new()
-        .merge(routes::health::router())
-        .merge(routes::business_router(state.clone()))
-        .layer(RequestBodyLimitLayer::new(16 * 1024 * 1024))
-        .layer(cors)
-        .with_state(state.clone());
+    let loopback = loopback_api(state.clone());
 
     let loopback_addr = format!("127.0.0.1:{LOCAL_API_PORT}");
     let loopback_listener = bind_when_free(&loopback_addr, LOCAL_API_PORT).await?;
@@ -179,6 +192,7 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
     backup::spawn_auto(state.clone());
 
     let loopback_state = state.clone();
+    let api = loopback.clone();
     tokio::spawn(async move {
         if let Err(e) = axum::serve(loopback_listener, loopback).await {
             tracing::error!(error = %e, "local business API crashed");
@@ -200,7 +214,7 @@ pub async fn start(app: &tauri::AppHandle, local_token: String) -> anyhow::Resul
         }
     });
 
-    Ok(())
+    Ok(Started { state, api })
 }
 
 #[derive(Clone, serde::Serialize)]
