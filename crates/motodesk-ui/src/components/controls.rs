@@ -19,7 +19,7 @@ use gpui_kit::{
 use crate::components::icon::{Icon, IconName, IconSize};
 use crate::components::text_field::{Input, TextModel};
 use crate::components::tooltip::tooltip;
-use crate::style::{StyleExt as _, col, row};
+use crate::style::{StyleExt as _, col, row, with_focus_mark};
 use crate::theme::Themed;
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -393,14 +393,16 @@ impl Select {
 }
 
 impl RenderOnce for Select {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let m = cx.ui().m;
-        div().w_full().text_size(m.fs_md).child(
-            KitSelect::new(&self.model.state)
-                .h(m.control_h_lg)
-                .disabled(self.disabled)
-                .when_some(self.placeholder, |this, text| this.placeholder(text)),
-        )
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        use gpui_kit::Focusable as _;
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
+        let focused = !self.disabled && self.model.state.read(cx).focus_handle(cx).contains_focused(window, cx);
+        let field = KitSelect::new(&self.model.state)
+            .h(m.control_h_lg)
+            .disabled(self.disabled)
+            .when_some(self.placeholder, |this, text| this.placeholder(text));
+        div().w_full().text_size(m.fs_md).child(with_focus_mark(field, focused, c.border_focus))
     }
 }
 

@@ -1,6 +1,7 @@
 //! Small layout and text helpers shared by the components and the pages.
 
-use gpui_kit::{Div, Hsla, Pixels, Styled, div, px};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{Div, Hsla, IntoElement, ParentElement as _, Pixels, Styled, div, px};
 
 use crate::tokens::line_height;
 
@@ -12,6 +13,15 @@ pub fn row() -> Div {
 /// A vertical flex box.
 pub fn col() -> Div {
     div().flex().flex_col()
+}
+
+/// A field with Motodesk's focus mark: while it has the keyboard, its border takes the accent
+/// (the Kit does that) and its bottom edge is drawn twice as thick (this does). No halo around
+/// the field: it stays inside its own box and cannot be clipped.
+pub(crate) fn with_focus_mark(field: impl IntoElement, focused: bool, color: Hsla) -> Div {
+    div().relative().w_full().child(field).when(focused, |this| {
+        this.child(div().absolute().left_0().right_0().bottom_0().h(px(2.)).bg(color))
+    })
 }
 
 pub trait StyleExt: Styled + Sized {
@@ -30,7 +40,8 @@ pub trait StyleExt: Styled + Sized {
         self.whitespace_nowrap().overflow_hidden().text_ellipsis()
     }
 
-    /// A hairline under the element.
+    /// A hairline under the element. It sets the element's border colour, and an element has
+    /// only one: do not combine it with a border of another colour on the same element.
     fn hairline_bottom(self, color: Hsla) -> Self {
         self.border_b_1().border_color(color)
     }

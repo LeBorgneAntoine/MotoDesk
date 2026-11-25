@@ -370,6 +370,8 @@ impl UiTheme {
             kit.radius_lg = px(0.);
             kit.window_radius = px(0.);
             kit.shadow = false;
+            // No halo around a focused control: its border takes the accent instead.
+            kit.focus_ring = false;
             kit.font_family = SharedString::new_static(FONT_UI);
             // GPUI Kit sizes its controls in rems and writes their text at 0.875rem: this base
             // makes that text exactly the body size.

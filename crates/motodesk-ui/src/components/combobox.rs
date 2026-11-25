@@ -20,12 +20,12 @@ use gpui_kit::component::input::{Input as KitInput, InputState};
 use gpui_kit::component::list::{ListDelegate, ListItem, ListState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
-    Task, WeakEntity, Window, div,
+    App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
+    Styled as _, Task, WeakEntity, Window, div,
 };
 
 use crate::components::icon::{Icon, IconName};
-use crate::style::{StyleExt as _, col};
+use crate::style::{StyleExt as _, col, with_focus_mark};
 use crate::theme::Themed;
 
 /// One match: the value the code reads, the label the user sees, a line of detail under it.
@@ -236,7 +236,7 @@ impl Combobox {
 }
 
 impl RenderOnce for Combobox {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.ui();
         let (c, m) = (theme.colors, theme.m);
         let chosen = self.model.value(cx).is_some();
@@ -245,6 +245,12 @@ impl RenderOnce for Combobox {
                 .color(if chosen { c.success } else { c.text_subtle }),
         );
         field.style().size.height = Some(m.control_h_lg.into());
-        div().w_full().text_size(m.fs_md).child(field.when(self.invalid, |this| this.border_color(c.danger)))
+        let focused = !self.disabled && self.model.input.read(cx).focus_handle(cx).is_focused(window);
+        let mark = if self.invalid { c.danger } else { c.border_focus };
+        div().w_full().text_size(m.fs_md).child(with_focus_mark(
+            field.when(self.invalid, |this| this.border_color(c.danger)),
+            focused,
+            mark,
+        ))
     }
 }
