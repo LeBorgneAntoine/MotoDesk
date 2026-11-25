@@ -17,7 +17,7 @@ use crate::types::TokenBundle;
 #[derive(Debug, Clone)]
 pub enum SessionEvent {
     /// The cloud renewed the session: here is the new one.
-    Refreshed(TokenBundle),
+    Refreshed(Box<TokenBundle>),
     /// The cloud rejected the session: the user has to sign in again.
     Unauthorized,
 }
@@ -198,7 +198,7 @@ impl Client {
         match self.inner.cloud.refresh(&presented).await {
             Ok(next) => {
                 self.set_tokens(Some(next.clone()));
-                self.emit(SessionEvent::Refreshed(next.clone()));
+                self.emit(SessionEvent::Refreshed(Box::new(next.clone())));
                 Some(next)
             }
             Err(e) => {

@@ -603,6 +603,25 @@ impl PanelHost {
     pub fn new(stack: &Entity<PanelStack>) -> Self {
         Self { stack: stack.clone(), children: Vec::new() }
     }
+
+    /// Escape and Alt+Left close the top panel. The host listens for them itself; a page whose
+    /// own fields can hold the focus while a panel is open (a search box) puts this on its root
+    /// too: `.on_key_down(PanelHost::key_handler(&self.panels))`.
+    pub fn key_handler(
+        stack: &Entity<PanelStack>,
+    ) -> impl Fn(&gpui_kit::KeyDownEvent, &mut Window, &mut App) + 'static + use<> {
+        let stack = stack.clone();
+        move |event, window, cx| {
+            if !stack.read(cx).is_open() {
+                return;
+            }
+            let key = event.keystroke.key.as_str();
+            if key == "escape" || (key == "left" && event.keystroke.modifiers.alt) {
+                cx.stop_propagation();
+                request_close(&stack, window, cx);
+            }
+        }
+    }
 }
 
 impl ParentElement for PanelHost {
@@ -619,20 +638,13 @@ impl RenderOnce for PanelHost {
             return div().into_any_element();
         }
         let focus = stack.focus.clone();
-        let (on_scrim, on_key) = (self.stack.clone(), self.stack.clone());
+        let on_scrim = self.stack.clone();
         let host = div()
             .id("panel-host")
             .absolute()
             .inset_0()
             .occlude()
-            .on_key_down(move |event, window, cx| {
-                let key = event.keystroke.key.as_str();
-                let back = key == "escape" || (key == "left" && event.keystroke.modifiers.alt);
-                if back {
-                    cx.stop_propagation();
-                    request_close(&on_key, window, cx);
-                }
-            })
+            .on_key_down(Self::key_handler(&self.stack))
             .child(div().id("panel-scrim").absolute().inset_0().bg(scrim).on_mouse_down(
                 MouseButton::Left,
                 move |_, window, cx| request_close(&on_scrim, window, cx),
@@ -641,8 +653,9 @@ impl RenderOnce for PanelHost {
 
         match focus {
             Some(handle) => {
-                // Keep the keyboard inside the panels while they are open.
-                if !handle.contains_focused(window, cx) {
+                // With nothing focused the keyboard would go nowhere: give it to the panels, so
+                // Escape closes the top one. A field the page focused keeps the focus.
+                if window.focused(cx).is_none() {
                     window.focus(&handle, cx);
                 }
                 host.track_focus(&handle).focus_trap("panel-trap", &handle).into_any_element()

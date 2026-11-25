@@ -24,6 +24,7 @@ use crate::theme::Themed;
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 type ToggleHandler = Rc<dyn Fn(bool, &mut Window, &mut App)>;
+type PickHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 
 // ---- IconButton -----------------------------------------------------------------------------
 
@@ -464,7 +465,7 @@ pub struct Tabs {
     items: Vec<TabItem>,
     active: SharedString,
     small: bool,
-    on_change: Option<Rc<dyn Fn(&SharedString, &mut Window, &mut App)>>,
+    on_change: Option<PickHandler>,
 }
 
 impl Tabs {

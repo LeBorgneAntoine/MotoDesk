@@ -19,6 +19,7 @@ use crate::style::{StyleExt as _, col, row};
 use crate::theme::Themed;
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type PickHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 
 // ---- TitleBar -------------------------------------------------------------------------------
 
@@ -119,7 +120,7 @@ pub struct Sidebar {
     items: Vec<SidebarItem>,
     footer: Vec<SidebarItem>,
     active: SharedString,
-    on_select: Option<Rc<dyn Fn(&SharedString, &mut Window, &mut App)>>,
+    on_select: Option<PickHandler>,
 }
 
 impl Sidebar {

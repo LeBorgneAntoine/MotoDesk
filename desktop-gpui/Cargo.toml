@@ -9,4 +9,15 @@ name = "motodesk-gpui"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "0.11.0"
+motodesk-ui = { path = "../crates/motodesk-ui" }
+motodesk-client = { path = "../crates/motodesk-client" }
+motodesk-server = { path = "../crates/motodesk-server" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+chrono = { workspace = true }
+tracing = "0.1"
+anyhow = { workspace = true }
+
+[dev-dependencies]
+# examples/seed.rs fills a throwaway data folder to look at the screens with data in them.
+rand = "0.8"
+hex = "0.4"
