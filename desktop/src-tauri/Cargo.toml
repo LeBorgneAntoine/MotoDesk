@@ -23,59 +23,12 @@ tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { workspace = true }
-chrono = { workspace = true }
-tokio = { version = "1", features = ["full"] }
-axum = { version = "0.7", features = ["macros"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "limit"] }
-sqlx = { version = "0.8", default-features = false, features = [
-    "runtime-tokio-rustls",
-    "sqlite",
-    "macros",
-    "uuid",
-    "chrono",
-    "migrate",
-] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tokio-stream = "0.1"
-# Listening sockets must not be inherited by a relaunched copy of the app (see local_server::bind_listener).
-socket2 = { version = "0.5", features = ["all"] }
-mdns-sd = "0.11"
-sqlparser = "0.51"
-hmac = "0.12"
-sha2 = "0.10"
-rand = "0.8"
-keyring = "3"
-argon2 = "0.5"
-srp = "0.6"
-hex = "0.4"
-zip = { version = "9", default-features = false, features = ["deflate"] }
-aes-gcm = "0.10"
-hkdf = "0.12"
-base64 = "0.22"
-flate2 = "1"
-motodesk-core = { path = "../../crates/motodesk-core" }
-motodesk-fiscal = { path = "../../crates/motodesk-fiscal" }
-motodesk-sync = { path = "../../crates/motodesk-sync" }
-motodesk-db = { path = "../../crates/motodesk-db", features = ["sqlite"] }
-
-# `keyring` 3 ships no platform backend by default and silently falls back to an
-# in-memory mock, so every secret written to the "OS keychain" was dropped. These
-# entries pick the real store per platform; the plain dependency above keeps other
-# targets compiling (they get the mock, which `secrets::set_verified` detects).
-[target.'cfg(windows)'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["linux-native"] }
+motodesk-server = { path = "../../crates/motodesk-server" }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+# The updater's own tests decode the public key of tauri.conf.json.
+base64 = "0.22"

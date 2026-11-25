@@ -1,12 +1,9 @@
 mod background;
-mod local_server;
-mod logs;
-mod previous_install;
-mod startup;
 mod updates;
 
-use local_server::{local_auth, LocalApiInfo, LOCAL_API_URL};
-use startup::{StartupFailure, StartupStatus};
+use motodesk_server::local_server::{self, local_auth, LocalApiInfo, LOCAL_API_URL};
+use motodesk_server::startup::{StartupFailure, StartupStatus};
+use motodesk_server::{logs, previous_install};
 use tauri::Manager;
 
 /// Entry point of `motodesk-keytool` (see `src/bin/motodesk-keytool.rs`): diagnose and
@@ -115,9 +112,12 @@ pub fn run() {
                 }
             }
 
-            let handle = app.handle().clone();
+            // The service decides whether the background mode is on; this shell carries it out.
+            motodesk_server::background::set_host(background::apply);
+
+            let data_dir = app.path().app_data_dir()?;
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = local_server::start(&handle, local_token).await {
+                if let Err(e) = local_server::start(data_dir, local_token).await {
                     tracing::error!(error = %e, "local server failed to start");
                     startup_status.record(&e);
                 }
