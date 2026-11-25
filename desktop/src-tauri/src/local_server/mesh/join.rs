@@ -1,7 +1,7 @@
 //! Joining the shop's network from a PC that has never been part of it.
 //!
-//! A new PC knows a username and a password, and nothing else: no company, no mesh secret, no
-//! accounts. It finds a PC of the network on the LAN and proves it knows the password **without
+//! A new PC knows an administrator's username and password, and nothing else: no company, no
+//! mesh secret, no accounts (an employee's password is not enough to add a PC). It finds a PC of the network on the LAN and proves it knows the password **without
 //! sending it** (SRP-6a, with an Argon2id-derived secret as the "password"). Both sides end up
 //! with the same session key; the PC that is joined seals the network's secrets with it:
 //!
@@ -262,6 +262,12 @@ pub async fn finish(state: &SharedState, req: JoinFinish) -> LocalResult<JoinFin
         return Err(LocalError::InvalidCredentials);
     };
 
+    // Adding a PC hands it everything the shop holds: an administrator's decision. Said only
+    // to someone who has just proved the password.
+    if !matches!(account.role.as_str(), "admin" | "staff") {
+        return Err(LocalError::AdminRequiredToJoin);
+    }
+
     let company_id = state
         .company_id
         .read()
@@ -306,6 +312,8 @@ enum Attempt {
     NotAHost,
     /// Is a PC of a network and did not accept the proof.
     BadCredentials,
+    /// Accepted the password of an account that may not add a PC.
+    NotAnAdmin,
     /// Sent something that does not hold together.
     Protocol,
     Locked,
@@ -375,6 +383,7 @@ async fn join_via(
     match res.status().as_u16() {
         200 => {}
         401 => return Err(Attempt::BadCredentials),
+        403 => return Err(Attempt::NotAnAdmin),
         429 => return Err(Attempt::Locked),
         _ => return Err(Attempt::Protocol),
     }
@@ -397,6 +406,7 @@ pub async fn join_network(
 ) -> LocalResult<serde_json::Value> {
     let mut wrong_password = false;
     let mut locked = false;
+    let mut not_admin = false;
     for peer in candidates.iter().take(MAX_CANDIDATES) {
         match join_via(state, peer, username, password).await {
             Ok(package) => {
@@ -415,9 +425,14 @@ pub async fn join_network(
                 return Ok(bundle);
             }
             Err(Attempt::BadCredentials) => wrong_password = true,
+            Err(Attempt::NotAnAdmin) => not_admin = true,
             Err(Attempt::Locked) => locked = true,
             Err(other) => tracing::debug!(peer = %peer.host, why = ?other, "join attempt did not work"),
         }
+    }
+    // A PC that took the password says more than one still holding an older one.
+    if not_admin {
+        return Err(LocalError::AdminRequiredToJoin);
     }
     if wrong_password {
         return Err(LocalError::InvalidCredentials);

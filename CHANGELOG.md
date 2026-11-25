@@ -19,6 +19,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 
 ### Corrigé
 - Réseau local : les échanges entre postes sont désormais chiffrés (ils n'étaient que signés : clients, ventes et empreintes de mots de passe circulaient en clair). Tous les postes doivent être mis à jour ensemble.
+- Réseau local : seul un administrateur peut ajouter un poste au réseau (le compte de n'importe quel employé suffisait).
 - Réseau local : une coupure pendant la création du réseau ou l'adhésion d'un poste ne laisse plus le poste ni le réseau à moitié configurés ; un enregistrement de compte qui échoue ne le fait plus disparaître.
 - Réseau local : un identifiant accentué (« Élodie ») fonctionne quelle que soit la casse saisie, y compris depuis un nouveau poste.
 - Réseau local : ouvrir de nombreuses tentatives d'adhésion en même temps ne contourne plus le verrouillage après cinq essais.

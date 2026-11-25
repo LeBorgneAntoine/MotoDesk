@@ -12,7 +12,7 @@ L'écran d'accès a deux onglets, **Connexion** et **Inscription**, et un interr
 
 1. **Poste A, Inscription › Local.** On crée le réseau local : un identifiant, un mot de passe et sa confirmation. Ce premier compte est l'administrateur. Le poste A est le premier poste du maillage. Si un réseau de l'atelier est déjà visible, il faut confirmer qu'on en veut un nouveau.
 2. **Poste A, Employés.** L'administrateur crée les comptes des autres personnes (identifiant, mot de passe, rôle).
-3. **Poste B, Connexion › Local.** On saisit l'identifiant et le mot de passe créés par l'administrateur. Le poste B **cherche sur le réseau un poste de l'atelier** déjà allumé (par mDNS ; ce n'est pas forcément l'administrateur), **prouve qu'il connaît le mot de passe sans l'envoyer**, reçoit de quoi rejoindre le maillage, puis récupère les comptes et les données et s'ajoute au maillage.
+3. **Poste B, Connexion › Local.** Un **administrateur** saisit son identifiant et son mot de passe (celui d'un employé ne suffit pas à ajouter un poste ; les employés se connectent ensuite). Le poste B **cherche sur le réseau un poste de l'atelier** déjà allumé (par mDNS ; ce n'est pas forcément l'administrateur), **prouve qu'il connaît le mot de passe sans l'envoyer**, reçoit de quoi rejoindre le maillage, puis récupère les comptes et les données et s'ajoute au maillage.
 4. **Garde-fou.** Un poste qui n'a jamais rejoint le réseau **ne peut pas** se connecter si aucun poste du réseau n'est allumé : il n'a ni comptes ni données à vérifier. Une fois rejoint, il possède sa propre copie des comptes et ouvre une session seul.
 
 ## Ce qui est construit
