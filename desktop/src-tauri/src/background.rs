@@ -35,12 +35,6 @@ pub fn started_in_background() -> bool {
     std::env::args().any(|a| a == BACKGROUND_ARG)
 }
 
-/// The setting is the owner's if they have made one; otherwise a PC of a local network stays
-/// on (its place in the network depends on it) and any other installation does not.
-pub fn effective(stored: Option<bool>, local_network: bool) -> bool {
-    stored.unwrap_or(local_network)
-}
-
 /// A development build, or an isolated profile, must not register itself with Windows.
 fn may_register_with_windows() -> bool {
     !cfg!(debug_assertions) && std::env::var("MOTODESK_PROFILE").is_err()
@@ -105,17 +99,4 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_owners_choice_wins_and_a_network_pc_stays_on_by_default() {
-        assert!(effective(None, true), "a network PC is on by default");
-        assert!(!effective(None, false), "any other installation is off by default");
-        assert!(!effective(Some(false), true), "the owner turned it off");
-        assert!(effective(Some(true), false), "the owner turned it on");
-    }
 }
