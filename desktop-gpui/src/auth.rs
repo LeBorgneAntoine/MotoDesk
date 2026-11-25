@@ -215,6 +215,12 @@ impl AuthStore {
         self.signed_in(session.bundle.user, cx);
     }
 
+    /// A new recovery key was issued: show it, once, the way the first one was.
+    pub fn show_recovery_key(&mut self, key: String, cx: &mut Context<Self>) {
+        self.recovery_key = Some(key);
+        cx.notify();
+    }
+
     /// The recovery key has been written down.
     pub fn recovery_key_noted(&mut self, cx: &mut Context<Self>) {
         self.recovery_key = None;

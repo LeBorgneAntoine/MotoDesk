@@ -111,9 +111,16 @@ fn main() {
             cx.update(|cx| match outcome {
                 Ok(service) => {
                     let state = service.state;
+                    #[allow(unused_mut)]
+                    let mut cloud_url = state.cloud_url.clone();
+                    // Development only: a stand-in for the cloud (`examples/team_cloud.rs`).
+                    #[cfg(debug_assertions)]
+                    if let Ok(stand_in) = std::env::var(pages::employees::DEV_TEAM_CLOUD) {
+                        cloud_url = stand_in;
+                    }
                     let client = Client::new(
                         Local::new(service.api, &local_token),
-                        Cloud::new(state.cloud_url.clone()),
+                        Cloud::new(cloud_url),
                         TokenStore::in_dir(&state.data_dir),
                     );
                     cx.set_global(Backend { runtime: handle, client });

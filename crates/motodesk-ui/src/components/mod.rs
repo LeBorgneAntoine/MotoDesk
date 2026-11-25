@@ -21,7 +21,7 @@ pub use controls::{
     Checkbox, FormField, IconButton, IconButtonSize, SearchField, Select, SelectModel, SelectOption, Switch, TabItem,
     Tabs,
 };
-pub use data::{Card, CardPadding, CardVariant, InfoItem, InfoList, ListRow, Pagination, SectionCard};
+pub use data::{Card, CardPadding, CardVariant, InfoItem, InfoList, KpiTile, ListRow, Pagination, SectionCard};
 pub use icon::{Icon, IconName, IconSize};
 pub use layout::{FilterRail, PageToolbar, Sidebar, SidebarItem, StatusBar, StatusBarButton, TitleBar};
 pub use menu::{MenuEntry, with_context_menu};

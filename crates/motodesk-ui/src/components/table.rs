@@ -86,6 +86,7 @@ impl Column {
 type Cell = Rc<dyn Fn(usize, usize, &mut Window, &mut App) -> AnyElement>;
 type RowHandler = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
 type RowMenu = Rc<dyn Fn(usize, &mut Window, &mut App) -> Vec<MenuEntry>>;
+type RowTest = Rc<dyn Fn(usize) -> bool>;
 
 #[derive(IntoElement)]
 pub struct DataTable {
@@ -95,6 +96,9 @@ pub struct DataTable {
     cell: Cell,
     selected: Option<usize>,
     compact: bool,
+    row_height: Option<Pixels>,
+    auto_height: bool,
+    muted: Option<RowTest>,
     on_row_click: Option<RowHandler>,
     row_menu: Option<RowMenu>,
 }
@@ -114,6 +118,9 @@ impl DataTable {
             cell: Rc::new(cell),
             selected: None,
             compact: false,
+            row_height: None,
+            auto_height: false,
+            muted: None,
             on_row_click: None,
             row_menu: None,
         }
@@ -128,6 +135,25 @@ impl DataTable {
     /// Shorter rows.
     pub fn compact(mut self) -> Self {
         self.compact = true;
+        self
+    }
+
+    /// Rows of another height than the two standard ones: for cells that hold two lines.
+    pub fn row_height(mut self, height: Pixels) -> Self {
+        self.row_height = Some(height);
+        self
+    }
+
+    /// As tall as its rows, with no scrolling of its own: for a short list inside a page that
+    /// scrolls. Every row is drawn, so keep it for lists that stay short.
+    pub fn auto_height(mut self) -> Self {
+        self.auto_height = true;
+        self
+    }
+
+    /// Rows written in muted ink: an account switched off, an archived record.
+    pub fn muted_rows(mut self, is_muted: impl Fn(usize) -> bool + 'static) -> Self {
+        self.muted = Some(Rc::new(is_muted));
         self
     }
 
@@ -156,12 +182,13 @@ fn sized(cell: gpui_kit::Div, column: &Column) -> gpui_kit::Div {
 }
 
 impl RenderOnce for DataTable {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.ui();
         let (c, m) = (theme.colors, theme.m);
         let columns = Rc::new(self.columns);
         let last = columns.len().saturating_sub(1);
-        let (pad_y, row_h) = if self.compact { (px(8.), px(33.)) } else { (px(12.), px(41.)) };
+        let (pad_y, standard_h) = if self.compact { (px(8.), px(33.)) } else { (px(12.), px(41.)) };
+        let row_h = self.row_height.unwrap_or(standard_h);
         let (inner, outer) = (m.space_3, m.space_5);
         let edge = move |i: usize, cell: gpui_kit::Div| {
             cell.px(inner).when(i == 0, |d| d.pl(outer)).when(i == last, |d| d.pr(outer))
@@ -180,53 +207,57 @@ impl RenderOnce for DataTable {
             }),
         );
 
-        let (cell, selected, rows) = (self.cell, self.selected, self.rows);
+        let (cell, selected, rows, muted) = (self.cell, self.selected, self.rows, self.muted);
         let (on_row_click, row_menu) = (self.on_row_click, self.row_menu);
         let clickable = on_row_click.is_some();
 
-        let body = uniform_list(self.id, rows, move |range, window, cx| {
-            range
-                .map(|ix| {
-                    let is_selected = selected == Some(ix);
-                    let line = row()
-                        .id(("row", ix))
-                        .w_full()
-                        .h(row_h)
-                        .relative()
-                        .bg(if is_selected { c.bg_selected } else { c.bg_surface })
-                        .when(ix + 1 != rows, |this| this.hairline_bottom(c.border_subtle))
-                        .when(clickable, |this| this.cursor(CursorStyle::PointingHand))
-                        .when(clickable && !is_selected, |this| this.hover(|s| s.bg(c.bg_hover)))
-                        .children(columns.iter().enumerate().map(|(i, column)| {
-                            edge(i, sized(row(), column))
-                                .py(pad_y)
-                                .text_size(if column.mono { m.fs_xs } else { m.fs_sm })
-                                .text_color(c.text)
-                                .when(column.mono, |d| d.font_family(FONT_MONO))
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .child(cell(ix, i, window, cx))
-                        }))
-                        // The accent bar of the selected row. Drawn over the row: an element has
-                        // one border colour, and the row's is its bottom hairline.
-                        .when(is_selected, |this| {
-                            this.child(div().absolute().top_0().bottom_0().left_0().w(px(3.)).bg(c.accent))
-                        })
-                        .when_some(on_row_click.clone(), |this, handler| {
-                            this.on_click(move |_, window, cx| handler(&ix, window, cx))
-                        });
-                    match row_menu.clone() {
-                        Some(items) => line
-                            .context_menu(move |menu, window, cx| fill(menu, items(ix, window, cx)))
-                            .into_any_element(),
-                        None => line.into_any_element(),
-                    }
+        let draw_row = move |ix: usize, window: &mut Window, cx: &mut App| -> AnyElement {
+            let is_selected = selected == Some(ix);
+            let ink = if muted.as_ref().is_some_and(|is_muted| is_muted(ix)) { c.text_muted } else { c.text };
+            let line = row()
+                .id(("row", ix))
+                .relative()
+                .flex_none()
+                .w_full()
+                .h(row_h)
+                .bg(if is_selected { c.bg_selected } else { c.bg_surface })
+                .when(ix + 1 != rows, |this| this.hairline_bottom(c.border_subtle))
+                .when(clickable, |this| this.cursor(CursorStyle::PointingHand))
+                .when(clickable && !is_selected, |this| this.hover(|s| s.bg(c.bg_hover)))
+                .children(columns.iter().enumerate().map(|(i, column)| {
+                    edge(i, sized(row(), column))
+                        .py(pad_y)
+                        .text_size(if column.mono { m.fs_xs } else { m.fs_sm })
+                        .text_color(ink)
+                        .when(column.mono, |d| d.font_family(FONT_MONO))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .child(cell(ix, i, window, cx))
+                }))
+                // The accent bar of the selected row. Drawn over the row: an element has one
+                // border colour, and the row's is its bottom hairline.
+                .when(is_selected, |this| {
+                    this.child(div().absolute().top_0().bottom_0().left_0().w(px(3.)).bg(c.accent))
                 })
-                .collect::<Vec<_>>()
-        })
-        .flex_1()
-        .min_h_0();
+                .when_some(on_row_click.clone(), |this, handler| {
+                    this.on_click(move |_, window, cx| handler(&ix, window, cx))
+                });
+            match row_menu.clone() {
+                Some(items) => {
+                    line.context_menu(move |menu, window, cx| fill(menu, items(ix, window, cx))).into_any_element()
+                }
+                None => line.into_any_element(),
+            }
+        };
 
-        col().size_full().min_h_0().bg(c.bg_surface).text_color(c.text).child(header).child(div().flex_1().min_h_0().child(body.size_full()))
+        let frame = col().w_full().bg(c.bg_surface).text_color(c.text).child(header);
+        if self.auto_height {
+            let lines: Vec<AnyElement> = (0..rows).map(|ix| draw_row(ix, window, cx)).collect();
+            return frame.children(lines);
+        }
+        let body = uniform_list(self.id, rows, move |range, window, cx| {
+            range.map(|ix| draw_row(ix, window, cx)).collect::<Vec<_>>()
+        });
+        frame.size_full().min_h_0().child(div().flex_1().min_h_0().child(body.size_full()))
     }
 }

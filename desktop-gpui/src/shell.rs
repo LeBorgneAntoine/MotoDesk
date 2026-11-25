@@ -16,6 +16,7 @@ use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::format::humanize_error;
 use crate::pages::clients::ClientsPage;
+use crate::pages::employees;
 use crate::pages::parc::ParcPage;
 use crate::pages::not_migrated;
 use crate::router::{self, Router};
@@ -53,6 +54,8 @@ struct Reconnect {
 pub struct Shell {
     clients: Option<Entity<ClientsPage>>,
     parc: Option<Entity<ParcPage>>,
+    /// The team of an online company, or the accounts of a local network.
+    employees: Option<AnyView>,
     sync: Option<SyncStatus>,
     /// Where this PC stands among the PCs of the shop (local networks only).
     mesh: MeshStatus,
@@ -96,6 +99,7 @@ impl Shell {
         Self {
             clients: None,
             parc: None,
+            employees: None,
             sync: None,
             mesh: MeshStatus::default(),
             reconnect: None,
@@ -316,6 +320,9 @@ impl Render for Shell {
         if current.as_ref() != router::PARC {
             self.parc = None;
         }
+        if current.as_ref() != router::EMPLOYEES {
+            self.employees = None;
+        }
 
         let screen: AnyElement = match current.as_ref() {
             router::CLIENTS => {
@@ -324,6 +331,10 @@ impl Render for Shell {
             }
             router::PARC => {
                 let page = self.parc.get_or_insert_with(|| cx.new(|cx| ParcPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::EMPLOYEES => {
+                let page = self.employees.get_or_insert_with(|| employees::open(window, cx)).clone();
                 page.into_any_element()
             }
             _ => not_migrated(title, cx).into_any_element(),

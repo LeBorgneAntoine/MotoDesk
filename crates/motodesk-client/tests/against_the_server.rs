@@ -3,7 +3,10 @@
 use motodesk_client::clients::{
     self, ClientInput, ListQuery, OdometerUnit, Reprise, VehicleInput, VehicleSellInput, VehicleType,
 };
-use motodesk_client::{local_account, network, settings, sync, Client, Cloud, Local, TokenStore};
+use motodesk_client::employees::Role;
+use motodesk_client::local_account::SetupPayload;
+use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAccount};
+use motodesk_client::{local_account, network, recovery, settings, sync, Client, Cloud, Local, TokenStore};
 use motodesk_server::local_server::{loopback_api, test_support};
 
 /// A client over a throwaway shop. The cloud address points nowhere: these calls are local.
@@ -181,4 +184,102 @@ async fn the_network_status_is_read_and_a_pc_outside_a_local_network_cannot_reco
     let refused = network::reconnect(&api, "camille", "mot de passe").await.unwrap_err();
     assert_eq!((refused.status, refused.code.as_str()), (409, "conflict"));
     assert!(refused.message.contains("réseau local"), "the server says why: {}", refused.message);
+}
+
+/// A fresh PC on which the first administrator has just created the local network.
+async fn local_network() -> (Client, String) {
+    let state = test_support::shop().await;
+    let token = state.local_token.clone();
+    let store = TokenStore::in_dir(&state.data_dir);
+    let api = Client::new(Local::new(loopback_api(state), &token), Cloud::new("http://127.0.0.1:9"), store);
+    let password = "mot de passe admin".to_string();
+    let session = local_account::setup(
+        &api,
+        &SetupPayload { username: "camille".into(), password: password.clone(), confirm: password.clone(), force: true },
+    )
+    .await
+    .expect("the first administrator creates the network");
+    api.set_tokens(Some(session.bundle));
+    (api, password)
+}
+
+#[tokio::test]
+async fn the_accounts_of_a_local_network_are_created_changed_and_removed() {
+    let (api, _) = local_network().await;
+
+    let accounts = network_accounts::list(&api).await.unwrap();
+    assert_eq!(accounts.len(), 1);
+    assert!(accounts[0].is_admin() && accounts[0].is_active);
+    assert_eq!(accounts[0].username, "camille");
+
+    let lea = network_accounts::create(
+        &api,
+        &NewNetworkAccount {
+            username: "lea".into(),
+            password: "mot de passe lea".into(),
+            confirm: "mot de passe lea".into(),
+            role: Role::Employee,
+            full_name: Some("Léa Martin".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!((lea.display_name(), lea.is_admin(), lea.is_active), ("Léa Martin", false, true));
+
+    let off = network_accounts::update(&api, &lea.id, &NetworkAccountPatch { is_active: Some(false), ..Default::default() })
+        .await
+        .unwrap();
+    assert!(!off.is_active);
+
+    network_accounts::update(
+        &api,
+        &lea.id,
+        &NetworkAccountPatch {
+            password: Some("un autre mot de passe".into()),
+            confirm: Some("un autre mot de passe".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let twice = network_accounts::create(
+        &api,
+        &NewNetworkAccount {
+            username: "lea".into(),
+            password: "mot de passe lea".into(),
+            confirm: "mot de passe lea".into(),
+            role: Role::Employee,
+            full_name: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    // The name is taken, even by an account that is switched off: the server says which case it is.
+    assert_eq!(twice.status, 400);
+    assert!(twice.message.contains("désactivé"), "{}", twice.message);
+
+    network_accounts::delete(&api, &lea.id).await.unwrap();
+    assert_eq!(network_accounts::list(&api).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn the_recovery_key_and_the_pcs_of_a_local_network_are_read() {
+    let (api, password) = local_network().await;
+
+    // Creating the network made a key; it is not confirmed until someone types it back.
+    let status = recovery::status(&api).await.unwrap();
+    assert!(status.exists && !status.confirmed);
+
+    let issued = recovery::issue(&api, &password).await.unwrap();
+    recovery::confirm(&api, &issued.recovery_key).await.unwrap();
+    assert!(recovery::status(&api).await.unwrap().confirmed);
+
+    let refused = recovery::issue(&api, "pas le bon").await.unwrap_err();
+    assert!((400..500).contains(&refused.status), "a wrong password does not issue a key: {}", refused.status);
+
+    // The list of PCs answers in the shape the screen reads; this PC is never offered for removal.
+    let devices = network::list_devices(&api).await.unwrap();
+    assert!(devices.iter().filter(|d| d.this_pc).count() <= 1);
+    assert!(devices.iter().all(|d| !d.device_id.is_empty()));
 }

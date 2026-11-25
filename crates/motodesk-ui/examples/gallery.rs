@@ -338,6 +338,36 @@ impl Gallery {
                 ),
             )
             .child(
+                Self::block("KpiTile", cx).child(
+                    row()
+                        .gap(m.space_3)
+                        .child(KpiTile::new("Membres", "12").icon(IconName::UsersRound))
+                        .child(KpiTile::new("Administrateurs", "2").icon(IconName::Shield).status(Status::Accent))
+                        .child(KpiTile::new("Actifs", "11").icon(IconName::CircleCheck).status(Status::Success))
+                        .child(KpiTile::new("Chiffre du jour", "1 284,50").unit("€").hint("7 ventes").icon(IconName::Receipt)),
+                ),
+            )
+            .child(
+                Self::block("DataTable, as tall as its rows, with a muted row", cx).child(
+                    div().w(px(560.)).border_1().border_color(c.border).child(
+                        DataTable::new(
+                            "auto-table",
+                            vec![Column::new("Compte").flex(2.), Column::new("Rôle").fixed(px(160.))],
+                            3,
+                            |row, column, _, _| match (row, column) {
+                                (0, 0) => "Camille".into_any_element(),
+                                (1, 0) => "Léa Martin".into_any_element(),
+                                (_, 0) => "Noël (désactivé)".into_any_element(),
+                                (0, _) => Tag::new("Admin").status(Status::Accent).into_any_element(),
+                                _ => Tag::new("Employé").status(Status::Muted).into_any_element(),
+                            },
+                        )
+                        .auto_height()
+                        .muted_rows(|row| row == 2),
+                    ),
+                ),
+            )
+            .child(
                 Self::block("StateView", cx).child(
                     row()
                         .gap(m.space_4)

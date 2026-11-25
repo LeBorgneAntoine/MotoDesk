@@ -290,6 +290,106 @@ impl RenderOnce for SectionCard {
     }
 }
 
+// ---- KpiTile --------------------------------------------------------------------------------
+
+/// One headline figure: a label, the number, an icon in the colour of what it says.
+#[derive(IntoElement)]
+pub struct KpiTile {
+    label: SharedString,
+    value: SharedString,
+    unit: Option<SharedString>,
+    icon: Option<IconName>,
+    hint: Option<SharedString>,
+    status: crate::components::content::Status,
+}
+
+impl KpiTile {
+    pub fn new(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            unit: None,
+            icon: None,
+            hint: None,
+            status: crate::components::content::Status::Neutral,
+        }
+    }
+
+    /// A small word after the number: "€", "km".
+    pub fn unit(mut self, unit: impl Into<SharedString>) -> Self {
+        self.unit = Some(unit.into());
+        self
+    }
+
+    pub fn icon(mut self, icon: IconName) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// A line under the number.
+    pub fn hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    /// The colour of the icon: accent, success, warning, danger.
+    pub fn status(mut self, status: crate::components::content::Status) -> Self {
+        self.status = status;
+        self
+    }
+}
+
+impl RenderOnce for KpiTile {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        use crate::components::content::Status;
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
+        let (icon_bg, icon_ink) = match self.status {
+            Status::Neutral | Status::Muted => (c.bg_hover, c.text_muted),
+            other => other.soft(cx),
+        };
+        col()
+            .flex_1()
+            .min_w_0()
+            .min_h(m.space_9)
+            .gap(m.space_3)
+            .p(m.space_4)
+            .bg(c.bg_surface)
+            .border_1()
+            .border_color(c.border)
+            .child(
+                row()
+                    .justify_between()
+                    .gap(m.space_2)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .one_line()
+                            .fs_tight(m.fs_xs)
+                            .text_color(c.text_muted)
+                            .child(SharedString::from(self.label.to_uppercase())),
+                    )
+                    .when_some(self.icon, |this, icon| {
+                        this.child(
+                            row().flex_none().justify_center().size(m.control_h_sm).bg(icon_bg).child(Icon::new(icon).sm().color(icon_ink)),
+                        )
+                    }),
+            )
+            .child(
+                row()
+                    .items_baseline()
+                    .gap(m.space_1)
+                    .child(
+                        div().fs_tight(m.fs_3xl).font_weight(FontWeight::SEMIBOLD).text_color(c.text_strong).child(self.value),
+                    )
+                    .when_some(self.unit, |this, unit| {
+                        this.child(div().fs_tight(m.fs_sm).font_weight(FontWeight::MEDIUM).text_color(c.text_muted).child(unit))
+                    }),
+            )
+            .when_some(self.hint, |this, hint| this.child(div().fs_tight(m.fs_xs).text_color(c.text_muted).child(hint)))
+    }
+}
+
 // ---- InfoList -------------------------------------------------------------------------------
 
 /// One label/value pair of an [`InfoList`].
