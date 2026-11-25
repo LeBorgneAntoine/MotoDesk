@@ -1,0 +1,12 @@
+[package]
+name = "motodesk-gpui"
+version = "0.1.0"
+description = "Motodesk desktop client (native GPUI interface)"
+edition = "2024"
+
+[[bin]]
+name = "motodesk-gpui"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit = "0.11.0"

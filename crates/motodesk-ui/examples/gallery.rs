@@ -1,0 +1,573 @@
+//! Every component of the kit on one page, in both themes and the three densities.
+//!
+//! `cargo run -p motodesk-ui --example gallery`
+//!
+//! This is where a component is looked at before a screen uses it: add it here with every
+//! variant and state when you add or change one. `--dark`, `--compact`, `--panel` and
+//! `--section <name>` start it in a given state (used to take screenshots).
+
+use std::rc::Rc;
+
+use motodesk_ui::gpui::*;
+use motodesk_ui::*;
+
+struct Gallery {
+    section: SharedString,
+    name: TextModel,
+    password: TextModel,
+    notes: TextModel,
+    search: TextModel,
+    vehicle_type: SelectModel,
+    panels: Entity<PanelStack>,
+    panel_note: TextModel,
+    tab: SharedString,
+    checked: bool,
+    switched: bool,
+    clicks: usize,
+    selected_row: Option<usize>,
+    page: usize,
+    _subscriptions: Vec<Subscription>,
+}
+
+const ROWS: usize = 200;
+
+fn person(row: usize) -> (&'static str, &'static str) {
+    const FIRST: [&str; 8] = ["Léa", "Camille", "Noël", "Maëlle", "Jean", "Chloé", "Rémi", "Inès"];
+    const LAST: [&str; 7] = ["Martin", "Le Gall", "Dubois", "Garçon", "Bernard", "Kervella", "Moreau"];
+    (FIRST[row % FIRST.len()], LAST[(row / 3) % LAST.len()])
+}
+
+impl Gallery {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let args: Vec<String> = std::env::args().collect();
+        let section = args.iter().position(|a| a == "--section").and_then(|i| args.get(i + 1)).cloned();
+        let name = TextModel::builder().placeholder("Nom du client").build(window, cx);
+        let on_name = name.on_event(window, cx, |_, _, _, cx| cx.notify());
+        let panels = cx.new(PanelStack::new);
+        let on_panels = cx.observe(&panels, |_, _, cx| cx.notify());
+
+        let this = Self {
+            section: section.unwrap_or_else(|| "controls".into()).into(),
+            name,
+            password: TextModel::builder().placeholder("Mot de passe").password().build(window, cx),
+            notes: TextModel::builder().placeholder("Notes").multiline(3).build(window, cx),
+            search: TextModel::builder().placeholder("Rechercher un client…").build(window, cx),
+            vehicle_type: SelectModel::new(
+                vec![
+                    SelectOption::new("moto", "Moto"),
+                    SelectOption::new("bicycle", "Vélo"),
+                    SelectOption::new("electric", "Électrique"),
+                ],
+                Some("moto"),
+                window,
+                cx,
+            ),
+            panels,
+            panel_note: TextModel::builder().placeholder("Téléphone").build(window, cx),
+            tab: "details".into(),
+            checked: true,
+            switched: false,
+            clicks: 0,
+            selected_row: Some(2),
+            page: 0,
+            _subscriptions: vec![on_name, on_panels],
+        };
+        if args.iter().any(|a| a == "--panel") {
+            Self::open_demo_panels(&this.panels, cx);
+        }
+        this
+    }
+
+    fn open_demo_panels(panels: &Entity<PanelStack>, cx: &mut App) {
+        panels.update(cx, |stack, cx| {
+            stack.open(
+                PanelLayer::new("client", "1", "Léa Martin").subtitle("Cliente depuis 2021").icon(IconName::CircleUser),
+            );
+            stack.open(
+                PanelLayer::new("vehicle", "7", "Honda CB 500 F (2019)")
+                    .subtitle("AB-123-CD")
+                    .icon(IconName::Bike)
+                    .width(PanelWidth::Sm),
+            );
+            cx.notify();
+        });
+    }
+
+    fn block(title: &'static str, cx: &App) -> Div {
+        col().gap(cx.ui().m.space_3).child(Heading::new(title).caps())
+    }
+
+    fn controls(&mut self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.ui().clone();
+        let (c, m) = (theme.colors, theme.m);
+        let count = cx.listener(|this, _: &ClickEvent, _, cx| {
+            this.clicks += 1;
+            cx.notify();
+        });
+        let entity = cx.entity();
+        let (check, switch, tab) = (entity.clone(), entity.clone(), entity.clone());
+
+        col()
+            .gap(m.space_7)
+            .child(
+                Self::block("Button", cx)
+                    .child(
+                        row()
+                            .gap(m.space_2)
+                            .flex_wrap()
+                            .child(Button::new("b1").primary().label("Enregistrer").on_click(count))
+                            .child(Button::new("b2").label("Annuler"))
+                            .child(Button::new("b3").ghost().icon(IconName::RefreshCw).label("Actualiser"))
+                            .child(Button::new("b4").danger().icon(IconName::Trash).label("Supprimer"))
+                            .child(Button::new("b5").link().label("Ouvrir les réglages"))
+                            .child(Button::new("b6").primary().loading(true).label("Envoi"))
+                            .child(Button::new("b7").disabled(true).label("Indisponible"))
+                            .child(Button::new("b8").primary().disabled(true).label("Indisponible")),
+                    )
+                    .child(
+                        row()
+                            .gap(m.space_2)
+                            .child(Button::new("s1").small().primary().label("Petit"))
+                            .child(Button::new("s2").small().icon(IconName::Plus).label("Nouveau"))
+                            .child(Button::new("s3").small().ghost().label("Plus tard").tooltip("Demander à nouveau demain"))
+                            .child(IconButton::new("i1", IconName::Pencil).title("Modifier"))
+                            .child(IconButton::new("i2", IconName::Trash).title("Supprimer").danger())
+                            .child(IconButton::new("i3", IconName::Funnel).title("Filtrer").active(true))
+                            .child(IconButton::new("i4", IconName::Copy).title("Copier").disabled(true))
+                            .child(div().fs(m.fs_sm).text_color(c.text_muted).child(format!("{} clic(s)", self.clicks))),
+                    ),
+            )
+            .child(
+                Self::block("Input, Textarea, Select, SearchField", cx)
+                    .child(
+                        row()
+                            .gap(m.space_3)
+                            .items_start()
+                            .child(div().w(px(240.)).child(Input::new(&self.name).icon(IconName::User).clearable()))
+                            .child(div().w(px(240.)).child(Input::new(&self.password).reveal_toggle()))
+                            .child(div().w(px(180.)).child(Input::new(&self.name).invalid(true)))
+                            .child(div().w(px(180.)).child(Input::new(&self.name).disabled(true)))
+                            .child(div().w(px(180.)).child(Select::new(&self.vehicle_type))),
+                    )
+                    .child(
+                        row()
+                            .gap(m.space_3)
+                            .items_start()
+                            .child(div().w(px(492.)).child(Textarea::new(&self.notes)))
+                            .child(SearchField::new(&self.search)),
+                    )
+                    .child(div().fs(m.fs_sm).text_color(c.text_muted).child(format!(
+                        "Saisi : « {} » · type : {}",
+                        self.name.text(cx),
+                        self.vehicle_type.value(cx).unwrap_or_default()
+                    ))),
+            )
+            .child(
+                Self::block("FormField, Checkbox, Switch", cx).child(
+                    row()
+                        .gap(m.space_6)
+                        .items_start()
+                        .child(div().w(px(240.)).child(FormField::new("Nom").required().child(Input::new(&self.name))))
+                        .child(
+                            div().w(px(240.)).child(
+                                FormField::new("Téléphone").hint("Pour prévenir quand la moto est prête").child(Input::new(&self.search)),
+                            ),
+                        )
+                        .child(
+                            div().w(px(240.)).child(
+                                FormField::new("Email").error(Some("Adresse invalide")).child(Input::new(&self.name).invalid(true)),
+                            ),
+                        )
+                        .child(
+                            col()
+                                .gap(m.space_3)
+                                .child(Checkbox::new("c1", self.checked).label("Bloquer le crédit").on_change(move |on, _, cx| {
+                                    check.update(cx, |this, cx| {
+                                        this.checked = on;
+                                        cx.notify();
+                                    })
+                                }))
+                                .child(Switch::new("w1", self.switched).label("Affichage compact").on_change(move |on, _, cx| {
+                                    switch.update(cx, |this, cx| {
+                                        this.switched = on;
+                                        cx.notify();
+                                    })
+                                })),
+                        ),
+                ),
+            )
+            .child(
+                Self::block("Tabs", cx).child(
+                    Tabs::new(
+                        "tabs",
+                        vec![
+                            TabItem::new("details", "Détails").icon(IconName::FileText),
+                            TabItem::new("vehicles", "Véhicules").badge("3"),
+                            TabItem::new("sales", "Ventes").badge("12"),
+                        ],
+                        self.tab.clone(),
+                    )
+                    .on_change(move |id, _, cx| {
+                        let id = id.clone();
+                        tab.update(cx, |this, cx| {
+                            this.tab = id;
+                            cx.notify();
+                        })
+                    }),
+                ),
+            )
+    }
+
+    fn content(&mut self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.ui().clone();
+        let (c, m) = (theme.colors, theme.m);
+        col()
+            .gap(m.space_7)
+            .child(
+                Self::block("Heading, Tag, Icon", cx)
+                    .child(
+                        row()
+                            .gap(m.space_5)
+                            .items_baseline()
+                            .child(Heading::new("Tableau de bord").size(HeadingSize::Xl3))
+                            .child(Heading::new("Clients").size(HeadingSize::Xl2))
+                            .child(Heading::new("Coordonnées").size(HeadingSize::Lg))
+                            .child(Heading::new("Section").tone(Tone::Muted))
+                            .child(Heading::new("Étiquette").caps()),
+                    )
+                    .child(
+                        row()
+                            .gap(m.space_2)
+                            .child(Tag::new("Brouillon"))
+                            .child(Tag::new("Archivé").status(Status::Muted))
+                            .child(Tag::new("En cours").status(Status::Accent))
+                            .child(Tag::new("Devis").status(Status::Info))
+                            .child(Tag::new("Payée").status(Status::Success).icon(IconName::Check))
+                            .child(Tag::new("En retard").status(Status::Warning))
+                            .child(Tag::new("Bloqué").status(Status::Danger))
+                            .child(Tag::new("3 véhicules").status(Status::Accent).medium()),
+                    )
+                    .child(
+                        row()
+                            .gap(m.space_4)
+                            .child(Icon::new(IconName::Users).sm())
+                            .child(Icon::new(IconName::Wrench))
+                            .child(Icon::new(IconName::Package).lg())
+                            .child(Icon::new(IconName::Receipt).xl())
+                            .child(Icon::new(IconName::CircleAlert).lg().color(c.danger))
+                            .child(Icon::new(IconName::CircleCheck).lg().color(c.success))
+                            .child(Spinner::new().label("Chargement…")),
+                    ),
+            )
+            .child(
+                Self::block("Alert", cx)
+                    .child(
+                        Alert::warning().title("Profil fiscal incomplet").child("Le SIRET manque : les factures ne peuvent pas être validées.").child(
+                            row().gap(m.space_3).mt(m.space_1).child(Button::new("a1").link().small().label("Ouvrir les réglages")),
+                        ),
+                    )
+                    .child(Alert::info().child("La caisse n'est pas encore configurée."))
+                    .child(Alert::success().title("Sauvegarde terminée").child("Fichier écrit il y a 2 minutes."))
+                    .child(Alert::danger().title("Synchronisation refusée").child("3 changements ont été refusés par le cloud.")),
+            )
+            .child(
+                Self::block("Card, SectionCard, InfoList, ListRow", cx).child(
+                    row()
+                        .gap(m.space_4)
+                        .items_start()
+                        .child(
+                            div().w(px(360.)).child(
+                                SectionCard::new()
+                                    .title("Coordonnées")
+                                    .subtitle("Visible sur les factures")
+                                    .icon(IconName::IdCard)
+                                    .action(IconButton::new("sc-edit", IconName::Pencil).title("Modifier"))
+                                    .footer(Button::new("sc-cancel").small().label("Annuler"))
+                                    .footer(Button::new("sc-save").small().primary().label("Enregistrer"))
+                                    .child(InfoList::new(vec![
+                                        InfoItem::new("Téléphone", Some("06 12 34 56 78")).icon(IconName::Phone),
+                                        InfoItem::new("Email", Some("lea.martin@example.fr")).icon(IconName::Mail),
+                                        InfoItem::new("N° de série", Some("JH2PC40A0KM000123")).mono(),
+                                        InfoItem::new("Adresse", None::<&str>),
+                                        InfoItem::new("Notes", Some("Préfère être appelée après 18 h. Pneus à surveiller au prochain passage.")).block(),
+                                    ])),
+                            ),
+                        )
+                        .child(
+                            div().w(px(320.)).child(
+                                Card::new().bordered().title("Véhicules").subtitle("2 au nom de ce client").padding(CardPadding::None).child(
+                                    col()
+                                        .child(ListRow::new("lr1", "Honda CB 500 F (2019)").meta("AB-123-CD · 12 500 km").icon(IconName::Bike).selected(true))
+                                        .child(ListRow::new("lr2", "Peugeot Kisbee 50").meta("Série VGA…0042").icon(IconName::Bike).count("3", Some(IconName::Wrench)))
+                                        .child(ListRow::new("lr3", "Camille Le Gall").meta("Mécanicienne").avatar("CL").trailing(Tag::new("Admin").status(Status::Accent))),
+                                ),
+                            ),
+                        )
+                        .child(
+                            div().w(px(220.)).bg(c.bg_sidebar).border_1().border_color(c.border).child(
+                                col()
+                                    .child(ListRow::new("d1", "Toutes les catégories").dense().count("312", None).selected(true))
+                                    .child(ListRow::new("d2", "Pneus").dense().count("48", None))
+                                    .child(ListRow::new("d3", "Huiles et lubrifiants").dense().count("27", None)),
+                            ),
+                        ),
+                ),
+            )
+            .child(
+                Self::block("StateView", cx).child(
+                    row()
+                        .gap(m.space_4)
+                        .children([
+                            StateView::loading().title("Chargement des clients").compact(),
+                            StateView::empty().icon(IconName::Users).title("Aucun client").body("Créez votre premier client pour commencer.").compact(),
+                            StateView::error().title("Chargement impossible").body("Le service de données ne répond pas.").action("Réessayer", |_, _, _| {}).compact(),
+                        ]
+                        .map(|view| div().w(px(280.)).h(px(220.)).bg(c.bg_surface).border_1().border_color(c.border).child(view))),
+                ),
+            )
+    }
+
+    fn table(&mut self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.ui().clone();
+        let (c, m) = (theme.colors, theme.m);
+        let (on_row, on_page) = (cx.entity(), cx.entity());
+        let muted = c.text_muted;
+
+        let table = DataTable::new(
+            "demo-table",
+            vec![
+                Column::new("Nom").flex(2.),
+                Column::new("Téléphone").flex(1.5),
+                Column::new("Référence").fixed(px(140.)).mono(),
+                Column::new("Véhicules").fixed(px(110.)).right(),
+                Column::new("Statut").fixed(px(120.)),
+            ],
+            ROWS,
+            move |row, column, _, _| {
+                let (first, last) = person(row);
+                match column {
+                    0 => format!("{last} {first}").into_any_element(),
+                    1 => div().text_color(muted).child(format!("06 {:02} {:02} {:02} {:02}", row % 97, (row * 7) % 97, (row * 13) % 97, (row * 31) % 97)).into_any_element(),
+                    2 => format!("CL-{:05}", 1000 + row).into_any_element(),
+                    3 => format!("{}", row % 4).into_any_element(),
+                    _ => if row % 5 == 0 { Tag::new("Bloqué").status(Status::Danger) } else { Tag::new("Actif").status(Status::Success) }.into_any_element(),
+                }
+            },
+        )
+        .selected(self.selected_row)
+        .on_row_click(move |row, _, cx| {
+            let row = *row;
+            on_row.update(cx, |this, cx| {
+                this.selected_row = Some(row);
+                cx.notify();
+            })
+        })
+        .row_menu(|row, _, _| {
+            vec![
+                MenuEntry::new(format!("Ouvrir la ligne {}", row + 1), |_, _| {}).icon(IconName::Eye),
+                MenuEntry::new("Modifier", |_, _| {}).icon(IconName::Pencil),
+                MenuEntry::separator(),
+                MenuEntry::new("Supprimer", |_, _| {}).icon(IconName::Trash),
+            ]
+        });
+
+        col().gap(m.space_3).child(Heading::new("DataTable, Pagination (200 lignes, clic droit pour le menu)").caps()).child(
+            col().h(px(420.)).border_1().border_color(c.border).child(div().flex_1().min_h_0().child(table)).child(
+                Pagination::new(self.page, 50, ROWS).noun("clients").on_page(move |page, _, cx| {
+                    on_page.update(cx, |this, cx| {
+                        this.page = page;
+                        cx.notify();
+                    })
+                }),
+            ),
+        )
+    }
+
+    fn overlays(&mut self, cx: &mut Context<Self>) -> Div {
+        let m = cx.ui().m;
+        let (panels, to_open) = (self.panels.clone(), self.panels.clone());
+        col().gap(m.space_3).child(Heading::new("Panel, Confirm, Modal, toast").caps()).child(
+            row()
+                .gap(m.space_2)
+                .child(Button::new("o1").icon(IconName::PanelRight).label("Ouvrir deux panneaux").on_click(move |_, _, cx| {
+                    Self::open_demo_panels(&to_open, cx);
+                }))
+                .child(Button::new("o2").label("Confirmation").on_click(|_, window, cx| {
+                    Confirm::new("Supprimer ce client ?", "Léa Martin et ses 2 véhicules seront supprimés. Cette action est définitive.")
+                        .confirm_label("Supprimer")
+                        .danger()
+                        .open(window, cx, |window, cx| toast::success("Client supprimé.", window, cx));
+                }))
+                .child(Button::new("o3").label("Fenêtre modale").on_click(|_, window, cx| {
+                    Modal::new("Nouvelle catégorie").open(
+                        window,
+                        cx,
+                        |_, _| element("Le corps d'une fenêtre modale : un court formulaire ou un message."),
+                        |_, _| {
+                            vec![
+                                element(Button::new("m-cancel").label("Annuler").on_click(|_, window, cx| close_modal(window, cx))),
+                                element(Button::new("m-ok").primary().label("Créer").on_click(|_, window, cx| close_modal(window, cx))),
+                            ]
+                        },
+                    );
+                }))
+                .child(Button::new("o4").label("Toast info").on_click(|_, window, cx| toast::info("Synchronisation en cours…", window, cx)))
+                .child(Button::new("o5").label("Toast succès").on_click(|_, window, cx| toast::success("Client enregistré.", window, cx)))
+                .child(Button::new("o6").label("Toast erreur").on_click(|_, window, cx| {
+                    toast::error("Enregistrement impossible : le service de données ne répond pas.", window, cx)
+                }))
+                .child(Button::new("o7").ghost().label("Marquer le panneau modifié").on_click(move |_, _, cx| {
+                    panels.update(cx, |stack, cx| {
+                        if let Some(id) = stack.top().map(|l| l.id.clone()) {
+                            stack.set_dirty(&id, true);
+                            cx.notify();
+                        }
+                    })
+                })),
+        )
+    }
+
+    fn panel_layer(&self, layer: &PanelLayer, cx: &App) -> Panel {
+        let m = cx.ui().m;
+        let panel = Panel::new(&self.panels, layer.id.clone());
+        if layer.kind.as_ref() == "client" {
+            panel
+                .badge("Actif", Status::Success)
+                .action(IconButton::new("p-edit", IconName::Pencil).title("Modifier").size(IconButtonSize::Md))
+                .child(
+                    PanelSection::new("Coordonnées").icon(IconName::IdCard).child(InfoList::new(vec![
+                        InfoItem::new("Téléphone", Some("06 12 34 56 78")),
+                        InfoItem::new("Email", Some("lea.martin@example.fr")),
+                        InfoItem::new("Adresse", Some("12 rue des Motos, 35000 Rennes")),
+                    ])),
+                )
+                .child(PanelSection::new("Véhicules").subtitle("2").flush().child(
+                    col().child(ListRow::new("pv1", "Honda CB 500 F (2019)").meta("AB-123-CD").icon(IconName::Bike)).child(
+                        ListRow::new("pv2", "Peugeot Kisbee 50").meta("Série VGA…0042").icon(IconName::Bike),
+                    ),
+                ))
+        } else {
+            panel
+                .footer(Button::new("p-cancel").label("Annuler"))
+                .footer(Button::new("p-save").primary().label("Enregistrer"))
+                .child(col().gap(m.space_4).child(FormField::new("Téléphone").child(Input::new(&self.panel_note))))
+        }
+    }
+}
+
+impl Render for Gallery {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.ui().clone();
+        let (c, m) = (theme.colors, theme.m);
+        let nav = cx.entity();
+
+        let body = match self.section.as_ref() {
+            "content" => self.content(cx),
+            "table" => col().gap(m.space_7).child(self.table(cx)).child(self.overlays(cx)),
+            _ => self.controls(cx),
+        };
+        let layers: Vec<PanelLayer> = self.panels.read(cx).layers().to_vec();
+        let title = match self.section.as_ref() {
+            "content" => "Contenu",
+            "table" => "Table et panneaux",
+            _ => "Contrôles",
+        };
+
+        col()
+            .size_full()
+            .bg(c.bg_app)
+            .text_color(c.text)
+            .font_family(FONT_UI)
+            .fs(m.fs_md)
+            .child(
+                TitleBar::new()
+                    .child(Icon::new(IconName::Bike).color(c.accent))
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child("Motodesk"))
+                    .child(div().text_color(c.text_muted).child("Galerie du kit"))
+                    .trailing(Button::new("mode").small().ghost().icon(if theme.is_dark() { IconName::Sun } else { IconName::Moon }).label(if theme.is_dark() { "Clair" } else { "Sombre" }).on_click(|_, _, cx| {
+                        UiTheme::update(cx, |t| t.mode = if t.mode == Mode::Dark { Mode::Light } else { Mode::Dark })
+                    }))
+                    .trailing(Button::new("density").small().ghost().label(format!("{:?}", theme.density)).on_click(|_, _, cx| {
+                        UiTheme::update(cx, |t| {
+                            t.density = match t.density {
+                                Density::Regular => Density::Compact,
+                                Density::Compact => Density::Pos,
+                                Density::Pos => Density::Regular,
+                            }
+                        })
+                    }))
+                    .trailing(Button::new("accent").small().ghost().label("Accent").on_click(|_, _, cx| {
+                        UiTheme::update(cx, |t| t.accent = if t.accent == DEFAULT_ACCENT { 0xc2410c } else { DEFAULT_ACCENT })
+                    })),
+            )
+            .child(
+                row()
+                    .flex_1()
+                    .min_h_0()
+                    .items_stretch()
+                    .child(
+                        Sidebar::new(
+                            vec![
+                                SidebarItem::new("controls", "Contrôles", IconName::Square),
+                                SidebarItem::new("content", "Contenu", IconName::LayoutDashboard),
+                                SidebarItem::new("table", "Table et panneaux", IconName::Table).badge("3"),
+                                SidebarItem::new("off", "Indisponible", IconName::Lock).disabled(true),
+                            ],
+                            self.section.clone(),
+                        )
+                        .footer(vec![SidebarItem::new("settings", "Réglages", IconName::Settings)])
+                        .on_select(move |id, _, cx| {
+                            let id = id.clone();
+                            nav.update(cx, |this, cx| {
+                                this.section = id;
+                                cx.notify();
+                            })
+                        }),
+                    )
+                    .child(
+                        col()
+                            .relative()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                PageToolbar::new(title)
+                                    .icon(IconName::Layers)
+                                    .meta("kit")
+                                    .subtitle("Tous les composants, tels qu'un écran les utilise")
+                                    .trailing(SearchField::new(&self.search).width(px(240.)))
+                                    .trailing(Button::new("tb-new").primary().icon(IconName::Plus).label("Nouveau")),
+                            )
+                            .child(div().id("gallery-scroll").flex_1().min_h_0().overflow_y_scroll().child(div().p(m.space_6).child(body)))
+                            .child(PanelHost::new(&self.panels).children(layers.iter().map(|layer| self.panel_layer(layer, cx)))),
+                    ),
+            )
+            .child(
+                StatusBar::new()
+                    .left(StatusBarButton::new("st-sync", "Synchronisé").dot(c.state_ok).title("Dernière synchronisation à l'instant"))
+                    .left(StatusBarButton::new("st-lan", "2 postes").icon(IconName::Users))
+                    .right(StatusBarButton::new("st-user", "Léa Martin").icon(IconName::CircleUser).on_click(|_, _, _| {}))
+                    .right(StatusBarButton::new("st-version", "0.1.0")),
+            )
+    }
+}
+
+fn main() {
+    let args: Rc<Vec<String>> = Rc::new(std::env::args().collect());
+    motodesk_ui::application().run(move |cx| {
+        motodesk_ui::init(cx);
+        if args.iter().any(|a| a == "--dark") {
+            UiTheme::update(cx, |t| t.mode = Mode::Dark);
+        }
+        if args.iter().any(|a| a == "--compact") {
+            UiTheme::update(cx, |t| t.density = Density::Compact);
+        }
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(820.)), cx))),
+            window_min_size: Some(size(px(960.), px(600.))),
+            ..TitleBar::window_options()
+        };
+        motodesk_ui::gpui::open_window(options, cx, |window, cx| cx.new(|cx| Gallery::new(window, cx)))
+            .expect("the gallery window opens");
+        cx.activate(true);
+    });
+}
