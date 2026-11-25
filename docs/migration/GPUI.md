@@ -20,15 +20,11 @@ sont pas passés.
 | Connexion et inscription (en ligne et réseau local), clé de récupération | migré |
 | Clients & Véhicules | migré |
 | Parc VN/VO (liste, fiche, vente avec reprise) | migré |
+| Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Tableau de bord, Atelier, Inventaire, Ventes, Comptabilité, Modèles, Dossier partagé, Employés, Données, Paramètres, Assistant, Caisse | à faire |
 
 À porter depuis les dernières évolutions de l'interface Svelte (master `f6e767d`) :
 
-- **Reconnexion d'un poste** : le bandeau « Ce poste n'échange plus avec le réseau » de la
-  coquille, les bandeaux « Postes à reconnecter » et « Versions différentes sur le réseau », et
-  `ReconnectDialog.svelte` (`POST /api/auth/local/reconnect`, `needs_reconnect`, `behind_count` et
-  `other_version_count` de `/mesh/status`). Tant que ce n'est pas fait, un poste sous l'interface
-  native ne dit pas qu'il a cessé d'échanger après le retrait d'un autre poste.
 - **Postes du réseau** : `NetworkDevices.svelte`, dans les comptes du réseau
   (`GET /api/network/devices`, `POST /api/network/devices/:id/remove`), avec l'écran Paramètres.
 - Déjà notés plus bas : la récupération d'accès et la restauration au premier lancement ; la
