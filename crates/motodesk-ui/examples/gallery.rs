@@ -533,6 +533,24 @@ impl Gallery {
                         InfoItem::new("Adresse", Some("12 rue des Motos, 35000 Rennes")),
                     ])),
                 )
+                .child(
+                    PanelSection::new("Stock").icon(IconName::Package).child(InfoList::new(vec![
+                        InfoItem::new("Quantité", Some("12 pièce")),
+                        InfoItem::new("Seuil d'alerte", None::<&str>).placeholder("Aucun seuil"),
+                    ])),
+                )
+                .child(
+                    PanelSection::new("Attributs véhicule")
+                        .subtitle("Une section qui se replie : ici ouverte")
+                        .collapsible(false, |_, _, _| {})
+                        .child(InfoList::new(vec![InfoItem::new("Année", Some("2021"))])),
+                )
+                .child(
+                    PanelSection::new("Divers")
+                        .subtitle("ici repliée")
+                        .collapsible(true, |_, _, _| {})
+                        .child("Ce texte ne se voit pas."),
+                )
                 .child(PanelSection::new("Véhicules").subtitle("2").flush().child(
                     col().child(ListRow::new("pv1", "Honda CB 500 F (2019)").meta("AB-123-CD").icon(IconName::Bike)).child(
                         ListRow::new("pv2", "Peugeot Kisbee 50").meta("Série VGA…0042").icon(IconName::Bike),

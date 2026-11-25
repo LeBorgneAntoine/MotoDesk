@@ -10,6 +10,7 @@ use motodesk_ui::gpui::{App, AppContext as _, Context, Entity, Global, SharedStr
 pub const DASHBOARD: &str = "dashboard";
 pub const CLIENTS: &str = "clients";
 pub const PARC: &str = "parc";
+pub const STOCK: &str = "stock";
 pub const EMPLOYEES: &str = "employees";
 
 /// The screen the app opens on.

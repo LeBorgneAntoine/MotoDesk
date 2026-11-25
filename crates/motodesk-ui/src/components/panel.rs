@@ -11,7 +11,8 @@ use gpui_kit::base::Button as BaseButton;
 use gpui_kit::component::FocusTrapElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Context, CursorStyle, ElementId, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    AnyElement, App, ClickEvent, Context, CursorStyle, ElementId, Entity, FocusHandle, InteractiveElement as _,
+    IntoElement,
     MouseButton, ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
     px,
 };
@@ -524,13 +525,36 @@ pub struct PanelSection {
     subtitle: Option<SharedString>,
     icon: Option<IconName>,
     flush: bool,
+    fold: Option<(bool, FoldHandler)>,
     actions: Vec<AnyElement>,
     children: Vec<AnyElement>,
 }
 
+type FoldHandler = std::rc::Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
 impl PanelSection {
     pub fn new(title: impl Into<SharedString>) -> Self {
-        Self { title: title.into(), subtitle: None, icon: None, flush: false, actions: Vec::new(), children: Vec::new() }
+        Self {
+            title: title.into(),
+            subtitle: None,
+            icon: None,
+            flush: false,
+            fold: None,
+            actions: Vec::new(),
+            children: Vec::new(),
+        }
+    }
+
+    /// A section that folds: its title bar is a button, a chevron takes the icon's place and
+    /// a folded section shows its title bar alone. The page keeps `collapsed` and flips it in
+    /// `on_toggle`.
+    pub fn collapsible(
+        mut self,
+        collapsed: bool,
+        on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.fold = Some((collapsed, std::rc::Rc::new(on_toggle)));
+        self
     }
 
     pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
@@ -565,6 +589,12 @@ impl RenderOnce for PanelSection {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.ui();
         let (c, m) = (theme.colors, theme.m);
+        let collapsed = self.fold.as_ref().is_some_and(|(collapsed, _)| *collapsed);
+        let icon = match self.fold {
+            Some(_) if collapsed => Some(IconName::ChevronRight),
+            Some(_) => Some(IconName::ChevronDown),
+            None => self.icon,
+        };
         col()
             .flex_none()
             .bg(c.bg_surface)
@@ -572,15 +602,21 @@ impl RenderOnce for PanelSection {
             .border_color(c.border)
             .child(
                 row()
+                    .id(ElementId::Name(format!("section-{}", self.title).into()))
                     .justify_between()
                     .gap(m.space_2)
                     .px(m.space_3)
                     .min_h(m.control_h_xl)
-                    .hairline_bottom(c.border)
+                    .when(!collapsed, |this| this.hairline_bottom(c.border))
+                    .when_some(self.fold, |this, (_, toggle)| {
+                        this.cursor(CursorStyle::PointingHand)
+                            .hover(|s| s.bg(c.bg_hover))
+                            .on_click(move |event, window, cx| toggle(event, window, cx))
+                    })
                     .child(
                         row()
                             .gap(m.space_2)
-                            .when_some(self.icon, |this, icon| this.child(Icon::new(icon).color(c.text_muted)))
+                            .when_some(icon, |this, icon| this.child(Icon::new(icon).color(c.text_muted)))
                             .child(
                                 row()
                                     .items_baseline()
@@ -593,7 +629,9 @@ impl RenderOnce for PanelSection {
                     )
                     .child(row().flex_none().gap(m.space_1).children(self.actions)),
             )
-            .child(col().when(!self.flush, |this| this.p(m.space_4)).children(self.children))
+            .when(!collapsed, |this| {
+                this.child(col().when(!self.flush, |this| this.p(m.space_4)).children(self.children))
+            })
     }
 }
 

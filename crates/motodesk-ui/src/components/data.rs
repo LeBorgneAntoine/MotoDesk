@@ -542,13 +542,15 @@ pub struct InfoItem {
     pub icon: Option<IconName>,
     pub mono: bool,
     pub block: bool,
+    /// What stands for a missing value, in place of the dash.
+    pub placeholder: Option<SharedString>,
 }
 
 impl InfoItem {
     /// An empty or missing value shows as a dash.
     pub fn new(label: impl Into<SharedString>, value: Option<impl Into<SharedString>>) -> Self {
         let value = value.map(Into::into).filter(|v: &SharedString| !v.trim().is_empty());
-        Self { label: label.into(), value, icon: None, mono: false, block: false }
+        Self { label: label.into(), value, icon: None, mono: false, block: false, placeholder: None }
     }
 
     pub fn icon(mut self, icon: IconName) -> Self {
@@ -559,6 +561,12 @@ impl InfoItem {
     /// Fixed-width value: identifiers, serial numbers, plates.
     pub fn mono(mut self) -> Self {
         self.mono = true;
+        self
+    }
+
+    /// The words shown when there is no value: "Aucun seuil", "Non classé".
+    pub fn placeholder(mut self, text: impl Into<SharedString>) -> Self {
+        self.placeholder = Some(text.into());
         self
     }
 
@@ -624,7 +632,7 @@ impl RenderOnce for InfoList {
                         ))
                         .text_color(if empty { c.text_subtle } else { c.text })
                         .when(item.mono, |this| this.font_family(FONT_MONO))
-                        .child(item.value.unwrap_or_else(|| "—".into())),
+                        .child(item.value.or(item.placeholder).unwrap_or_else(|| "—".into())),
                 )
         }))
     }
@@ -793,7 +801,11 @@ impl RenderOnce for ListRow {
                         .child(count),
                 )
             })
-            .children(self.trailing)
+            // The buttons at the end sit in the row's own padding: a row with one is as tall as
+            // a row without.
+            .when(!self.trailing.is_empty(), |this| {
+                this.child(row().flex_none().gap(m.space_1).my(-m.space_2).children(self.trailing))
+            })
             .when_some(on_click, |this, handler| this.on_click(move |event, window, cx| handler(event, window, cx)))
     }
 }
