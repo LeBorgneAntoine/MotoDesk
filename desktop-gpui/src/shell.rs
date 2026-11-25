@@ -4,11 +4,13 @@
 use std::time::Duration;
 
 use chrono::Datelike as _;
+use motodesk_client::settings;
 use motodesk_client::sync::{self, SyncStatus};
 use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
 
+use crate::appearance;
 use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::pages::clients::ClientsPage;
@@ -56,6 +58,20 @@ impl Shell {
             }
         })
         .detach();
+        // The look the shop chose, from the same settings as the Svelte interface.
+        cx.api(
+            |client| async move { settings::list(&client).await },
+            |_, settings, cx| {
+                let Ok(settings) = settings else { return };
+                let system_is_dark = matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
+                let look = appearance::from_settings(&settings, system_is_dark);
+                UiTheme::update(cx, |theme| {
+                    theme.mode = look.mode;
+                    theme.accent = look.accent;
+                    theme.density = look.density;
+                });
+            },
+        );
         Self { clients: None, sync: None, _subscriptions: subscriptions }
     }
 

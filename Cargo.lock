@@ -5556,6 +5556,7 @@ dependencies = [
  "motodesk-server",
  "motodesk-ui",
  "rand 0.8.8",
+ "serde_json",
  "tokio",
  "tracing",
 ]
