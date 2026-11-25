@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "desktop/src-tauri",
+    "desktop-gpui",
+    "crates/motodesk-client",
     "crates/motodesk-core",
     "crates/motodesk-db",
     "crates/motodesk-fiscal",

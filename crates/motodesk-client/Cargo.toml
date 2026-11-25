@@ -1,0 +1,20 @@
+[package]
+name = "motodesk-client"
+version = "0.1.0"
+edition = "2021"
+description = "Typed access to Motodesk's local API and cloud accounts, for the native interface"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+axum = "0.7"
+tower = { version = "0.5", features = ["util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["sync", "time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+motodesk-server = { path = "../motodesk-server", features = ["test-support"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { workspace = true }
