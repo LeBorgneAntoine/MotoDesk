@@ -11,19 +11,20 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, comptes, équipe, postes du réseau, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
 | Écran | État |
 |---|---|
 | Connexion et inscription (en ligne et réseau local), clé de récupération | migré |
+| Tableau de bord (indicateurs, modules, activité récente) : l'écran d'accueil | migré |
 | Clients & Véhicules | migré |
 | Parc VN/VO (liste, fiche, vente avec reprise) | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Tableau de bord, Atelier, Inventaire, Ventes, Comptabilité, Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
+| Atelier, Inventaire, Ventes, Comptabilité, Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -37,7 +38,9 @@ l'invitation dans le presse-papiers : le bouton n'a pas été essayé dans l'app
 Non repris pour l'instant sur les écrans migrés : « Mot de passe perdu ? » et « Restaurer une
 sauvegarde » sur la page de connexion, l'impression de la clé de récupération, les ventes et
 ordres d'atelier dans la fiche client (ils arrivent avec leurs écrans), les bandeaux d'alerte et
-les menus de la barre de titre. Vendre un véhicule du parc crée bien la facture brouillon, mais
+les menus de la barre de titre. Avec ces menus manquent ce qu'ils ouvraient depuis le tableau de
+bord : les raccourcis (Ctrl+N, F5...) et les fenêtres d'aide (documentation, raccourcis, à
+propos). Une ligne de l'activité récente mène à l'écran Ventes, pas encore migré. Vendre un véhicule du parc crée bien la facture brouillon, mais
 l'écran Ventes qui doit l'ouvrir n'est pas encore migré.
 
 ## Lancer
@@ -94,7 +97,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Tableau de bord, Inventaire, Ventes, Atelier, Comptabilité,
+Ordre prévu : Inventaire, Ventes, Atelier, Comptabilité,
 Paramètres, Import, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.

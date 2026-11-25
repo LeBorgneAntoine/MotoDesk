@@ -11,6 +11,7 @@
 pub mod auth;
 pub mod clients;
 pub mod cloud;
+pub mod dashboard;
 pub mod employees;
 pub mod error;
 pub mod local_account;

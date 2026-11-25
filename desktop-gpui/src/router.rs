@@ -7,13 +7,13 @@ use std::collections::BTreeMap;
 
 use motodesk_ui::gpui::{App, AppContext as _, Context, Entity, Global, SharedString};
 
+pub const DASHBOARD: &str = "dashboard";
 pub const CLIENTS: &str = "clients";
 pub const PARC: &str = "parc";
 pub const EMPLOYEES: &str = "employees";
 
-/// The screen the app opens on. It will be the dashboard once that screen is migrated; until
-/// then, the first screen that is.
-pub const HOME: &str = CLIENTS;
+/// The screen the app opens on.
+pub const HOME: &str = DASHBOARD;
 
 pub struct Router {
     current: SharedString,

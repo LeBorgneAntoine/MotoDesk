@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod clients;
+pub mod dashboard;
 pub mod employees;
 pub mod parc;
 pub mod vehicle;

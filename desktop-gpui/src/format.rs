@@ -23,7 +23,8 @@ pub fn date(iso: &str) -> String {
 }
 
 /// A moment as the service stores it (`2026-03-07T09:15:00Z`, or SQLite's
-/// `2026-03-07 09:15:00`, both in UTC) → `07/03/2026 10:15` on this PC's clock.
+/// `2026-03-07 09:15:00`, both in UTC) → `07/03/2026 10:15` on this PC's clock. A day
+/// without an hour (`2026-03-07`) stays a day: `07/03/2026`.
 pub fn date_time(stored: &str) -> String {
     date_time_in(stored, &chrono::Local)
 }
@@ -38,7 +39,7 @@ where
     });
     match moment {
         Ok(moment) => moment.with_timezone(zone).format("%d/%m/%Y %H:%M").to_string(),
-        Err(_) => stored.to_string(),
+        Err(_) => date(stored),
     }
 }
 
@@ -55,6 +56,13 @@ pub fn euros(cents: i64) -> String {
         grouped.push(digit);
     }
     format!("{sign}{grouped},{:02}\u{a0}€", cents % 100)
+}
+
+/// Cents → `1 235 €`: whole euros, for a headline figure.
+pub fn euros_whole(cents: i64) -> String {
+    let rounded = (cents.unsigned_abs() + 50) / 100;
+    let sign = if cents < 0 && rounded > 0 { "-" } else { "" };
+    format!("{sign}{}\u{a0}€", integer(rounded as i64))
 }
 
 /// "1 234,50" or "1234.5" → cents. Empty or unreadable → `None`.
@@ -135,6 +143,7 @@ mod tests {
         assert_eq!(date_time_in("2026-03-07T09:15:00Z", &paris_in_winter), "07/03/2026 10:15");
         assert_eq!(date_time_in("2026-03-07T23:30:12.345+00:00", &paris_in_winter), "08/03/2026 00:30");
         assert_eq!(date_time_in("2026-03-07 09:15:00", &paris_in_winter), "07/03/2026 10:15");
+        assert_eq!(date_time_in("2026-03-07", &paris_in_winter), "07/03/2026", "a day has no hour to shift");
         assert_eq!(date_time_in("hier", &paris_in_winter), "hier");
         assert_eq!(date_time_in("", &paris_in_winter), "");
     }
@@ -148,6 +157,11 @@ mod tests {
         assert_eq!(euros(-5), "-0,05\u{a0}€");
         assert_eq!(euros(0), "0,00\u{a0}€");
         assert_eq!(integer(12_500), "12\u{202f}500");
+        assert_eq!(euros_whole(1_284_550), "12\u{202f}846\u{a0}€");
+        assert_eq!(euros_whole(149), "1\u{a0}€");
+        assert_eq!(euros_whole(150), "2\u{a0}€");
+        assert_eq!(euros_whole(-150), "-2\u{a0}€");
+        assert_eq!(euros_whole(-49), "0\u{a0}€");
     }
 
     #[test]
