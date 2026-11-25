@@ -21,9 +21,10 @@ use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
 
-use self::forms::{PaymentForm, SaleForm, percent};
+use self::forms::{PaymentForm, SaleForm};
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
+use crate::pages::lines::{LineEditor, LinesHost, percent};
 use crate::router::Router;
 
 /// How long the list waits after the last keystroke before searching.
@@ -449,7 +450,8 @@ impl SalesPage {
 
     /// A field of the document form changed.
     pub(super) fn form_changed(&mut self, cx: &mut Context<Self>) {
-        let Some(form) = self.form.as_ref() else { return };
+        let Some(form) = self.form.as_mut() else { return };
+        form.recheck(cx);
         let dirty = form.is_dirty(cx);
         if let Some(id) = self.layer(SALE, cx) {
             self.update_panels(cx, |stack| stack.set_dirty(&id, dirty));
@@ -1165,6 +1167,16 @@ impl SalesPage {
     fn panel(&self, layer: &PanelLayer, cx: &mut Context<Self>) -> Panel {
         let panel = Panel::new(&self.panels, layer.id.clone());
         if layer.kind.as_ref() == PAYMENT { self.payment_panel(panel, cx) } else { self.sale_panel(panel, cx) }
+    }
+}
+
+impl LinesHost for SalesPage {
+    fn lines_mut(&mut self) -> Option<&mut LineEditor> {
+        self.form.as_mut().map(|form| &mut form.lines)
+    }
+
+    fn lines_changed(&mut self, cx: &mut Context<Self>) {
+        self.form_changed(cx);
     }
 }
 

@@ -15,6 +15,7 @@ use crate::appearance;
 use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::format::humanize_error;
+use crate::pages::atelier::AtelierPage;
 use crate::pages::clients::ClientsPage;
 use crate::pages::dashboard::{DashboardPage, Module};
 use crate::pages::employees;
@@ -57,6 +58,7 @@ struct Reconnect {
 pub struct Shell {
     dashboard: Option<Entity<DashboardPage>>,
     clients: Option<Entity<ClientsPage>>,
+    atelier: Option<Entity<AtelierPage>>,
     parc: Option<Entity<ParcPage>>,
     stock: Option<Entity<StockPage>>,
     sales: Option<Entity<SalesPage>>,
@@ -105,6 +107,7 @@ impl Shell {
         Self {
             clients: None,
             dashboard: None,
+            atelier: None,
             parc: None,
             stock: None,
             sales: None,
@@ -329,6 +332,9 @@ impl Render for Shell {
         if current.as_ref() != router::CLIENTS {
             self.clients = None;
         }
+        if current.as_ref() != router::ATELIER {
+            self.atelier = None;
+        }
         if current.as_ref() != router::PARC {
             self.parc = None;
         }
@@ -360,6 +366,10 @@ impl Render for Shell {
             }
             router::CLIENTS => {
                 let page = self.clients.get_or_insert_with(|| cx.new(|cx| ClientsPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::ATELIER => {
+                let page = self.atelier.get_or_insert_with(|| cx.new(|cx| AtelierPage::new(window, cx))).clone();
                 page.into_any_element()
             }
             router::PARC => {

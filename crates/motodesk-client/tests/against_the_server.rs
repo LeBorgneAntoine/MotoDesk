@@ -11,6 +11,7 @@ use motodesk_client::products::{
 };
 use motodesk_client::sales::{self, DraftStatus, ListQuery as ListSales, PaymentInput, SaleInput, SaleLineInput};
 use motodesk_client::stock::{self, MovementInput, SupplierInput};
+use motodesk_client::workshop::{NewOrder, OrderEdit, Step, WorkshopLineInput};
 use motodesk_client::{
     dashboard, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local, TokenStore,
 };
@@ -461,6 +462,82 @@ async fn a_quote_becomes_an_invoice_or_a_repair_order_and_is_kept() {
     let order = workshop::create_order_from_quote(&api, &quote.id).await.unwrap();
     assert!(!order.id.is_empty());
     assert!(sales::get(&api, &quote.id).await.unwrap().reference.is_some(), "the quote took its number on the way");
+}
+
+#[tokio::test]
+async fn a_repair_order_goes_through_the_workshop_and_becomes_an_invoice() {
+    let api = client().await;
+    let owner = clients::create(&api, &ClientInput { last_name: "Le Gall".into(), ..Default::default() }).await.unwrap();
+
+    let order = workshop::create(
+        &api,
+        &NewOrder { label: "Révision 10 000 km".into(), client_id: Some(owner.id.clone()), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    assert_eq!((order.status, order.client_name.as_deref()), (Step::Pending, Some("Le Gall")));
+
+    // The form: a part at its shelf price, an hour and a half of labour, the mileage.
+    let edit = OrderEdit {
+        label: "Révision 10 000 km".into(),
+        client_id: Some(owner.id.clone()),
+        mileage: Some(10_250),
+        fuel_level: Some("1/2".into()),
+        promised_at: Some("2026-12-01".into()),
+        notes: Some("Bruit à l'avant.".into()),
+        lines: vec![
+            WorkshopLineInput {
+                label: Some("Bidon d'huile".into()),
+                quantity_milli: 2_000,
+                unit_price_ht_cents: 833,
+                unit_price_ttc_cents: Some(999),
+                vat_rate_bp: 2000,
+                ..Default::default()
+            },
+            WorkshopLineInput {
+                label: Some("Main d'œuvre".into()),
+                quantity_milli: 1_500,
+                unit_price_ht_cents: 6_000,
+                vat_rate_bp: 2000,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let saved = workshop::update(&api, &order.id, &edit).await.unwrap();
+    assert_eq!((saved.mileage, saved.fuel_level.as_deref(), saved.lines.len()), (Some(10_250), Some("1/2"), 2));
+    assert_eq!(saved.lines[0].unit_price_ttc_cents, Some(999));
+
+    // Sending a field empty clears it; moving the card touches nothing else.
+    let cleared = workshop::update(&api, &order.id, &OrderEdit { fuel_level: None, ..edit.clone() }).await.unwrap();
+    assert_eq!(cleared.fuel_level, None);
+    let moved = workshop::set_step(&api, &order.id, Step::InProgress).await.unwrap();
+    assert_eq!((moved.status, moved.mileage, moved.lines.len()), (Step::InProgress, Some(10_250), 2));
+    workshop::set_step(&api, &order.id, Step::Ready).await.unwrap();
+    assert!(workshop::set_step(&api, &order.id, Step::Invoiced).await.is_err(), "invoiced is never set by hand");
+
+    let board = workshop::list_board(&api).await.unwrap();
+    assert_eq!(board.iter().map(|o| (o.id.as_str(), o.status)).collect::<Vec<_>>(), [(order.id.as_str(), Step::Ready)]);
+
+    // Invoicing drafts the invoice; asking again brings the same draft up to date.
+    let draft = workshop::invoice(&api, &order.id).await.unwrap();
+    assert!(!draft.refreshed_from_order);
+    let again = workshop::invoice(&api, &order.id).await.unwrap();
+    assert_eq!((again.id.as_str(), again.refreshed_from_order), (draft.id.as_str(), true));
+    let invoice = sales::get(&api, &draft.id).await.unwrap();
+    // 2 x 9,99 TTC + 1,5 x 60,00 HT (108,00 TTC).
+    assert_eq!((invoice.lines.len(), invoice.total_ttc_cents), (2, Some(1_998 + 10_800)));
+
+    // Only the validated invoice makes the order "Facturé", and then it no longer changes.
+    sales::validate(&api, &draft.id).await.unwrap();
+    let invoiced = workshop::get(&api, &order.id).await.unwrap();
+    assert_eq!((invoiced.status, invoiced.sale_id.as_deref()), (Step::Invoiced, Some(draft.id.as_str())));
+    assert!(workshop::update(&api, &order.id, &edit).await.is_err());
+
+    // An order that was not invoiced can be removed.
+    let mistake = workshop::create(&api, &NewOrder { label: "Erreur de saisie".into(), ..Default::default() }).await.unwrap();
+    workshop::delete(&api, &mistake.id).await.unwrap();
+    assert!(workshop::list_board(&api).await.unwrap().iter().all(|o| o.id != mistake.id));
 }
 
 #[tokio::test]
