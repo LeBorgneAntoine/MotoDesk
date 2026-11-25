@@ -6,6 +6,7 @@
 //! view, on the main thread.
 
 use std::future::Future;
+use std::path::PathBuf;
 
 use motodesk_client::Client;
 use motodesk_ui::gpui::{App, Context, Global, Window};
@@ -21,6 +22,51 @@ impl Global for Backend {}
 /// The client, or `None` while the service is still starting.
 pub fn client(cx: &App) -> Option<Client> {
     cx.try_global::<Backend>().map(|backend| backend.client.clone())
+}
+
+/// Where the system's "save as" dialog starts: the user's documents, or wherever the app
+/// runs when there is no such folder.
+fn documents_dir() -> PathBuf {
+    let documents = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(|home| PathBuf::from(home).join("Documents"));
+    documents.filter(|folder| folder.is_dir()).unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub trait SaveExt<V: 'static> {
+    /// Ask the user where to save `bytes` (the system's "save as" dialog, offering
+    /// `suggested_name`), write them there, then call `done` on the view with the path
+    /// written: `None` when the user closed the dialog.
+    fn save_file(
+        &mut self,
+        window: &Window,
+        suggested_name: &str,
+        bytes: Vec<u8>,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    );
+}
+
+impl<V: 'static> SaveExt<V> for Context<'_, V> {
+    fn save_file(
+        &mut self,
+        window: &Window,
+        suggested_name: &str,
+        bytes: Vec<u8>,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    ) {
+        let chosen = self.prompt_for_new_path(&documents_dir(), Some(suggested_name));
+        self.spawn_in(window, async move |view, cx| {
+            let outcome = match chosen.await {
+                Ok(Ok(Some(path))) => {
+                    // Off the interface's thread: a year of entries is a file of some size.
+                    cx.background_executor().spawn(async move { std::fs::write(&path, bytes).map(|()| Some(path)) }).await
+                }
+                // The dialog was closed, or went away with the window.
+                Ok(Ok(None)) | Err(_) => Ok(None),
+                Ok(Err(error)) => Err(std::io::Error::other(error.to_string())),
+            };
+            let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
+        })
+        .detach();
+    }
 }
 
 pub trait ApiExt<V: 'static> {

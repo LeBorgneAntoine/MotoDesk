@@ -13,6 +13,7 @@ pub const ATELIER: &str = "atelier";
 pub const PARC: &str = "parc";
 pub const STOCK: &str = "stock";
 pub const SALES: &str = "sales";
+pub const BILLING: &str = "billing";
 pub const EMPLOYEES: &str = "employees";
 
 /// The screen the app opens on.

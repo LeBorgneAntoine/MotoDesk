@@ -5478,6 +5478,7 @@ name = "motodesk-client"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "motodesk-server",
  "reqwest 0.12.28",
  "serde",

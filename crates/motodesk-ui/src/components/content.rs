@@ -338,6 +338,41 @@ impl RenderOnce for Spinner {
     }
 }
 
+// ---- Preformatted ---------------------------------------------------------------------------
+
+/// Text shown as it is, line for line, in fixed-width type: the first lines of a file.
+/// A line too long for the block is cut at its edge, never wrapped.
+#[derive(IntoElement)]
+pub struct Preformatted {
+    lines: Vec<SharedString>,
+}
+
+impl Preformatted {
+    pub fn new(text: impl AsRef<str>) -> Self {
+        // An empty line still takes its height.
+        let lines = text.as_ref().lines().map(|line| if line.is_empty() { "\u{a0}".into() } else { line.to_string().into() });
+        Self { lines: lines.collect() }
+    }
+}
+
+impl RenderOnce for Preformatted {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
+        col()
+            .w_full()
+            .overflow_hidden()
+            .p(m.space_3)
+            .bg(c.bg_app)
+            .border_1()
+            .border_color(c.border)
+            .font_family(crate::theme::FONT_MONO)
+            .fs(m.fs_xs)
+            .text_color(c.text)
+            .children(self.lines.into_iter().map(|line| div().whitespace_nowrap().child(line)))
+    }
+}
+
 // ---- StateView ------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

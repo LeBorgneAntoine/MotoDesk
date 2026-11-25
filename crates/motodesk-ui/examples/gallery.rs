@@ -357,6 +357,11 @@ impl Gallery {
                 ),
             )
             .child(
+                Self::block("Preformatted", cx).child(div().w(px(560.)).child(Preformatted::new(
+                    "JournalCode|JournalLib|EcritureNum|EcritureDate|CompteNum|CompteLib|Debit|Credit\nVT|Ventes|FA-2026-CF60F-00001|20261105|411000|Clients|120,00|0,00\nVT|Ventes|FA-2026-CF60F-00001|20261105|706000|Prestations|0,00|100,00",
+                ))),
+            )
+            .child(
                 Self::block("TileButton", cx).child(
                     row()
                         .w(px(760.))
