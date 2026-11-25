@@ -53,11 +53,15 @@ async fn stats(State(state): State<SharedState>) -> LocalResult<Json<Value>> {
 /// Sealed documents since `since`, credit notes included. A credit note is stored
 /// with a negative total, so it is added like any other document; subtracting it
 /// (as this once did) turned every refund into extra revenue.
+///
+/// Documents sealed before the seal started filling in a missing date can have
+/// none, and can no longer be given one; they count on the day they were sealed.
 async fn revenue_since(state: &SharedState, since: &str) -> LocalResult<i64> {
     let (revenue,): (i64,) = sqlx::query_as(
         r#"SELECT CAST(COALESCE(SUM(total_ttc_cents), 0) AS INTEGER) FROM sales
            WHERE deleted_at IS NULL AND locked_at IS NOT NULL
-             AND sale_date >= $1 AND document_kind != 'quote'"#,
+             AND COALESCE(NULLIF(sale_date, ''), substr(locked_at, 1, 10)) >= $1
+             AND document_kind != 'quote'"#,
     )
     .bind(since)
     .fetch_one(&state.db)
@@ -149,5 +153,30 @@ mod tests {
         sealed(&state, "credit_note", -3_000).await;
         sealed(&state, "quote", 99_999).await;
         assert_eq!(revenue_since(&state, "2026-11-01").await.unwrap(), 7_000);
+    }
+
+    /// Such rows exist (a draft could lose its date before being sealed) and the
+    /// database refuses to rewrite them, so the reader has to cope.
+    #[tokio::test]
+    async fn a_document_sealed_without_a_date_counts_on_the_day_it_was_sealed() {
+        let state = shop().await;
+        sealed(&state, "invoice", 10_000).await;
+        for (date, total) in [(None, 2_500), (Some(""), 400)] {
+            sqlx::query(
+                "INSERT INTO sales (id, status, document_kind, sale_date, total_ttc_cents, locked_at,
+                                    created_at, updated_at, row_version, field_meta)
+                 VALUES ($1, 'invoice', 'invoice', $2, $3, '2026-11-12T09:00:00Z',
+                         '2026-11-12T09:00:00Z', '2026-11-12T09:00:00Z', 1, '{}')",
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(date)
+            .bind(total)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        }
+        assert_eq!(revenue_since(&state, "2026-11-01").await.unwrap(), 12_900);
+        assert_eq!(revenue_since(&state, "2026-11-10").await.unwrap(), 2_900);
+        assert_eq!(revenue_since(&state, "2026-12-01").await.unwrap(), 0);
     }
 }
