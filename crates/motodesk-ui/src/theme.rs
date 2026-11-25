@@ -401,6 +401,12 @@ impl UiTheme {
             k.primary_hover = c.accent_hover;
             k.primary_active = c.accent_active;
             k.primary_foreground = c.text_on_accent;
+            // The Kit's own buttons (a dialog's "confirm") have their colours apart from the
+            // primary colour: without these they stay the Kit's black.
+            k.button_primary = c.accent;
+            k.button_primary_hover = c.accent_hover;
+            k.button_primary_active = c.accent_active;
+            k.button_primary_foreground = c.text_on_accent;
             k.secondary = c.bg_surface;
             k.secondary_hover = c.bg_hover;
             k.secondary_active = c.bg_active;
