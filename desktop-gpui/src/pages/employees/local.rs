@@ -686,6 +686,12 @@ impl Render for LocalAccounts {
         let (c, m) = (theme.colors, theme.m);
         let me = AuthStore::global(cx).read(cx).user.as_ref().map(|user| user.id.clone());
         let loaded = self.load_error.is_none() && !(self.loading && self.accounts.is_empty());
+        let total = self.accounts.len();
+        let count = if !loaded {
+            String::new()
+        } else {
+            format!("{total} compte{}", if total > 1 { "s" } else { "" })
+        };
 
         col()
             .size_full()
@@ -693,28 +699,23 @@ impl Render for LocalAccounts {
             .child(
                 PageToolbar::new("Employés")
                     .icon(IconName::UsersRound)
-                    .subtitle("Gérez les accès de votre équipe et leurs rôles."),
+                    .subtitle("Gérez les accès de votre équipe et leurs rôles.")
+                    .meta(count)
+                    .trailing(
+                        Button::new("account-new").primary().icon(IconName::UserPlus).label("Nouveau compte").on_click(
+                            cx.listener(|this, _, window, cx| this.open_form(Target::Create, window, cx)),
+                        ),
+                    ),
             )
             .child(
                 div().id("local-accounts").flex_1().min_h_0().overflow_y_scroll().child(
+                    // The whole width, like the online team: no column to leave half the window empty.
                     col()
-                        .max_w(px(960.))
                         .p(m.space_5)
                         .gap(m.space_4)
-                        .child(
-                            row()
-                                .justify_between()
-                                .items_start()
-                                .gap(m.space_4)
-                                .child(div().flex_1().min_w_0().fs(m.fs_sm).text_color(c.text_muted).child(
-                                    "Ces comptes ouvrent une session sur tous les postes du réseau local de l'atelier. Seul un administrateur peut ajouter un nouveau poste, tant qu'un poste du réseau est allumé.",
-                                ))
-                                .child(
-                                    Button::new("account-new").primary().icon(IconName::UserPlus).label("Nouveau compte").on_click(
-                                        cx.listener(|this, _, window, cx| this.open_form(Target::Create, window, cx)),
-                                    ),
-                                ),
-                        )
+                        .child(div().fs(m.fs_sm).text_color(c.text_muted).child(
+                            "Ces comptes ouvrent une session sur tous les postes du réseau local de l'atelier. Seul un administrateur peut ajouter un nouveau poste, tant qu'un poste du réseau est allumé.",
+                        ))
                         .children(self.recovery_card(cx))
                         .child(self.accounts_table(me, cx))
                         .when(loaded, |this| {
