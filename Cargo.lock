@@ -5554,6 +5554,7 @@ dependencies = [
  "chrono",
  "hex",
  "motodesk-client",
+ "motodesk-fiscal",
  "motodesk-server",
  "motodesk-ui",
  "rand 0.8.8",

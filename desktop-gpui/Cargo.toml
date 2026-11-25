@@ -12,6 +12,8 @@ path = "src/main.rs"
 motodesk-ui = { path = "../crates/motodesk-ui" }
 motodesk-client = { path = "../crates/motodesk-client" }
 motodesk-server = { path = "../crates/motodesk-server" }
+# The totals of a document on screen are computed as the service seals them.
+motodesk-fiscal = { path = "../crates/motodesk-fiscal" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 chrono = { workspace = true }
 tracing = "0.1"

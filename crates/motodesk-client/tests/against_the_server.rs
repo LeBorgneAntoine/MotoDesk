@@ -9,9 +9,10 @@ use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAcc
 use motodesk_client::products::{
     self, CategoryInput, ListQuery as ListProducts, ProductInput, Unit, VariantAttr, VariantInput,
 };
+use motodesk_client::sales::{self, DraftStatus, ListQuery as ListSales, PaymentInput, SaleInput, SaleLineInput};
 use motodesk_client::stock::{self, MovementInput, SupplierInput};
 use motodesk_client::{
-    dashboard, local_account, network, recovery, settings, sync, Client, Cloud, Local, TokenStore,
+    dashboard, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local, TokenStore,
 };
 use motodesk_server::local_server::{loopback_api, test_support};
 
@@ -324,6 +325,142 @@ async fn the_catalogue_goes_through_its_whole_life() {
     assert!(products::list(&api, &ListProducts::default()).await.unwrap().is_empty());
     products::delete_category(&api, &brakes.id).await.unwrap();
     assert!(products::list_categories(&api).await.unwrap().iter().all(|c| c.id != brakes.id));
+}
+
+#[tokio::test]
+async fn a_document_goes_from_draft_to_sealed_invoice_paid_then_credited() {
+    let api = client().await;
+    assert_eq!(fiscal::check_profile(&api).await.unwrap().blocker(), None, "the fixture shop can invoice");
+
+    let buyer = clients::create(&api, &ClientInput { last_name: "Kervella".into(), ..Default::default() }).await.unwrap();
+    let lines = vec![
+        // A shelf price: 9,99 TTC is what the customer pays, whatever the rounding of its HT.
+        SaleLineInput {
+            label: Some("Bidon d'huile".into()),
+            quantity_milli: 2_000,
+            unit_price_ht_cents: 833,
+            unit_price_ttc_cents: Some(999),
+            vat_rate_bp: 2000,
+            ..Default::default()
+        },
+        SaleLineInput {
+            label: Some("Main d'œuvre".into()),
+            quantity_milli: 1_500,
+            unit_price_ht_cents: 6_000,
+            vat_rate_bp: 2000,
+            discount_bp: 1000,
+            ..Default::default()
+        },
+    ];
+    let draft = sales::create(
+        &api,
+        &SaleInput {
+            client_id: Some(buyer.id.clone()),
+            sale_date: Some("2026-11-05".into()),
+            lines: lines.clone(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!((draft.status.as_str(), draft.is_sealed(), draft.lines.len()), ("draft", false, 2));
+    // 2 x 9,99 TTC = 19,98 ; 1,5 x 60,00 HT - 10 % = 81,00 HT = 97,20 TTC.
+    assert_eq!(draft.total_ttc_cents, Some(1_998 + 9_720));
+    assert_eq!(draft.lines[0].shelf_price_cents(), Some(999));
+    assert_eq!(draft.lines[1].shelf_price_cents(), None);
+
+    // The list finds it by its customer, and by its status.
+    let found = sales::list(&api, &ListSales { q: "kervella".into(), ..Default::default() }).await.unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].client_name.as_deref(), found[0].due_cents()), (Some("Kervella"), None));
+    assert_eq!(sales::list(&api, &ListSales { status: "draft".into(), ..Default::default() }).await.unwrap().len(), 1);
+    assert!(sales::list(&api, &ListSales { status: "paid".into(), ..Default::default() }).await.unwrap().is_empty());
+
+    // An edit replaces the lines.
+    let edited = sales::update(
+        &api,
+        &draft.id,
+        &SaleInput {
+            client_id: Some(buyer.id.clone()),
+            sale_date: Some("2026-11-05".into()),
+            notes: Some("À régler à réception.".into()),
+            lines: vec![lines[1].clone()],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!((edited.lines.len(), edited.total_ttc_cents), (1, Some(9_720)));
+
+    // Sealing gives it its number and closes it to edits and deletion.
+    let sealed = sales::validate(&api, &draft.id).await.unwrap();
+    assert!(sealed.is_sealed() && sealed.reference.is_some());
+    assert_eq!(sealed.outstanding_cents, 9_720);
+    assert!(sales::update(&api, &draft.id, &SaleInput::default()).await.is_err());
+    assert!(sales::delete(&api, &draft.id).await.is_err());
+
+    // A receipt, taken back by the opposite movement, then the full payment.
+    let receipt = sales::add_payment(
+        &api,
+        &draft.id,
+        &PaymentInput { amount_cents: 5_000, method: "cheque".into(), bank: Some("Crédit Agricole".into()), ..Default::default() },
+    )
+    .await
+    .unwrap();
+    assert!(receipt.is_reversible());
+    assert_eq!(sales::get(&api, &draft.id).await.unwrap().outstanding_cents, 4_720);
+    let reversal = sales::reverse_payment(&api, &receipt.id).await.unwrap();
+    assert_eq!((reversal.amount_cents, reversal.is_reversible()), (-5_000, false));
+    let too_much = sales::add_payment(&api, &draft.id, &PaymentInput { amount_cents: 9_721, method: "cash".into(), ..Default::default() }).await;
+    assert!(too_much.is_err(), "a receipt cannot exceed what is owed");
+    sales::add_payment(&api, &draft.id, &PaymentInput { amount_cents: 9_720, method: "card".into(), ..Default::default() }).await.unwrap();
+    let paid = sales::get(&api, &draft.id).await.unwrap();
+    assert_eq!((paid.status.as_str(), paid.outstanding_cents, paid.payments.len()), ("paid", 0, 3));
+
+    // A mistake on a sealed document is corrected by a credit note, itself sealed.
+    let note = sales::create_credit_note(&api, &draft.id).await.unwrap();
+    assert!(note.is_credit_note() && note.is_sealed());
+    assert_eq!(note.corrects_sale_id.as_deref(), Some(draft.id.as_str()));
+    assert_eq!(note.total_ttc_cents, Some(-9_720));
+}
+
+#[tokio::test]
+async fn a_quote_becomes_an_invoice_or_a_repair_order_and_is_kept() {
+    let api = client().await;
+    let quote = sales::create(
+        &api,
+        &SaleInput {
+            status: DraftStatus::Quote,
+            lines: vec![SaleLineInput {
+                label: Some("Révision".into()),
+                quantity_milli: 1_000,
+                unit_price_ht_cents: 10_000,
+                vat_rate_bp: 2000,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(quote.is_quote() && !quote.is_closed_quote());
+
+    let invoice = sales::convert_quote(&api, &quote.id).await.unwrap();
+    assert_eq!((invoice.status.as_str(), invoice.source_quote_id.as_deref()), ("draft", Some(quote.id.as_str())));
+    assert_eq!(invoice.total_ttc_cents, Some(12_000));
+    // Asking again gives the same draft, and the quote now points at it.
+    assert_eq!(sales::convert_quote(&api, &quote.id).await.unwrap().id, invoice.id);
+    let kept = sales::get(&api, &quote.id).await.unwrap();
+    assert!(kept.is_closed_quote());
+    assert_eq!(kept.converted_to_sale_id.as_deref(), Some(invoice.id.as_str()));
+
+    // A draft is deleted freely.
+    sales::delete(&api, &invoice.id).await.unwrap();
+    assert!(!sales::get(&api, &quote.id).await.unwrap().is_closed_quote(), "the quote is open again");
+
+    let order = workshop::create_order_from_quote(&api, &quote.id).await.unwrap();
+    assert!(!order.id.is_empty());
+    assert!(sales::get(&api, &quote.id).await.unwrap().reference.is_some(), "the quote took its number on the way");
 }
 
 #[tokio::test]

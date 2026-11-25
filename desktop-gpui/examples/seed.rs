@@ -1,5 +1,6 @@
-//! Fill a new, throwaway data folder with a local network and a few customers, to look at
-//! the screens with data in them.
+//! Fill a new, throwaway data folder with a local network, a few customers, a small catalogue
+//! and a made-up company profile (so that an invoice can be validated), to look at the screens
+//! with data in them.
 //!
 //! ```text
 //! cargo run -p motodesk-gpui --example seed -- <folder>
@@ -14,7 +15,8 @@ use std::path::PathBuf;
 
 use motodesk_client::clients::{self, ClientInput, OdometerUnit, VehicleInput, VehicleType};
 use motodesk_client::local_account::{self, SetupPayload};
-use motodesk_client::{Client, Cloud, Local, TokenStore, recovery};
+use motodesk_client::products::{self, ProductInput, Unit};
+use motodesk_client::{Client, Cloud, Local, TokenStore, recovery, settings};
 use motodesk_server::local_server::{self, local_auth};
 
 const FIRST: [&str; 12] =
@@ -143,6 +145,54 @@ async fn seed(folder: PathBuf) -> anyhow::Result<usize> {
                 odometer_unit: Some(OdometerUnit::Km),
                 purchase_price_ht_cents: (i % 6 != 5).then_some(buy),
                 selling_price_ttc_cents: (i % 7 != 6).then_some(buy * 3 / 2 + 49_000),
+                ..Default::default()
+            },
+        )
+        .await?;
+    }
+
+    // The mentions an invoice must carry: without them validation is refused. All made up.
+    let profile: settings::SettingsBulk = [
+        ("shop.legal_name", serde_json::json!("Garage de démonstration")),
+        ("contact.address_line1", serde_json::json!("12 rue des Motos")),
+        ("contact.postal_code", serde_json::json!("35000")),
+        ("contact.city", serde_json::json!("Rennes")),
+        ("legal.siret", serde_json::json!("12345678900012")),
+        ("legal.legal_form", serde_json::json!("EI")),
+        ("legal.ape_code", serde_json::json!("4540Z")),
+        ("legal.vat_number", serde_json::json!("FR12123456789")),
+        ("vat.is_subject", serde_json::json!(true)),
+        ("invoicing.payment_terms_days", serde_json::json!(30)),
+        ("invoicing.late_fee_rate_bp", serde_json::json!(1000)),
+        ("invoicing.recovery_indemnity_eur", serde_json::json!(40)),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value))
+    .collect();
+    settings::set_bulk(&client, &profile).await?;
+
+    // A small catalogue: parts at a shelf price, and an hour of labour.
+    for (name, brand, sku, unit, price_ttc, stock) in [
+        ("Plaquettes de frein avant", Some("Brembo"), "BRMB-PLQ-001", Unit::Piece, 4_990, 8.),
+        ("Huile moteur 10W40", Some("Motul"), "MOT-5100-1L", Unit::Liter, 1_499, 24.),
+        ("Kit chaîne 520", Some("DID"), "DID-520-KIT", Unit::Piece, 12_900, 3.),
+        ("Chambre à air 700x25", Some("Michelin"), "MIC-CAA-700", Unit::Piece, 999, 1.),
+        ("Bougie CR8E", Some("NGK"), "NGK-CR8E", Unit::Piece, 890, 0.),
+        ("Main d'œuvre atelier", None, "MO-ATELIER", Unit::Hour, 7_200, 0.),
+    ] {
+        products::create(
+            &client,
+            &ProductInput {
+                name: name.into(),
+                brand: brand.map(str::to_string),
+                sku: Some(sku.into()),
+                unit,
+                is_service: unit == Unit::Hour,
+                selling_price_ttc_cents: Some(price_ttc),
+                vat_rate_bp: 2000,
+                stock_quantity: Some(stock),
+                low_stock_threshold: (unit != Unit::Hour).then_some(2),
+                is_active: true,
                 ..Default::default()
             },
         )

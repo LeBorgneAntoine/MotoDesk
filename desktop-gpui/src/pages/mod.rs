@@ -8,6 +8,7 @@ pub mod clients;
 pub mod dashboard;
 pub mod employees;
 pub mod parc;
+pub mod sales;
 pub mod stock;
 pub mod vehicle;
 

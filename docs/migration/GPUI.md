@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -22,10 +22,11 @@ sont pas passés.
 | Clients & Véhicules | migré |
 | Parc VN/VO (liste, fiche, vente avec reprise) | migré |
 | Inventaire (catalogue, catégories, fiche produit, variantes, réception fournisseur) | migré |
+| Ventes (devis, factures, validation, avoirs, règlements) | migré, sans l'impression |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Atelier, Ventes, Comptabilité, Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
+| Atelier, Comptabilité, Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -41,15 +42,23 @@ sauvegarde » sur la page de connexion, l'impression de la clé de récupératio
 ordres d'atelier dans la fiche client (ils arrivent avec leurs écrans), les bandeaux d'alerte et
 les menus de la barre de titre. Avec ces menus manquent ce qu'ils ouvraient depuis le tableau de
 bord : les raccourcis (Ctrl+N, F5...) et les fenêtres d'aide (documentation, raccourcis, à
-propos). Une ligne de l'activité récente mène à l'écran Ventes, pas encore migré. Sur
+propos). Sur
 l'Inventaire, les entrées de ces menus (nouveau produit, réception, nouvelle catégorie) ont
 toutes leur bouton à l'écran ; F5 actualise.
+
+**L'impression n'est pas portée** : elle arrive avec les modèles de documents. D'ici là,
+l'écran Ventes n'a ni bouton d'impression ni duplicata, et un devis ne prend son numéro qu'en
+étant transformé en facture ou en ordre de réparation (dans Svelte, il le prend aussi à
+l'impression). Une facture validée ici s'imprime depuis l'interface Svelte.
+
+Sur l'écran Ventes, la fiche d'un document montre aussi son client, que la fiche Svelte ne
+montrait pas. Les totaux affichés pendant la saisie viennent de `motodesk_fiscal::vat`, le calcul
+avec lequel le service scelle : ce qui est à l'écran est ce qui sera enregistré.
 
 Deux écarts voulus avec l'écran Svelte de l'Inventaire : la réception fournisseur s'ouvre sans
 produit choisi (Svelte présélectionnait le premier de la liste, au risque de recevoir sur le
 mauvais article), et la référence proposée pour une variante (« BRMB-PLQ-001- ») n'est pas
-enregistrée telle quelle si personne ne la complète : le service la déduit alors du modèle. Vendre un véhicule du parc crée bien la facture brouillon, mais
-l'écran Ventes qui doit l'ouvrir n'est pas encore migré.
+enregistrée telle quelle si personne ne la complète : le service la déduit alors du modèle. 
 
 ## Lancer
 
@@ -65,7 +74,7 @@ Pour regarder les écrans sans toucher aux données du magasin, travaillez sur u
 avec un profil isolé (ses secrets vont sous un autre nom dans le trousseau) :
 
 ```powershell
-cargo run -p motodesk-gpui --example seed -- C:\Temp\motodesk-demo    # 137 clients et 14 véhicules en stock, fictifs
+cargo run -p motodesk-gpui --example seed -- C:\Temp\motodesk-demo    # 137 clients, 14 véhicules en stock, 6 produits et un profil d'entreprise, fictifs
 $env:MOTODESK_PROFILE = "demo"; $env:MOTODESK_DATA_DIR = "C:\Temp\motodesk-demo"
 cargo run -p motodesk-gpui
 ```
@@ -105,7 +114,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Ventes, Atelier, Comptabilité,
+Ordre prévu : Atelier, Comptabilité,
 Paramètres, Import, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.

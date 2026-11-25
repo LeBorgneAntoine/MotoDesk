@@ -374,11 +374,19 @@ pub struct Select {
     model: SelectModel,
     placeholder: Option<SharedString>,
     disabled: bool,
+    menu_width: Option<Pixels>,
 }
 
 impl Select {
     pub fn new(model: &SelectModel) -> Self {
-        Self { model: model.clone(), placeholder: None, disabled: false }
+        Self { model: model.clone(), placeholder: None, disabled: false, menu_width: None }
+    }
+
+    /// The width of the list that opens, when the field is too narrow to read its options
+    /// (a column of a line editor). Without it the list is as wide as the field.
+    pub fn menu_width(mut self, width: Pixels) -> Self {
+        self.menu_width = Some(width);
+        self
     }
 
     pub fn placeholder(mut self, text: impl Into<SharedString>) -> Self {
@@ -401,6 +409,7 @@ impl RenderOnce for Select {
         let field = KitSelect::new(&self.model.state)
             .h(m.control_h_lg)
             .disabled(self.disabled)
+            .when_some(self.menu_width, |this, width| this.menu_width(width))
             .when_some(self.placeholder, |this, text| this.placeholder(text));
         div().w_full().text_size(m.fs_md).child(with_focus_mark(field, focused, c.border_focus))
     }
