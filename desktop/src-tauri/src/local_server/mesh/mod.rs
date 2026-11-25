@@ -81,6 +81,57 @@ fn speaks_our_version(announced: Option<&str>) -> bool {
     announced.and_then(|v| v.parse::<u32>().ok()) == Some(transport::PROTOCOL)
 }
 
+/// PCs of this company seen holding another network key: their epoch, and when.
+static OTHER_KEY: OnceLock<RwLock<HashMap<Uuid, (i64, Instant)>>> = OnceLock::new();
+
+fn other_key() -> &'static RwLock<HashMap<Uuid, (i64, Instant)>> {
+    OTHER_KEY.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// This PC's key identifier and epoch.
+async fn our_key(state: &SharedState) -> (Option<String>, i64) {
+    let kid = state.mesh_secret.read().await.as_deref().map(crate::local_server::network_devices::key_id);
+    let epoch = crate::local_server::network_devices::key_epoch(&state.db).await.unwrap_or(1);
+    (kid, epoch)
+}
+
+/// Whether this PC is the one left behind: it has no key at all, or a PC of the shop holds
+/// another one at least as recent. (Anyone on the network can claim so; all it does is show the
+/// reconnect screen, which proves the other side before taking anything from it.)
+pub async fn needs_reconnect(state: &SharedState) -> bool {
+    if !crate::local_server::local_accounts::is_standalone(&state.db).await {
+        return false;
+    }
+    let (kid, epoch) = our_key(state).await;
+    kid.is_none()
+        || other_key()
+            .read()
+            .await
+            .values()
+            .any(|(theirs, seen)| *theirs >= epoch && seen.elapsed() < PEER_TTL * 2)
+}
+
+/// How many PCs were seen still holding an older key: they wait to be reconnected (a removed
+/// PC that is switched on near the shop counts too).
+pub async fn behind_count(state: &SharedState) -> usize {
+    let (_, epoch) = our_key(state).await;
+    other_key()
+        .read()
+        .await
+        .values()
+        .filter(|(theirs, seen)| *theirs < epoch && seen.elapsed() < PEER_TTL * 2)
+        .count()
+}
+
+/// Drop every known peer: after the key changes they have to be seen again.
+pub async fn forget_peers(state: &SharedState) {
+    let mut tbl = table().write().await;
+    tbl.clear();
+    refresh_visible_peers(state, &tbl).await;
+    drop(tbl);
+    state.peers.write().await.clear();
+}
+
 fn candidates() -> &'static RwLock<HashMap<Uuid, (PeerInfo, Instant)>> {
     CANDIDATES.get_or_init(|| RwLock::new(HashMap::new()))
 }
@@ -169,10 +220,13 @@ async fn advertise(
 ) {
     let service_name = format!("Motodesk-{}", &device_id.to_string()[..8]);
     let fingerprint = state.company_fingerprint().await.unwrap_or_default();
+    let (kid, epoch) = our_key(state).await;
     let properties = [
         ("device_id".to_string(), device_id.to_string()),
         ("company".to_string(), fingerprint.clone()),
         ("version".to_string(), transport::PROTOCOL.to_string()),
+        ("kid".to_string(), kid.unwrap_or_default()),
+        ("epoch".to_string(), epoch.to_string()),
     ];
     // No address was ever given, and the daemon does not announce a service
     // without one, so no peer could be discovered. `enable_addr_auto` fills in the
@@ -263,6 +317,16 @@ async fn browse_loop(
                     continue;
                 }
                 other_version().write().await.remove(&peer_id);
+                let (kid, _) = our_key(&state).await;
+                let theirs = info.get_property_val_str("kid").filter(|k| !k.is_empty());
+                if theirs.is_some() && theirs != kid.as_deref() {
+                    let epoch = info.get_property_val_str("epoch").and_then(|e| e.parse().ok()).unwrap_or(1);
+                    tracing::debug!(peer = %peer_id, epoch, "skipping peer: another network key");
+                    other_key().write().await.insert(peer_id, (epoch, Instant::now()));
+                    table().write().await.remove(&peer_id);
+                    continue;
+                }
+                other_key().write().await.remove(&peer_id);
                 let addrs: Vec<_> = info.get_addresses().iter().copied().collect();
                 let Some(ip) = addrs.first() else { continue };
                 let entry = PeerEntry {

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::local_server::auth_guard::AdminUser;
 use crate::local_server::error::{LocalError, LocalResult};
-use crate::local_server::recovery_key;
+use crate::local_server::{network_devices, recovery_key};
 use crate::local_server::local_accounts::{self, AccountPatch, AccountView, NewAccount};
 use crate::local_server::state::SharedState;
 
@@ -21,6 +21,37 @@ pub fn router() -> Router<SharedState> {
         .route("/api/network/accounts/:id", patch(update).delete(remove))
         .route("/api/network/recovery", get(recovery_status).post(recovery_issue))
         .route("/api/network/recovery/confirm", post(recovery_confirm))
+        .route("/api/network/devices", get(devices))
+        .route("/api/network/devices/:id/remove", post(remove_device))
+}
+
+#[derive(Debug, Serialize)]
+struct DeviceView {
+    #[serde(flatten)]
+    device: network_devices::Device,
+    this_pc: bool,
+}
+
+async fn devices(State(state): State<SharedState>, _admin: AdminUser) -> LocalResult<Json<Vec<DeviceView>>> {
+    network_devices::touch_self(&state).await?;
+    let me = state.device_id().await?.to_string();
+    Ok(Json(
+        network_devices::all(&state.db)
+            .await?
+            .into_iter()
+            .map(|device| DeviceView { this_pc: device.device_id == me, device })
+            .collect(),
+    ))
+}
+
+async fn remove_device(
+    State(state): State<SharedState>,
+    admin: AdminUser,
+    Path(id): Path<String>,
+    Json(input): Json<network_devices::Removal>,
+) -> LocalResult<StatusCode> {
+    network_devices::remove(&state, &admin.user_id, &id, input).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Serialize)]

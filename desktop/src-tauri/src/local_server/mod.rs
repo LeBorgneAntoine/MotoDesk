@@ -15,6 +15,7 @@ pub mod mesh;
 pub mod recovery;
 pub mod recovery_key;
 pub mod mesh_auth;
+pub mod network_devices;
 pub mod pos;
 pub mod routes;
 pub mod secrets;

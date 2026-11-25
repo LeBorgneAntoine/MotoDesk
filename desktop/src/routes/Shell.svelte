@@ -5,6 +5,7 @@
    */
   import { getRecoveryStatus } from "$lib/api/recovery";
   import { getMeshStatus } from "$lib/api/meshAdmin";
+  import ReconnectDialog from "./ReconnectDialog.svelte";
   import { onMount } from "svelte";
   import {
     Alert,
@@ -169,13 +170,22 @@
 
   // A PC of the shop on another version is silently out of the exchanges: say so.
   let otherVersion = $state(0);
+  // A removed PC changes the network's key: the others are reconnected one by one.
+  let needsReconnect = $state(false);
+  let behind = $state(0);
+  let reconnecting = $state(false);
   async function refreshMeshStatus(): Promise<void> {
     if (!authStore.isLocal) {
       otherVersion = 0;
+      needsReconnect = false;
+      behind = 0;
       return;
     }
     try {
-      otherVersion = (await getMeshStatus()).other_version_count ?? 0;
+      const mesh = await getMeshStatus();
+      otherVersion = mesh.other_version_count ?? 0;
+      needsReconnect = mesh.needs_reconnect ?? false;
+      behind = mesh.behind_count ?? 0;
     } catch {
       otherVersion = 0;
     }
@@ -490,6 +500,25 @@
             </Alert>
           </div>
         {/if}
+        {#if needsReconnect}
+          <div class="shell__banner">
+            <Alert flush variant="warning" title="Ce poste n'échange plus avec le réseau">
+              La clé du réseau a changé (un poste a été retiré) ou ce poste n'a plus la sienne.
+              <span class="shell__banner-actions">
+                <Button variant="primary" size="sm" onclick={() => (reconnecting = true)}>
+                  Reconnecter ce poste
+                </Button>
+              </span>
+            </Alert>
+          </div>
+        {:else if behind > 0 && authStore.isAdmin}
+          <div class="shell__banner">
+            <Alert flush variant="info" title="Postes à reconnecter">
+              {behind > 1 ? `${behind} postes ont` : "Un poste a"} encore l'ancienne clé du réseau : ouvrez-y
+              « Reconnecter ce poste ». Un poste que vous avez retiré peut aussi apparaître ici.
+            </Alert>
+          </div>
+        {/if}
         {#if otherVersion > 0}
           <div class="shell__banner">
             <Alert flush variant="warning" title="Versions différentes sur le réseau">
@@ -647,6 +676,15 @@
   </StatusBar>
 
   <PanelHost />
+  <ReconnectDialog
+    open={reconnecting}
+    onClose={() => (reconnecting = false)}
+    onDone={() => {
+      reconnecting = false;
+      needsReconnect = false;
+      void refreshMeshStatus();
+    }}
+  />
   <UpdateDialog open={updateOpen} onClose={() => (updateOpen = false)} />
   <ToastHost />
 </div>

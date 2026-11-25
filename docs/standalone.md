@@ -40,13 +40,14 @@ Tous les échanges entre postes sont **chiffrés et authentifiés** (AES-256-GCM
 | **Vrai service Windows**, qui démarre au démarrage de l'ordinateur, avant toute ouverture de session. | **Non fait**, par choix : l'arrière-plan actuel démarre à l'ouverture de la session Windows et vit dans le processus de l'application. Un vrai service demanderait de séparer le serveur de données de la fenêtre. Un poste dont personne n'a ouvert de session Windows n'est donc pas dans le maillage. |
 | **Un nouveau poste a son propre registre fiscal** : il ne copie jamais la base d'un autre poste (deux postes qui signeraient la même chaîne la forkeraient). | Vrai par construction (il part d'une base vierge et reçoit des modifications), mais **pas encore éprouvé** par un test de caisse sur deux postes. |
 | **Mise en ligne de tout le réseau** : reprendre les comptes dans le cloud avec leurs empreintes Argon2 (mêmes mots de passe) et prévenir les autres postes. | **À faire.** Aujourd'hui seul le poste qui met en ligne reçoit un compte en ligne. |
-| **Révoquer un poste perdu ou volé** : désactiver un compte l'empêche de se connecter, mais le poste garde le secret du maillage et ses données. | **À faire** : changer le secret du maillage, avec ré-adhésion des postes restants. |
 | **Caisse retirée par une restauration** : ses périodes encore ouvertes ne reçoivent plus de clôture, puisque plus aucun poste ne l'écrit. | Limite connue, à signaler à l'expert-comptable. |
 
 ## Décisions et limites
 
 | Sujet | Décision |
 |---|---|
+| Poste perdu ou volé | **Retirer ce poste** (Employés) : nouveau secret du maillage, nouveau mot de passe pour l'administrateur, clés du dossier partagé réemballées. Les autres postes se **reconnectent** un par un avec un compte administrateur (même échange que l'adhésion) et gardent leurs données. Ce que le poste retiré contient déjà reste lisible par qui le détient : la protection du compte Windows et le chiffrement du disque sont ce qui le garde. Ses copies des empreintes de mots de passe peuvent être attaquées hors ligne : les changer tous. |
+| Deux retraits sans contact entre les postes | Deux secrets différents du même âge : reconnecter les postes sur l'un des deux tranche. |
 | Restaurer une sauvegarde sur un poste du réseau | Le poste repart comme un **nouvel appareil** : nouvelle caisse, nouvelle série de numéros, nouveau journal. Ce que l'ancienne caisse a fait après la sauvegarde revient des autres postes. Restaurer n'annule donc rien sur le réseau : les autres postes renvoient les modifications faites depuis. |
 | Mot de passe sur le réseau | Jamais en clair : SRP-6a. La bibliothèque `srp` indique elle-même n'avoir fait l'objet d'aucun audit indépendant : à relire avant une mise en production. Un mot de passe faible reste devinable au rythme permis par le verrouillage. |
 | Un poste vierge sans pair joignable | **Refusé**, par conception. |
