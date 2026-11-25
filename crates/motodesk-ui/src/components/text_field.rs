@@ -14,11 +14,12 @@ use gpui_kit::component::input::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
-    Subscription, Window, div,
+    App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
+    Styled as _, Subscription, Window, div,
 };
 
 use crate::components::icon::{Icon, IconName};
+use crate::style::with_focus_mark;
 use crate::theme::{FONT_MONO, Themed};
 
 /// What happened in a field.
@@ -243,10 +244,15 @@ impl Input {
 }
 
 impl RenderOnce for Input {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.ui();
         let (c, m) = (theme.colors, theme.m);
         let height = if self.tall { m.control_h_xl } else { m.control_h_lg };
+        let focused = !self.disabled
+            && match &self.model.kind {
+                Kind::Line(state) => state.read(cx).focus_handle(cx).is_focused(window),
+                Kind::Area(state) => state.read(cx).focus_handle(cx).is_focused(window),
+            };
 
         let field = match &self.model.kind {
             Kind::Line(state) => exact_height(KitInput::new(state), height)
@@ -265,7 +271,8 @@ impl RenderOnce for Input {
                 .when(self.mono, |this| this.font_family(FONT_MONO))
                 .into_any_element(),
         };
-        div().w_full().text_size(m.fs_md).child(field)
+        let mark = if self.invalid { c.danger } else { c.border_focus };
+        div().w_full().text_size(m.fs_md).child(with_focus_mark(field, focused, mark))
     }
 }
 

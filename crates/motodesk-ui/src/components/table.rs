@@ -192,17 +192,14 @@ impl RenderOnce for DataTable {
                         .id(("row", ix))
                         .w_full()
                         .h(row_h)
+                        .relative()
                         .bg(if is_selected { c.bg_selected } else { c.bg_surface })
-                        .border_l_3()
-                        .border_color(if is_selected { c.accent } else { c.bg_surface.opacity(0.) })
                         .when(ix + 1 != rows, |this| this.hairline_bottom(c.border_subtle))
                         .when(clickable, |this| this.cursor(CursorStyle::PointingHand))
                         .when(clickable && !is_selected, |this| this.hover(|s| s.bg(c.bg_hover)))
                         .children(columns.iter().enumerate().map(|(i, column)| {
                             edge(i, sized(row(), column))
                                 .py(pad_y)
-                                // The selection bar takes 3px of the first cell's padding.
-                                .when(i == 0, |d| d.pl(m.space_5 - px(3.)))
                                 .text_size(if column.mono { m.fs_xs } else { m.fs_sm })
                                 .text_color(c.text)
                                 .when(column.mono, |d| d.font_family(FONT_MONO))
@@ -210,6 +207,11 @@ impl RenderOnce for DataTable {
                                 .whitespace_nowrap()
                                 .child(cell(ix, i, window, cx))
                         }))
+                        // The accent bar of the selected row. Drawn over the row: an element has
+                        // one border colour, and the row's is its bottom hairline.
+                        .when(is_selected, |this| {
+                            this.child(div().absolute().top_0().bottom_0().left_0().w(px(3.)).bg(c.accent))
+                        })
                         .when_some(on_row_click.clone(), |this, handler| {
                             this.on_click(move |_, window, cx| handler(&ix, window, cx))
                         });
