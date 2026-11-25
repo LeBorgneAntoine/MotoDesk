@@ -35,6 +35,10 @@ pub enum LocalError {
     #[error("Aucun poste du réseau local n'est joignable. Allumez un poste déjà connecté, sur le même réseau, puis réessayez : un nouveau poste doit d'abord rejoindre le réseau avec lui.")]
     NoNetwork,
 
+    /// The password was right, but only an administrator may add a PC to the network.
+    #[error("Seul un administrateur peut ajouter un poste au réseau : saisissez ici un compte administrateur. Les employés se connecteront ensuite.")]
+    AdminRequiredToJoin,
+
     #[error("Trop d'essais : réessayez dans une minute.")]
     TooManyAttempts,
 
@@ -60,6 +64,7 @@ impl LocalError {
             LocalError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             LocalError::NetworkExists(_) => (StatusCode::CONFLICT, "network_exists"),
             LocalError::NoNetwork => (StatusCode::SERVICE_UNAVAILABLE, "no_network"),
+            LocalError::AdminRequiredToJoin => (StatusCode::FORBIDDEN, "admin_required"),
             LocalError::TooManyAttempts => (StatusCode::TOO_MANY_REQUESTS, "too_many_attempts"),
             LocalError::WrongCompany(_) => (StatusCode::CONFLICT, "company_mismatch"),
             LocalError::CloudRequired => (StatusCode::SERVICE_UNAVAILABLE, "cloud_required"),

@@ -72,17 +72,23 @@ async fn network_of_one() -> (SharedState, PeerInfo, Uuid) {
 }
 
 #[tokio::test]
-async fn a_new_pc_joins_with_an_employees_credentials_and_catches_up() {
+async fn a_new_pc_joins_with_an_administrators_credentials_and_catches_up() {
     let (a, peer_a, _) = network_of_one().await;
     let b = shop().await;
     assert!(status(&b.db).await.unwrap().can_setup, "B has never been part of a network");
 
-    // B knows a username and a password, nothing else.
-    let bundle = join::join_network(&b, "lea", "mot de passe lea", std::slice::from_ref(&peer_a))
+    // An employee's password is right, and not enough to add a PC.
+    let refused = join::join_network(&b, "lea", "mot de passe lea", std::slice::from_ref(&peer_a)).await;
+    assert!(matches!(refused, Err(LocalError::AdminRequiredToJoin)), "{refused:?}");
+    assert!(status(&b.db).await.unwrap().can_setup, "nothing was handed over");
+    assert!(b.mesh_secret.read().await.is_none());
+
+    // B knows an administrator's username and password, nothing else.
+    let bundle = join::join_network(&b, "camille", "mot de passe admin", std::slice::from_ref(&peer_a))
         .await
         .expect("the PC joins");
-    assert_eq!(bundle["user"]["username"], "lea");
-    assert_eq!(bundle["user"]["role"], "employee");
+    assert_eq!(bundle["user"]["username"], "camille");
+    assert_eq!(bundle["user"]["role"], "admin");
 
     // It is a member now: same company, same secret, both accounts, signed in, and A is a peer.
     let s = status(&b.db).await.unwrap();
@@ -94,15 +100,13 @@ async fn a_new_pc_joins_with_an_employees_credentials_and_catches_up() {
     assert!(key.is_some());
     assert_eq!(crate::local_server::recovery_key::stored(&b.db).await.unwrap(), key, "the key works on B too");
     assert!(b.peers.read().await.iter().any(|p| p.port == peer_a.port));
-    assert!(!crate::local_server::auth_guard::is_admin(&b).await, "an employee is not an admin");
-
     // The data comes with a catch-up.
     assert!(clients(&b).await.is_empty());
     let received = catchup::pull_from(&b, &peer_a).await.unwrap();
     assert_eq!(received, 2);
     assert_eq!(clients(&b).await, vec!["Bernard", "Moreau"]);
 
-    // Having joined, B signs in on its own, with no PC on.
+    // Having joined, B signs its employees in on its own, with no PC on.
     sqlx::query("DELETE FROM cached_session").execute(&b.db).await.unwrap();
     assert!(local_accounts::login(&b, "lea", "mot de passe lea").await.is_ok());
     assert!(local_accounts::login(&b, "lea", "pas le bon").await.is_err());
@@ -223,7 +227,7 @@ async fn opening_many_handshakes_at_once_does_not_get_past_the_lock() {
 #[tokio::test]
 async fn an_accented_name_joins_however_it_is_typed() {
     let (a, peer_a, _) = network_of_one().await;
-    let elodie = local_accounts::new_account("Élodie", "mot de passe elodie", "employee", None)
+    let elodie = local_accounts::new_account("Élodie", "mot de passe elodie", "admin", None)
         .await
         .unwrap();
     local_accounts::merge_accounts(&a.db, vec![elodie]).await.unwrap();

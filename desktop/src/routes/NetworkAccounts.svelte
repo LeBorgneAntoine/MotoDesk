@@ -160,8 +160,8 @@
   <div class="na__head">
     <p class="na__text">
       Ces comptes ouvrent une session sur <strong>tous les postes</strong> du réseau local de
-      l'atelier. Un nouveau poste s'y connecte avec l'un d'eux, tant qu'un poste du réseau est
-      allumé.
+      l'atelier. Seul un administrateur peut ajouter un nouveau poste, tant qu'un poste du réseau
+      est allumé.
     </p>
     <Button variant="primary" onclick={openCreate}>
       <Icon name="user-plus" size={14} /> Nouveau compte

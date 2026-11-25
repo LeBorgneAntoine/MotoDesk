@@ -87,8 +87,9 @@
 
       {#if joining}
         <p class="af__subtitle">
-          Ce poste n'a pas encore rejoint le réseau : il va chercher un poste allumé de l'atelier et
-          s'y connecter avec ces identifiants. Un poste du réseau doit donc être allumé.
+          Ce poste n'a pas encore rejoint le réseau : saisissez le compte d'un
+          <strong>administrateur</strong>. Il va chercher un poste allumé de l'atelier et s'y
+          connecter ; les employés pourront ensuite ouvrir leur session ici.
         </p>
       {/if}
 
