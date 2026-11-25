@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -23,10 +23,11 @@ sont pas passés.
 | Parc VN/VO (liste, fiche, vente avec reprise) | migré |
 | Inventaire (catalogue, catégories, fiche produit, variantes, réception fournisseur) | migré |
 | Ventes (devis, factures, validation, avoirs, règlements) | migré, sans l'impression |
+| L'Atelier (tableau des ordres de réparation, fiche, facturation) | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Atelier, Comptabilité, Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
+| Comptabilité, Modèles, Dossier partagé, Données, Paramètres, Assistant, Caisse | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -54,6 +55,14 @@ l'impression). Une facture validée ici s'imprime depuis l'interface Svelte.
 Sur l'écran Ventes, la fiche d'un document montre aussi son client, que la fiche Svelte ne
 montrait pas. Les totaux affichés pendant la saisie viennent de `motodesk_fiscal::vat`, le calcul
 avec lequel le service scelle : ce qui est à l'écran est ce qui sera enregistré.
+
+L'éditeur de lignes d'un document (article, désignation, quantité, prix, remise, TVA, totaux)
+est le même pour une vente et pour un ordre de réparation : `desktop-gpui/src/pages/lines.rs`.
+Svelte en portait une copie dans chaque formulaire.
+
+Sur L'Atelier, le champ « Technicien » propose l'équipe d'une entreprise en ligne, comme dans
+Svelte : sur un réseau local, où l'équipe n'existe pas, il reste vide. Une affectation déjà
+enregistrée est conservée et affichée « Technicien assigné ».
 
 Deux écarts voulus avec l'écran Svelte de l'Inventaire : la réception fournisseur s'ouvre sans
 produit choisi (Svelte présélectionnait le premier de la liste, au risque de recevoir sur le
@@ -114,7 +123,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Atelier, Comptabilité,
+Ordre prévu : Comptabilité,
 Paramètres, Import, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
