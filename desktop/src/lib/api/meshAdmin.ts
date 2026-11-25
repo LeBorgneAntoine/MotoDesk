@@ -34,3 +34,13 @@ export async function getStaticPeers(): Promise<{ peers: string[] }> {
 export async function setStaticPeers(peers: string[]): Promise<{ peers: string[] }> {
   return api.put<{ peers: string[] }>("/mesh/static-peers", { peers }, { auth: false });
 }
+
+export interface MeshStatus {
+  peer_count: number;
+  /** PCs of the shop seen running another version: they cannot exchange with this one. */
+  other_version_count: number;
+}
+
+export function getMeshStatus(): Promise<MeshStatus> {
+  return api.get<MeshStatus>("/mesh/status", { auth: false });
+}

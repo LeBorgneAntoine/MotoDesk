@@ -1,20 +1,20 @@
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     routing::{get, post},
     Json, Router,
 };
-use chrono::Utc;
-use motodesk_core::sync::{MeshApplyRequest, MeshApplyResponse};
+use motodesk_core::sync::MeshApplyResponse;
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::local_server::error::{LocalError, LocalResult};
 use crate::local_server::mesh;
-use crate::local_server::mesh_auth::{self, timestamp_fresh};
+use crate::local_server::mesh::transport::{self, Kind};
 use crate::local_server::state::SharedState;
 
-/// LAN-facing routes (no local-token; HMAC on apply).
+/// LAN-facing routes: no local token. All but joining are sealed with the network secret
+/// (`mesh::transport`).
 pub fn lan_router() -> Router<SharedState> {
     Router::new()
         .route("/mesh/apply", post(apply))
@@ -26,6 +26,8 @@ pub fn lan_router() -> Router<SharedState> {
         .route("/mesh/shared/rows", post(shared_rows))
         .route("/mesh/shared/chunk", post(shared_chunk))
         .route("/mesh/shared/nudge", post(shared_nudge))
+        // A batch of changes is well over axum's 2 MB default once it carries images.
+        .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
 }
 
 async fn join_start(
@@ -42,45 +44,36 @@ async fn join_finish(
     mesh::join::finish(&state, body).await.map(Json)
 }
 
-/// A request signed with the mesh secret: its fields without `nonce`, `ts` and `sig`, if the
-/// signature is genuine, recent and unused.
-pub(crate) async fn authenticated_fields(
+/// The fields of a request a PC of this network sealed: recent, and not seen before.
+async fn open_request(
     state: &SharedState,
-    mut body: serde_json::Value,
+    body: &serde_json::Value,
 ) -> LocalResult<serde_json::Map<String, serde_json::Value>> {
-    if !crate::local_server::local_accounts::is_standalone(&state.db).await {
-        return Err(LocalError::NotFound);
-    }
     let secret = state.mesh_secret.read().await.clone();
     let Some(secret) = secret.filter(|s| !s.is_empty()) else {
         return Err(LocalError::Unauthorized);
     };
-    let Some(map) = body.as_object_mut() else {
-        return Err(LocalError::Unauthorized);
-    };
-    let nonce = map.remove("nonce").and_then(|v| v.as_str().map(str::to_string));
-    let ts = map.remove("ts").and_then(|v| v.as_i64());
-    let sig = map.remove("sig").and_then(|v| v.as_str().map(str::to_string));
-    let (Some(nonce), Some(ts), Some(sig)) = (nonce, ts, sig) else {
-        return Err(LocalError::Unauthorized);
-    };
-    if !mesh_auth::value_signature_ok(&secret, &nonce, ts, &sig, &serde_json::Value::Object(map.clone())) {
-        return Err(LocalError::Unauthorized);
-    }
+    let (fields, nonce) = transport::open(&secret, Kind::Request, body)?;
     if !state.mesh_nonces.accept(&nonce).await {
         return Err(LocalError::Unauthorized);
     }
-    Ok(std::mem::take(map))
+    Ok(fields)
 }
 
-pub(crate) async fn sign_reply(state: &SharedState, fields: serde_json::Map<String, serde_json::Value>) -> LocalResult<Json<serde_json::Value>> {
+/// [`open_request`] for what only a local network does.
+pub(crate) async fn authenticated_fields(
+    state: &SharedState,
+    body: serde_json::Value,
+) -> LocalResult<serde_json::Map<String, serde_json::Value>> {
+    if !crate::local_server::local_accounts::is_standalone(&state.db).await {
+        return Err(LocalError::NotFound);
+    }
+    open_request(state, &body).await
+}
+
+pub(crate) async fn sealed_reply(state: &SharedState, fields: serde_json::Map<String, serde_json::Value>) -> LocalResult<Json<serde_json::Value>> {
     let secret = state.mesh_secret.read().await.clone().ok_or(LocalError::Unauthorized)?;
-    let (nonce, ts, sig) = mesh_auth::sign_value(&secret, &serde_json::Value::Object(fields.clone()));
-    let mut out = fields;
-    out.insert("nonce".into(), nonce.into());
-    out.insert("ts".into(), ts.into());
-    out.insert("sig".into(), sig.into());
-    Ok(Json(serde_json::Value::Object(out)))
+    Ok(Json(transport::seal(&secret, Kind::Reply, fields)))
 }
 
 /// "What do you have that I lack?" — answered with the changes beyond the asker's version vector.
@@ -112,7 +105,7 @@ async fn pull(
     let mut out = serde_json::Map::new();
     out.insert("ops".into(), serde_json::to_value(&ops).map_err(|e| LocalError::Internal(e.into()))?);
     out.insert("more".into(), more.into());
-    sign_reply(&state, out).await
+    sealed_reply(&state, out).await
 }
 
 /// Swap accounts: keep the asker's newer ones, answer with all of this PC's.
@@ -132,7 +125,7 @@ async fn accounts(
     let mut out = serde_json::Map::new();
     out.insert("recovery".into(), serde_json::to_value(&recovery).map_err(|e| LocalError::Internal(e.into()))?);
     out.insert("accounts".into(), serde_json::to_value(&all).map_err(|e| LocalError::Internal(e.into()))?);
-    sign_reply(&state, out).await
+    sealed_reply(&state, out).await
 }
 
 /// The shared folder: what this PC holds (or just that it matches the asker), the full rows
@@ -144,7 +137,7 @@ async fn shared_summary(
     let fields = authenticated_fields(&state, body).await?;
     let digest = fields.get("digest").and_then(|v| v.as_str()).unwrap_or("");
     let out = crate::local_server::shared_folder::replication::serve_summary(&state, digest).await?;
-    sign_reply(&state, out).await
+    sealed_reply(&state, out).await
 }
 
 async fn shared_rows(
@@ -153,7 +146,7 @@ async fn shared_rows(
 ) -> LocalResult<Json<serde_json::Value>> {
     let fields = authenticated_fields(&state, body).await?;
     let out = crate::local_server::shared_folder::replication::serve_rows(&state, &fields).await?;
-    sign_reply(&state, out).await
+    sealed_reply(&state, out).await
 }
 
 async fn shared_chunk(
@@ -162,7 +155,7 @@ async fn shared_chunk(
 ) -> LocalResult<Json<serde_json::Value>> {
     let fields = authenticated_fields(&state, body).await?;
     let out = crate::local_server::shared_folder::replication::serve_chunk(&state, &fields).await?;
-    sign_reply(&state, out).await
+    sealed_reply(&state, out).await
 }
 
 async fn shared_nudge(
@@ -171,7 +164,7 @@ async fn shared_nudge(
 ) -> LocalResult<Json<serde_json::Value>> {
     authenticated_fields(&state, body).await?;
     mesh::catchup::request(&state);
-    sign_reply(&state, serde_json::Map::new()).await
+    sealed_reply(&state, serde_json::Map::new()).await
 }
 
 /// Loopback admin routes for mesh status / static peers.
@@ -182,34 +175,15 @@ pub fn admin_router() -> Router<SharedState> {
     )
 }
 
+/// Changes pushed by a peer as they happen.
 async fn apply(
     State(state): State<SharedState>,
-    Json(body): Json<MeshApplyRequest>,
+    Json(body): Json<serde_json::Value>,
 ) -> LocalResult<Json<MeshApplyResponse>> {
-    let secret = state.mesh_secret.read().await.clone();
-    let Some(secret) = secret.filter(|s| !s.is_empty()) else {
-        return Err(LocalError::Unauthorized);
-    };
-
-    let nonce = body.nonce.as_deref().ok_or(LocalError::Unauthorized)?;
-    let ts = body.ts.ok_or(LocalError::Unauthorized)?;
-    let sig = body.sig.as_deref().ok_or(LocalError::Unauthorized)?;
-    let now = Utc::now().timestamp();
-    if !timestamp_fresh(ts, now) {
-        return Err(LocalError::Unauthorized);
-    }
-    if !state.mesh_nonces.accept(nonce).await {
-        return Err(LocalError::Unauthorized);
-    }
-
-    let ops_body = mesh_auth::canonical_ops_bytes(&body.ops);
-    let expected = mesh_auth::sign(&secret, nonce, ts, &ops_body);
-    if !mesh_auth::constant_time_eq(sig, &expected) {
-        return Err(LocalError::Unauthorized);
-    }
-
-    let resp = mesh::apply_batch(&state, body.ops).await?;
-    Ok(Json(resp))
+    let mut fields = open_request(&state, &body).await?;
+    let ops = serde_json::from_value(fields.remove("ops").unwrap_or_default())
+        .map_err(|_| LocalError::BadRequest("modifications invalides".into()))?;
+    Ok(Json(mesh::apply_batch(&state, ops).await?))
 }
 
 async fn status(State(state): State<SharedState>) -> LocalResult<Json<serde_json::Value>> {
@@ -217,6 +191,7 @@ async fn status(State(state): State<SharedState>) -> LocalResult<Json<serde_json
     Ok(Json(json!({
         "peer_count": peers.len(),
         "peers": peers.clone(),
+        "other_version_count": mesh::other_version_count().await,
     })))
 }
 
@@ -257,84 +232,9 @@ async fn put_static_peers(
     Ok(Json(json!({ "peers": cleaned })))
 }
 
-/// Build a signed mesh apply body.
-pub fn signed_apply_request(
-    secret: &str,
-    ops: Vec<motodesk_core::sync::ChangeLogEntry>,
-) -> MeshApplyRequest {
-    let nonce = Uuid::new_v4().to_string();
-    let ts = Utc::now().timestamp();
-    let ops_body = mesh_auth::canonical_ops_bytes(&ops);
-    let sig = mesh_auth::sign(secret, &nonce, ts, &ops_body);
-    MeshApplyRequest {
-        ops,
-        mesh_psk: None,
-        nonce: Some(nonce),
-        ts: Some(ts),
-        sig: Some(sig),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use motodesk_core::entity::EntityType;
-    use motodesk_core::sync::{ChangeLogEntry, OpKind};
-
-    fn op(seq: i64) -> ChangeLogEntry {
-        let device = Uuid::new_v4();
-        let payload = json!({ "id": "x", "last_name": "Martin", "credit_limit_cents": 5000, "notes": null });
-        ChangeLogEntry {
-            id: Uuid::new_v4(),
-            device_id: device,
-            seq,
-            entity_type: EntityType::Client,
-            entity_id: Uuid::new_v4(),
-            op: OpKind::Update,
-            // Several keys: this is what made the order of a HashMap matter.
-            field_meta: crate::local_server::sync_log::field_meta_for_patch(
-                &Default::default(),
-                &payload,
-                device,
-            ),
-            payload,
-            created_at: Utc::now(),
-            synced_to_cloud: false,
-            relayed: false,
-        }
-    }
-
-    #[test]
-    fn a_signed_batch_still_verifies_after_a_trip_over_the_wire() {
-        let secret = "shared-company-secret-0123456789";
-        let sent = signed_apply_request(secret, vec![op(1), op(2), op(3)]);
-
-        // Serialise, deserialise, as the two machines do.
-        let wire = serde_json::to_vec(&sent).unwrap();
-        let received: MeshApplyRequest = serde_json::from_slice(&wire).unwrap();
-
-        let expected = mesh_auth::sign(
-            secret,
-            received.nonce.as_deref().unwrap(),
-            received.ts.unwrap(),
-            &mesh_auth::canonical_ops_bytes(&received.ops),
-        );
-        assert!(mesh_auth::constant_time_eq(received.sig.as_deref().unwrap(), &expected));
-    }
-
-    #[test]
-    fn tampering_with_an_op_breaks_the_signature() {
-        let secret = "shared-company-secret-0123456789";
-        let sent = signed_apply_request(secret, vec![op(1)]);
-        let wire = serde_json::to_vec(&sent).unwrap();
-        let mut received: MeshApplyRequest = serde_json::from_slice(&wire).unwrap();
-        received.ops[0].payload = json!({ "last_name": "Pirate" });
-        let expected = mesh_auth::sign(
-            secret,
-            received.nonce.as_deref().unwrap(),
-            received.ts.unwrap(),
-            &mesh_auth::canonical_ops_bytes(&received.ops),
-        );
-        assert!(!mesh_auth::constant_time_eq(received.sig.as_deref().unwrap(), &expected));
-    }
+/// The changes to push to a peer, sealed.
+pub fn apply_request(secret: &str, ops: Vec<motodesk_core::sync::ChangeLogEntry>) -> serde_json::Value {
+    let mut fields = serde_json::Map::new();
+    fields.insert("ops".into(), serde_json::to_value(ops).unwrap_or_default());
+    transport::seal(secret, Kind::Request, fields)
 }

@@ -249,11 +249,11 @@ async fn files_still_being_uploaded_are_not_offered_to_other_pcs() {
         &b,
         &peer_a,
         "/mesh/shared/rows",
-        catchup::signed(&secret, fields(vec![("folders", json!([])), ("files", json!([start.file.id]))])),
+        catchup::seal_request(&secret, fields(vec![("folders", json!([])), ("files", json!([start.file.id]))])),
     )
     .await
     .unwrap();
-    let rows = catchup::verified(&secret, reply).unwrap();
+    let rows = catchup::open_reply(&secret, reply).unwrap();
     assert_eq!(rows["files"], json!([]));
 }
 
