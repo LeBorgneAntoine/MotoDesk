@@ -426,8 +426,8 @@ async fn ask(
     fields: serde_json::Map<String, Value>,
 ) -> LocalResult<serde_json::Map<String, Value>> {
     let secret = catchup::secret_of(state).await?;
-    let reply = catchup::post(state, peer, path, catchup::signed(&secret, fields)).await?;
-    catchup::verified(&secret, reply)
+    let reply = catchup::post(state, peer, path, catchup::seal_request(&secret, fields)).await?;
+    catchup::open_reply(&secret, reply)
 }
 
 fn fields(pairs: Vec<(&str, Value)>) -> serde_json::Map<String, Value> {

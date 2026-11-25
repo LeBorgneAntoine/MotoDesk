@@ -4,6 +4,7 @@
    * status bar, and the two global overlay hosts (panels and toasts).
    */
   import { getRecoveryStatus } from "$lib/api/recovery";
+  import { getMeshStatus } from "$lib/api/meshAdmin";
   import { onMount } from "svelte";
   import {
     Alert,
@@ -165,6 +166,25 @@
       backupNote = null;
     }
   }
+
+  // A PC of the shop on another version is silently out of the exchanges: say so.
+  let otherVersion = $state(0);
+  async function refreshMeshStatus(): Promise<void> {
+    if (!authStore.isLocal) {
+      otherVersion = 0;
+      return;
+    }
+    try {
+      otherVersion = (await getMeshStatus()).other_version_count ?? 0;
+    } catch {
+      otherVersion = 0;
+    }
+  }
+  onMount(() => {
+    void refreshMeshStatus();
+    const timer = window.setInterval(() => void refreshMeshStatus(), 60_000);
+    return () => window.clearInterval(timer);
+  });
 
   // A network without a recovery key written down is one forgotten password from being stuck.
   let recoveryMissing = $state(false);
@@ -467,6 +487,14 @@
               <span class="shell__banner-actions">
                 <Button variant="link" size="sm" onclick={() => navigate("employees")}>Créer la clé</Button>
               </span>
+            </Alert>
+          </div>
+        {/if}
+        {#if otherVersion > 0}
+          <div class="shell__banner">
+            <Alert flush variant="warning" title="Versions différentes sur le réseau">
+              {otherVersion > 1 ? `${otherVersion} postes utilisent` : "Un autre poste utilise"} une autre version de
+              Motodesk : rien n'est échangé avec {otherVersion > 1 ? "eux" : "lui"}. Mettez tous les postes à jour.
             </Alert>
           </div>
         {/if}

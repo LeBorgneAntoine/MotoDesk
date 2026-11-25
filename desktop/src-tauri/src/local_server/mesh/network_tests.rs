@@ -2,6 +2,8 @@
 //! and catching up. No mDNS (the test hands the join the address), everything else is the real
 //! code path.
 
+use std::sync::{Arc, Mutex};
+
 use chrono::Duration;
 use motodesk_core::entity::EntityType;
 use motodesk_core::sync::{ChangeLogEntry, OpKind};
@@ -10,6 +12,7 @@ use uuid::Uuid;
 
 use crate::local_server::error::LocalError;
 use crate::local_server::local_accounts::{self, status};
+use crate::local_server::mesh::transport::{self, Kind};
 use crate::local_server::mesh::{self, catchup, join, PeerInfo};
 use crate::local_server::state::SharedState;
 use crate::local_server::sync_log::field_meta_for_patch;
@@ -273,7 +276,7 @@ async fn a_stranger_who_does_not_hold_the_account_is_not_believed() {
 }
 
 #[tokio::test]
-async fn the_lan_routes_refuse_what_is_not_signed_with_the_networks_secret() {
+async fn the_lan_routes_refuse_what_is_not_sealed_with_the_networks_secret() {
     let (_a, peer_a, _) = network_of_one().await;
     let http = reqwest::Client::new();
     let url = |path: &str| format!("http://{}:{}{path}", peer_a.host, peer_a.port);
@@ -284,16 +287,68 @@ async fn the_lan_routes_refuse_what_is_not_signed_with_the_networks_secret() {
     let r = http.post(url("/mesh/accounts")).json(&json!({ "accounts": [] })).send().await.unwrap();
     assert_eq!(r.status().as_u16(), 401);
 
-    // Signed with another network's secret.
-    let fields = json!({ "vv": {}, "limit": 10 });
-    let (nonce, ts, sig) = crate::local_server::mesh_auth::sign_value("some other secret", &fields);
-    let r = http
-        .post(url("/mesh/pull"))
-        .json(&json!({ "vv": {}, "limit": 10, "nonce": nonce, "ts": ts, "sig": sig }))
-        .send()
-        .await
-        .unwrap();
+    // Sealed with another network's secret.
+    let fields = json!({ "vv": {}, "limit": 10 }).as_object().unwrap().clone();
+    let foreign = transport::seal("some other secret", Kind::Request, fields.clone());
+    let r = http.post(url("/mesh/pull")).json(&foreign).send().await.unwrap();
     assert_eq!(r.status().as_u16(), 401);
+
+    // Sealed properly, then sent twice: the second is refused.
+    let secret = catchup::secret_of(&_a).await.unwrap();
+    let genuine = transport::seal(&secret, Kind::Request, fields);
+    let r = http.post(url("/mesh/pull")).json(&genuine).send().await.unwrap();
+    assert_eq!(r.status().as_u16(), 200);
+    let r = http.post(url("/mesh/pull")).json(&genuine).send().await.unwrap();
+    assert_eq!(r.status().as_u16(), 401);
+}
+
+/// Everything two PCs say to each other, as someone on the Wi-Fi would capture it.
+#[tokio::test]
+async fn nothing_readable_crosses_the_network() {
+    let (a, _plain, device) = network_of_one().await;
+    let seen = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let tap = seen.clone();
+    let app = crate::local_server::routes::mesh::lan_router().with_state(a.clone()).layer(
+        axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
+            let tap = tap.clone();
+            async move {
+                let path = req.uri().path().to_string();
+                let (parts, body) = req.into_parts();
+                let sent = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+                let res = next.run(axum::extract::Request::from_parts(parts, axum::body::Body::from(sent.clone()))).await;
+                let (head, body) = res.into_parts();
+                let answered = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+                // Joining has its own sealing and is checked by its own tests.
+                if !path.starts_with("/mesh/join") {
+                    let mut tap = tap.lock().unwrap();
+                    tap.extend_from_slice(&sent);
+                    tap.extend_from_slice(&answered);
+                }
+                axum::response::Response::from_parts(head, axum::body::Body::from(answered))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let peer = PeerInfo { device_id: a.device_id().await.unwrap(), host: addr.ip().to_string(), port: addr.port() };
+
+    let b = shop().await;
+    join::join_network(&b, "camille", "mot de passe admin", std::slice::from_ref(&peer)).await.unwrap();
+    catchup::exchange_accounts(&b, &peer).await.unwrap();
+    assert_eq!(catchup::pull_from(&b, &peer).await.unwrap(), 2);
+    mesh::apply_batch(&b, vec![client_op(device, 3, "Girard")]).await.unwrap();
+    let ops = crate::local_server::sync_log::ops_after(&b.db, device, 2, 10).await.unwrap();
+    mesh::broadcast_ops_to_peers(&b, std::slice::from_ref(&peer), ops).await;
+    assert!(clients(&a).await.contains(&"Girard".to_string()), "the push got through");
+
+    let wire = String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
+    assert!(wire.len() > 500, "the exchanges were captured");
+    for word in ["Bernard", "Moreau", "Girard", "argon2", "camille", "password_hash"] {
+        assert!(!wire.contains(word), "{word} crossed the network in clear");
+    }
 }
 
 #[tokio::test]

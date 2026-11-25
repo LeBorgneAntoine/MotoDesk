@@ -13,6 +13,7 @@ pub mod join;
 mod network_tests;
 #[cfg(test)]
 mod two_pc_tests;
+pub mod transport;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -61,6 +62,24 @@ fn table() -> &'static RwLock<HashMap<Uuid, PeerEntry>> {
 /// Every PC seen advertising a company on the LAN, whatever the company: where a PC that has
 /// no network yet looks for one to join. Not trusted: joining proves the password to each.
 static CANDIDATES: OnceLock<RwLock<HashMap<Uuid, (PeerInfo, Instant)>>> = OnceLock::new();
+
+/// PCs of this company seen speaking another version of the exchanges (`transport::PROTOCOL`):
+/// they cannot be talked to until both are up to date, and the screens say so.
+static OTHER_VERSION: OnceLock<RwLock<HashMap<Uuid, Instant>>> = OnceLock::new();
+
+fn other_version() -> &'static RwLock<HashMap<Uuid, Instant>> {
+    OTHER_VERSION.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// How many of the shop's PCs were seen lately with another version.
+pub async fn other_version_count() -> usize {
+    other_version().read().await.values().filter(|seen| seen.elapsed() < PEER_TTL * 2).count()
+}
+
+/// Whether an announced `version` is the one this build speaks.
+fn speaks_our_version(announced: Option<&str>) -> bool {
+    announced.and_then(|v| v.parse::<u32>().ok()) == Some(transport::PROTOCOL)
+}
 
 fn candidates() -> &'static RwLock<HashMap<Uuid, (PeerInfo, Instant)>> {
     CANDIDATES.get_or_init(|| RwLock::new(HashMap::new()))
@@ -153,7 +172,7 @@ async fn advertise(
     let properties = [
         ("device_id".to_string(), device_id.to_string()),
         ("company".to_string(), fingerprint.clone()),
-        ("version".to_string(), "2".to_string()),
+        ("version".to_string(), transport::PROTOCOL.to_string()),
     ];
     // No address was ever given, and the daemon does not announce a service
     // without one, so no peer could be discovered. `enable_addr_auto` fills in the
@@ -237,6 +256,13 @@ async fn browse_loop(
                         continue;
                     }
                 }
+                if !speaks_our_version(info.get_property_val_str("version")) {
+                    tracing::debug!(peer = %peer_id, "skipping peer: another version of Motodesk");
+                    other_version().write().await.insert(peer_id, Instant::now());
+                    table().write().await.remove(&peer_id);
+                    continue;
+                }
+                other_version().write().await.remove(&peer_id);
                 let addrs: Vec<_> = info.get_addresses().iter().copied().collect();
                 let Some(ip) = addrs.first() else { continue };
                 let entry = PeerEntry {
@@ -396,7 +422,7 @@ pub async fn broadcast_ops_to_peers(
     let Some(secret) = secret else {
         return;
     };
-    let body = crate::local_server::routes::mesh::signed_apply_request(&secret, ops);
+    let body = crate::local_server::routes::mesh::apply_request(&secret, ops);
     let body = match serde_json::to_vec(&body) {
         Ok(b) => b,
         Err(_) => return,
@@ -1052,3 +1078,16 @@ mod merge_tests {
 
 pub(crate) mod persist;
 use persist::{load_snapshot, persist_snapshot, soft_delete_entity};
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_same_version_of_the_exchanges_is_talked_to() {
+        assert!(speaks_our_version(Some(&transport::PROTOCOL.to_string())));
+        for other in [None, Some("2"), Some("999"), Some("x")] {
+            assert!(!speaks_our_version(other), "{other:?}");
+        }
+    }
+}

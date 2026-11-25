@@ -25,7 +25,7 @@ use motodesk_core::sync::ChangeLogEntry;
 use crate::local_server::error::{LocalError, LocalResult};
 use crate::local_server::local_accounts::{self, Account};
 use crate::local_server::mesh::{self, PeerInfo};
-use crate::local_server::mesh_auth;
+use crate::local_server::mesh::transport::{self, Kind};
 use crate::local_server::state::SharedState;
 use crate::local_server::recovery_key;
 use crate::local_server::sync_log::{self, Gaps};
@@ -97,30 +97,14 @@ pub(crate) fn url(peer: &PeerInfo, path: &str) -> String {
     format!("http://{host}:{}{path}", peer.port)
 }
 
-/// A request body signed with the mesh secret: the fields, plus `nonce`, `ts` and `sig`.
-pub(crate) fn signed(secret: &str, mut fields: serde_json::Map<String, Value>) -> Value {
-    let (nonce, ts, sig) = mesh_auth::sign_value(secret, &Value::Object(fields.clone()));
-    fields.insert("nonce".into(), nonce.into());
-    fields.insert("ts".into(), ts.into());
-    fields.insert("sig".into(), sig.into());
-    Value::Object(fields)
+/// A request to a peer, sealed with the network's secret (`transport`).
+pub(crate) fn seal_request(secret: &str, fields: serde_json::Map<String, Value>) -> Value {
+    transport::seal(secret, Kind::Request, fields)
 }
 
-/// Check a signed response and return its fields without the signature.
-pub(crate) fn verified(secret: &str, mut body: Value) -> LocalResult<serde_json::Map<String, Value>> {
-    let Some(map) = body.as_object_mut() else {
-        return Err(LocalError::Unauthorized);
-    };
-    let nonce = map.remove("nonce").and_then(|v| v.as_str().map(str::to_string));
-    let ts = map.remove("ts").and_then(|v| v.as_i64());
-    let sig = map.remove("sig").and_then(|v| v.as_str().map(str::to_string));
-    let (Some(nonce), Some(ts), Some(sig)) = (nonce, ts, sig) else {
-        return Err(LocalError::Unauthorized);
-    };
-    if !mesh_auth::value_signature_ok(secret, &nonce, ts, &sig, &Value::Object(map.clone())) {
-        return Err(LocalError::Unauthorized);
-    }
-    Ok(std::mem::take(map))
+/// A peer's answer, opened.
+pub(crate) fn open_reply(secret: &str, body: Value) -> LocalResult<serde_json::Map<String, Value>> {
+    Ok(transport::open(secret, Kind::Reply, &body)?.0)
 }
 
 pub(crate) async fn secret_of(state: &SharedState) -> LocalResult<String> {
@@ -156,7 +140,7 @@ pub async fn exchange_accounts(state: &SharedState, peer: &PeerInfo) -> LocalRes
     fields.insert("accounts".into(), serde_json::to_value(&mine).map_err(|e| LocalError::Internal(e.into()))?);
     let recovery = recovery_key::stored(&state.db).await?;
     fields.insert("recovery".into(), serde_json::to_value(&recovery).map_err(|e| LocalError::Internal(e.into()))?);
-    let reply = verified(&secret, post(state, peer, "/mesh/accounts", signed(&secret, fields)).await?)?;
+    let reply = open_reply(&secret, post(state, peer, "/mesh/accounts", seal_request(&secret, fields)).await?)?;
     let theirs: Vec<Account> = serde_json::from_value(reply.get("accounts").cloned().unwrap_or(Value::Null))
         .map_err(|e| LocalError::Internal(e.into()))?;
     let theirs_recovery = reply.get("recovery").and_then(|v| serde_json::from_value(v.clone()).ok());
@@ -175,7 +159,7 @@ pub async fn pull_from(state: &SharedState, peer: &PeerInfo) -> LocalResult<usiz
         fields.insert("vv".into(), vv_json(&vv));
         fields.insert("gaps".into(), gaps_json(&gaps));
         fields.insert("limit".into(), json!(BATCH));
-        let reply = verified(&secret, post(state, peer, "/mesh/pull", signed(&secret, fields)).await?)?;
+        let reply = open_reply(&secret, post(state, peer, "/mesh/pull", seal_request(&secret, fields)).await?)?;
         let ops: Vec<ChangeLogEntry> = serde_json::from_value(reply.get("ops").cloned().unwrap_or(Value::Null))
             .map_err(|e| LocalError::Internal(e.into()))?;
         let more = reply.get("more").and_then(|m| m.as_bool()).unwrap_or(false);
@@ -244,30 +228,4 @@ pub fn start(state: SharedState) {
             catch_up_all(&state).await;
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_signed_body_verifies_and_a_tampered_one_does_not() {
-        let secret = "network-secret";
-        let mut fields = serde_json::Map::new();
-        fields.insert("vv".into(), json!({"a": 3}));
-        fields.insert("limit".into(), json!(500));
-        let body = signed(secret, fields);
-        assert!(verified(secret, body.clone()).is_ok());
-        assert!(verified("another-secret", body.clone()).is_err());
-
-        let mut forged = body;
-        forged["limit"] = json!(1);
-        assert!(verified(secret, forged).is_err());
-    }
-
-    #[test]
-    fn an_unsigned_body_is_refused() {
-        assert!(verified("s", json!({"ops": []})).is_err());
-        assert!(verified("s", json!(null)).is_err());
-    }
 }
