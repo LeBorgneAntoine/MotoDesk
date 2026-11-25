@@ -97,12 +97,20 @@ pub struct PanelStack {
     /// A panel with unsaved edits that the user asked to close.
     pending_close: Option<SharedString>,
     focus: Option<FocusHandle>,
+    /// The panels took the keyboard for this opening (see `PanelHost`).
+    took_keyboard: std::cell::Cell<bool>,
 }
 
 impl PanelStack {
     /// A stack outside any window, for the rules alone (tests).
     pub fn detached() -> Self {
-        Self { layers: Vec::new(), expanded: false, pending_close: None, focus: None }
+        Self {
+            layers: Vec::new(),
+            expanded: false,
+            pending_close: None,
+            focus: None,
+            took_keyboard: std::cell::Cell::new(false),
+        }
     }
 
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -635,9 +643,11 @@ impl RenderOnce for PanelHost {
         let scrim = cx.ui().colors.scrim;
         let stack = self.stack.read(cx);
         if !stack.is_open() {
+            stack.took_keyboard.set(false);
             return div().into_any_element();
         }
         let focus = stack.focus.clone();
+        let opening = !stack.took_keyboard.replace(true);
         let on_scrim = self.stack.clone();
         let host = div()
             .id("panel-host")
@@ -654,9 +664,21 @@ impl RenderOnce for PanelHost {
         match focus {
             Some(handle) => {
                 // With nothing focused the keyboard would go nowhere: give it to the panels, so
-                // Escape closes the top one. A field the page focused keeps the focus.
+                // Escape closes the top one.
                 if window.focused(cx).is_none() {
                     window.focus(&handle, cx);
+                } else if opening {
+                    // The keyboard may still be where the click came from: the navigation rail,
+                    // a row. The panels take it, unless a field of the new panel already has it
+                    // (a form focuses its first field). Which is only known once this frame is
+                    // drawn, hence the wait. Done once per opening: a dialog opened later over
+                    // the panels keeps the keyboard.
+                    let panels = handle.clone();
+                    window.on_next_frame(move |window, cx| {
+                        if !panels.contains_focused(window, cx) {
+                            window.focus(&panels, cx);
+                        }
+                    });
                 }
                 host.track_focus(&handle).focus_trap("panel-trap", &handle).into_any_element()
             }

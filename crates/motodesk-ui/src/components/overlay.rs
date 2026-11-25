@@ -129,7 +129,8 @@ impl Modal {
                 // Enter belongs to the form inside (its fields submit it): it must not close the
                 // dialog before the answer is back. Escape and the cross still close it.
                 .on_ok(|_, _, _| false)
-                .child(col().gap(m.space_4).fs(m.fs_md).child(body(window, cx)))
+                // A little air under the title: a form starts with a label, not a sentence.
+                .child(col().pt(m.space_2).gap(m.space_4).fs(m.fs_md).child(body(window, cx)))
                 .footer(div().flex().justify_end().gap(m.space_2).children(buttons))
         });
     }
