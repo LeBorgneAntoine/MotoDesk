@@ -86,6 +86,20 @@ pub fn integer(value: i64) -> String {
     text.split(',').next().unwrap_or_default().to_string()
 }
 
+/// A quantity the French way: `1 250,75`, `2,5`, `12`. Three decimals at most, none kept
+/// for nothing.
+pub fn number(value: f64) -> String {
+    if !value.is_finite() {
+        return "—".to_string();
+    }
+    let thousandths = (value.abs() * 1000.).round() as i64;
+    let sign = if value < 0. && thousandths > 0 { "-" } else { "" };
+    let decimals = format!("{:03}", thousandths % 1000);
+    let decimals = decimals.trim_end_matches('0');
+    let whole = integer(thousandths / 1000);
+    if decimals.is_empty() { format!("{sign}{whole}") } else { format!("{sign}{whole},{decimals}") }
+}
+
 /// Whether what was typed is the last group of the recovery key, however it was typed
 /// (lower case, spaces, O for 0, I or L for 1).
 pub fn last_group_matches(key: &str, typed: &str) -> bool {
@@ -159,6 +173,12 @@ mod tests {
         assert_eq!(integer(12_500), "12\u{202f}500");
         assert_eq!(euros_whole(1_284_550), "12\u{202f}846\u{a0}€");
         assert_eq!(euros_whole(149), "1\u{a0}€");
+        assert_eq!(number(12.), "12");
+        assert_eq!(number(2.5), "2,5");
+        assert_eq!(number(1250.75), "1\u{202f}250,75");
+        assert_eq!(number(0.3336), "0,334");
+        assert_eq!(number(-4.5), "-4,5");
+        assert_eq!(number(-0.0001), "0");
         assert_eq!(euros_whole(150), "2\u{a0}€");
         assert_eq!(euros_whole(-150), "-2\u{a0}€");
         assert_eq!(euros_whole(-49), "0\u{a0}€");

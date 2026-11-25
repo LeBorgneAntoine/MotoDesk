@@ -6,6 +6,10 @@ use motodesk_client::clients::{
 use motodesk_client::employees::Role;
 use motodesk_client::local_account::SetupPayload;
 use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAccount};
+use motodesk_client::products::{
+    self, CategoryInput, ListQuery as ListProducts, ProductInput, Unit, VariantAttr, VariantInput,
+};
+use motodesk_client::stock::{self, MovementInput, SupplierInput};
 use motodesk_client::{
     dashboard, local_account, network, recovery, settings, sync, Client, Cloud, Local, TokenStore,
 };
@@ -216,6 +220,110 @@ async fn the_home_screen_counts_the_shop_and_lists_its_last_documents() {
     assert_eq!(line.client_name.as_deref(), Some("Maëlle Kervella"));
     assert!(!line.doc_number.is_empty() && !line.status.is_empty() && !line.created_at.is_empty());
     assert_eq!(dashboard::status_label(&line.status), "Brouillon");
+}
+
+#[tokio::test]
+async fn the_catalogue_goes_through_its_whole_life() {
+    let api = client().await;
+
+    // A category, then a product filed under it.
+    let brakes = products::create_category(&api, &CategoryInput { name: "Freinage".into(), position: Some(10) }).await.unwrap();
+    let pads = products::create(
+        &api,
+        &ProductInput {
+            name: "Plaquette de frein avant".into(),
+            category_id: Some(brakes.id.clone()),
+            sku: Some("BRMB-PLQ-001".into()),
+            brand: Some("Brembo".into()),
+            selling_price_ttc_cents: Some(4_990),
+            vat_rate_bp: 2000,
+            stock_quantity: Some(3.),
+            low_stock_threshold: Some(5),
+            is_active: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!((pads.stock_quantity, pads.stock_milli, pads.unit), (3., 3_000, Unit::Piece));
+
+    let categories = products::list_categories(&api).await.unwrap();
+    // A new shop comes with a few categories of its own; ours counts its one product.
+    let ours = categories.iter().find(|c| c.id == brakes.id).expect("the new category is listed");
+    assert_eq!((ours.name.as_str(), ours.product_count, ours.position), ("Freinage", 1, 10));
+
+    // The list: by a piece of the name, brand or SKU; by category; by low stock.
+    let found = products::list(&api, &ListProducts { q: "brmb-plq".into(), ..Default::default() }).await.unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].category_name.as_deref(), Some("Freinage"));
+    assert!(products::is_low_stock(found[0].is_service, found[0].stock_quantity, found[0].low_stock_threshold));
+    let in_category =
+        products::list(&api, &ListProducts { category_id: Some(brakes.id.clone()), ..Default::default() }).await.unwrap();
+    assert_eq!(in_category.len(), 1);
+    assert_eq!(products::list(&api, &ListProducts { low_stock: true, ..Default::default() }).await.unwrap().len(), 1);
+
+    // A reception from a new supplier brings the stock over its threshold.
+    let supplier = stock::create_supplier(&api, &SupplierInput { name: "Bihr".into(), ..Default::default() }).await.unwrap();
+    assert_eq!(stock::list_suppliers(&api).await.unwrap().len(), 1);
+    stock::create_movement(
+        &api,
+        &MovementInput {
+            product_id: pads.id.clone(),
+            supplier_id: Some(supplier.id),
+            quantity_milli: 4_500,
+            unit_cost_ht_cents: Some(2_100),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(products::get(&api, &pads.id).await.unwrap().stock_quantity, 7.5);
+    assert!(products::list(&api, &ListProducts { low_stock: true, ..Default::default() }).await.unwrap().is_empty());
+    let moves = stock::list_movements(&api, Some(&pads.id)).await.unwrap();
+    assert!(moves.iter().any(|m| m.kind == "reception" && m.quantity_milli == 4_500));
+
+    // An edit that leaves the stock alone does not undo the reception.
+    let renamed = products::update(
+        &api,
+        &pads.id,
+        &ProductInput {
+            name: "Plaquettes avant".into(),
+            category_id: Some(brakes.id.clone()),
+            sku: Some("BRMB-PLQ-001".into()),
+            vat_rate_bp: 2000,
+            is_active: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!((renamed.name.as_str(), renamed.stock_quantity), ("Plaquettes avant", 7.5));
+    assert_eq!(renamed.brand, None, "a field sent empty is cleared");
+
+    // A variant is a product of its own, named after its model.
+    let blue = products::create_variant(
+        &api,
+        &pads.id,
+        &VariantInput {
+            attrs: vec![VariantAttr { name: "couleur".into(), value: "bleu".into() }],
+            stock_quantity: Some(2.),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(blue.parent_id.as_deref(), Some(pads.id.as_str()));
+    assert_eq!(blue.variant_label.as_deref(), Some("couleur bleu"));
+    assert_eq!(blue.name, "Plaquettes avant — couleur bleu");
+    let variants = products::list_variants(&api, &pads.id).await.unwrap();
+    assert!(variants.iter().any(|v| v.id == blue.id));
+
+    // Deleting: the variant, the product, then the category.
+    products::delete(&api, &blue.id).await.unwrap();
+    products::delete(&api, &pads.id).await.unwrap();
+    assert!(products::list(&api, &ListProducts::default()).await.unwrap().is_empty());
+    products::delete_category(&api, &brakes.id).await.unwrap();
+    assert!(products::list_categories(&api).await.unwrap().iter().all(|c| c.id != brakes.id));
 }
 
 #[tokio::test]
