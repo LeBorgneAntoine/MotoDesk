@@ -22,7 +22,13 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 describe("settings registry", () => {
   const desktop = resolve(__dirname, "../../..");
   const registry = resolve(__dirname, "registry.ts");
-  const files = [...sourceFiles(join(desktop, "src")), ...sourceFiles(join(desktop, "src-tauri/src"))].filter(
+  // The interface, the Tauri shell, and the data service (its own crate, beside the desktop app).
+  const roots = [
+    join(desktop, "src"),
+    join(desktop, "src-tauri/src"),
+    resolve(desktop, "../crates/motodesk-server/src"),
+  ];
+  const files = roots.flatMap((root) => sourceFiles(root)).filter(
     (f) => f !== registry && !f.endsWith(".test.ts"),
   );
   const text = files.map((f) => readFileSync(f, "utf8")).join("\n");

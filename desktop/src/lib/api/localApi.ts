@@ -1,4 +1,4 @@
-/** Fixed local API port (must match desktop/src-tauri local_server). */
+/** Fixed local API port (must match `local_server` in crates/motodesk-server). */
 export const LOCAL_API_PORT = 17300;
 
 export const LOCAL_API_URL = `http://127.0.0.1:${LOCAL_API_PORT}`;
