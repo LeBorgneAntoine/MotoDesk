@@ -18,6 +18,7 @@ tracing = "0.1"
 anyhow = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 # examples/seed.rs fills a throwaway data folder to look at the screens with data in them.
 rand = "0.8"
 hex = "0.4"
