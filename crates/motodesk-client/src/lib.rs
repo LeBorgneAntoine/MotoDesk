@@ -11,9 +11,11 @@
 pub mod auth;
 pub mod clients;
 pub mod cloud;
+pub mod employees;
 pub mod error;
 pub mod local_account;
 pub mod network;
+pub mod network_accounts;
 pub mod recovery;
 pub mod session;
 pub mod settings;

@@ -2,7 +2,7 @@
 //! `desktop/src/lib/api/meshAdmin.ts` and of `reconnectToNetwork` in `networkDevices.ts`).
 
 use axum::http::Method;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::ApiResult;
 use crate::session::Client;
@@ -22,6 +22,42 @@ pub struct MeshStatus {
 
 pub async fn mesh_status(client: &Client) -> ApiResult<MeshStatus> {
     client.call(Method::GET, "/mesh/status").public().send().await
+}
+
+/// One PC of the local network (see `local_server/network_devices.rs`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct NetworkDevice {
+    pub device_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub first_seen: String,
+    #[serde(default)]
+    pub last_seen: String,
+    /// Set once an administrator has removed it.
+    #[serde(default)]
+    pub removed_at: Option<String>,
+    #[serde(default)]
+    pub this_pc: bool,
+}
+
+pub async fn list_devices(client: &Client) -> ApiResult<Vec<NetworkDevice>> {
+    client.get("/api/network/devices").await
+}
+
+/// What removing a PC asks of the administrator: their password, and a new one, because the PC
+/// that is shut out knows the fingerprint of the old one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoveDevice {
+    pub password: String,
+    pub new_password: String,
+    pub confirm: String,
+}
+
+/// Shut a PC out: the network gets a new key and the administrator a new password. Every other
+/// PC then has to be reconnected.
+pub async fn remove_device(client: &Client, device_id: &str, payload: &RemoveDevice) -> ApiResult<()> {
+    client.call(Method::POST, format!("/api/network/devices/{device_id}/remove")).json(payload).done().await
 }
 
 /// On a PC left with an old key: get the current one with an administrator's password. Another

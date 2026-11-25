@@ -70,6 +70,19 @@ impl Cloud {
         self.send(self.http.get(format!("{}{path}", self.base)), access_token).await
     }
 
+    pub async fn patch<T: DeserializeOwned, B: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        body: &B,
+        access_token: Option<&str>,
+    ) -> ApiResult<T> {
+        self.send(self.http.patch(format!("{}{path}", self.base)).json(body), access_token).await
+    }
+
+    pub async fn delete<T: DeserializeOwned>(&self, path: &str, access_token: Option<&str>) -> ApiResult<T> {
+        self.send(self.http.delete(format!("{}{path}", self.base)), access_token).await
+    }
+
     pub async fn login(&self, identifier: &str, password: &str) -> ApiResult<TokenBundle> {
         self.post("/api/auth/login", &serde_json::json!({ "identifier": identifier, "password": password }), None)
             .await

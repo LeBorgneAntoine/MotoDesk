@@ -18,7 +18,10 @@ tracing = "0.1"
 anyhow = { workspace = true }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net"] }
 serde_json = { workspace = true }
 # examples/seed.rs fills a throwaway data folder to look at the screens with data in them.
 rand = "0.8"
+# examples/team_cloud.rs stands in for the cloud's team service.
+axum = "0.7"
 hex = "0.4"

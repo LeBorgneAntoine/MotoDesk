@@ -22,6 +22,26 @@ pub fn date(iso: &str) -> String {
     }
 }
 
+/// A moment as the service stores it (`2026-03-07T09:15:00Z`, or SQLite's
+/// `2026-03-07 09:15:00`, both in UTC) → `07/03/2026 10:15` on this PC's clock.
+pub fn date_time(stored: &str) -> String {
+    date_time_in(stored, &chrono::Local)
+}
+
+fn date_time_in<Tz: chrono::TimeZone>(stored: &str, zone: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let stored = stored.trim();
+    let moment = chrono::DateTime::parse_from_rfc3339(stored).map(|m| m.with_timezone(&chrono::Utc)).or_else(|_| {
+        chrono::NaiveDateTime::parse_from_str(stored, "%Y-%m-%d %H:%M:%S").map(|naive| naive.and_utc())
+    });
+    match moment {
+        Ok(moment) => moment.with_timezone(zone).format("%d/%m/%Y %H:%M").to_string(),
+        Err(_) => stored.to_string(),
+    }
+}
+
 /// Cents → `1 234,50 €`, with the narrow no-break spaces French typography uses.
 pub fn euros(cents: i64) -> String {
     let sign = if cents < 0 { "-" } else { "" };
@@ -107,6 +127,16 @@ mod tests {
         assert!(!last_group_matches(KEY, "RST0"));
         assert!(!last_group_matches(KEY, "KMNPQ"));
         assert!(!last_group_matches("", ""));
+    }
+
+    #[test]
+    fn a_moment_is_shown_on_the_clock_of_the_pc() {
+        let paris_in_winter = chrono::FixedOffset::east_opt(3600).unwrap();
+        assert_eq!(date_time_in("2026-03-07T09:15:00Z", &paris_in_winter), "07/03/2026 10:15");
+        assert_eq!(date_time_in("2026-03-07T23:30:12.345+00:00", &paris_in_winter), "08/03/2026 00:30");
+        assert_eq!(date_time_in("2026-03-07 09:15:00", &paris_in_winter), "07/03/2026 10:15");
+        assert_eq!(date_time_in("hier", &paris_in_winter), "hier");
+        assert_eq!(date_time_in("", &paris_in_winter), "");
     }
 
     #[test]
