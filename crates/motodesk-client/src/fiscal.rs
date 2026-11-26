@@ -22,11 +22,31 @@ pub struct MissingMention {
     pub reason: String,
 }
 
+/// What the shop's profile says of how its documents are worded. (The identity itself is read
+/// from the settings; see `templates::sample::shop_block`.)
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct CompanyProfile {
+    /// False for a shop that charges no VAT (franchise en base): its documents say why.
+    pub vat_subject: bool,
+    pub vat_exemption_text: String,
+    /// How long a customer has to pay.
+    pub payment_terms_days: i64,
+}
+
+impl Default for CompanyProfile {
+    fn default() -> Self {
+        CompanyProfile { vat_subject: true, vat_exemption_text: String::new(), payment_terms_days: 30 }
+    }
+}
+
 /// What an invoice issued right now would be missing.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct ProfileCheck {
     #[serde(default)]
     pub complete: bool,
+    #[serde(default)]
+    pub profile: CompanyProfile,
     #[serde(default)]
     pub missing: Vec<MissingMention>,
     #[serde(default)]
@@ -327,6 +347,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(check.blocker().as_deref(), Some("SIRET, Ville"));
+        assert_eq!(check.profile, CompanyProfile::default(), "what the profile does not say reads as the usual case");
         assert_eq!(ProfileCheck { complete: true, ..Default::default() }.blocker(), None);
     }
 

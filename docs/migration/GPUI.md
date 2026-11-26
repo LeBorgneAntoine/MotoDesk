@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), impression d'une vente (données du document, trace au journal, PDF), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -22,7 +22,7 @@ sont pas passés.
 | Clients & Véhicules | migré |
 | Parc VN/VO (liste, fiche, vente avec reprise) | migré |
 | Inventaire (catalogue, catégories, fiche produit, variantes, réception fournisseur) | migré |
-| Ventes (devis, factures, validation, avoirs, règlements) | migré, sans l'impression |
+| Ventes (devis, factures, validation, avoirs, règlements, impression) | migré |
 | L'Atelier (tableau des ordres de réparation, fiche, facturation) | migré |
 | Comptabilité (journaux des ventes et de caisse, TVA, balance âgée, FEC, caisse et intégrité, clôtures, archives, journal fiscal) | migré |
 | Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré |
@@ -34,7 +34,7 @@ sont pas passés.
 | Caisse (ouverture de session, recherche et lecture de codes, panier, encaissement en espèces, carte, chèque ou à plusieurs, tickets en attente, tiroir, clôture) | migré, sans imprimante, tiroir ni terminal réels |
 | Assistant (conversations, échange, canevas, clé et modèle du poste) | migré, sans échange avec un vrai modèle |
 | Modèles (bibliothèque, éditeur de mise en page, aperçu, export PDF) | migré |
-| Impression des documents (facture ou devis depuis Ventes avec sa trace et son DUPLICATA, clé de récupération) | à faire : le moteur est là, pas encore branché |
+| Impression des documents (facture, avoir, ticket ou devis depuis Ventes avec sa trace et son DUPLICATA, clé de récupération) | migré : un PDF confié au lecteur du poste, pas d'envoi direct à une imprimante |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -46,7 +46,7 @@ service de démonstration (voir « Lancer »), jamais contre le vrai cloud. « I
 l'invitation dans le presse-papiers : le bouton n'a pas été essayé dans l'application.
 
 Non repris pour l'instant sur les écrans migrés : « Mot de passe perdu ? » et « Restaurer une
-sauvegarde » sur la page de connexion, l'impression de la clé de récupération, les ventes et
+sauvegarde » sur la page de connexion, les ventes et
 ordres d'atelier dans la fiche client (ils arrivent avec leurs écrans), les bandeaux d'alerte et
 les menus de la barre de titre. Avec ces menus manquent ce qu'ils ouvraient depuis le tableau de
 bord : les raccourcis (Ctrl+N, F5...) et les fenêtres d'aide (documentation, raccourcis, à
@@ -54,11 +54,54 @@ propos). Sur
 l'Inventaire, les entrées de ces menus (nouveau produit, réception, nouvelle catégorie) ont
 toutes leur bouton à l'écran ; F5 actualise.
 
-**L'impression des documents n'est pas encore branchée.** Ce qui dessine une page et l'écrit en
-PDF existe (voir « Sur les Modèles ») et sert déjà à l'aperçu d'un modèle. Il reste à l'appeler
-depuis Ventes : d'ici là, cet écran n'a ni bouton d'impression ni duplicata, et un devis ne
-prend son numéro qu'en étant transformé en facture ou en ordre de réparation (dans Svelte, il le
-prend aussi à l'impression). Une facture validée ici s'imprime depuis l'interface Svelte.
+Sur l'impression :
+
+- **Imprimer, c'est ouvrir un PDF.** Le bouton de la fiche d'une vente (document scellé ou
+  devis) écrit le document en PDF avec le modèle par défaut de son type et le confie au
+  programme qui ouvre les PDF sur ce poste ; l'impression sur papier se lance de là. Il n'y a
+  pas encore d'envoi direct à une imprimante (voir « Sur les Modèles »).
+- **La trace est écrite avant la page**, comme dans Svelte : pour un document scellé, le
+  journal fiscal reçoit l'impression, et sa réponse dit si c'est l'original ou une copie, qui
+  porte alors DUPLICATA en travers de chaque page. Tout ce qui peut échouer sans laisser de
+  trace passe avant (modèle, client, identité de l'atelier, dossier où écrire) : un échec
+  n'use pas l'original. C'est `motodesk_client::templates::print`, en deux temps (`prepare`,
+  puis `finish`), avec ses tests contre le service (`tests/templates.rs`).
+- **Ce que la trace compte, c'est le PDF produit**, pas la feuille sortie de l'imprimante : un
+  original ouvert dans le lecteur peut y être imprimé plusieurs fois ou enregistré ailleurs,
+  sans que le journal le voie. Svelte avait la même limite (la fenêtre d'impression du système
+  propose aussi d'enregistrer en PDF), mais elle est plus visible ici. Un envoi direct à
+  l'imprimante la lèverait.
+- Un devis prend son numéro à sa première impression et ne laisse aucune trace : ce n'est pas
+  un document fiscal, le réimprimer est simplement le réimprimer.
+- Les données du document (`templates::document`, port de `documentData.ts`) viennent du même
+  calcul que celui avec lequel le service scelle ; les mentions légales viennent du profil que
+  le service vérifie avant de sceller.
+- **Plus strict que Svelte** : si l'identité de l'atelier, ses réglages ou ses mentions légales
+  ne peuvent pas être lus, l'impression échoue avant la trace. Svelte imprimait alors un
+  document sans émetteur. Un client supprimé depuis s'imprime toujours « Client de passage ».
+- **Où vont les fichiers** : `%TEMP%\motodesk`. Chaque copie a son nom (`FA-… - duplicata 2.pdf`),
+  pour ne jamais buter sur un original encore ouvert dans un lecteur ; un nom qui ne peut pas
+  être écrit passe au suivant (`… (2).pdf`). Ces fichiers portent ce que porte le document
+  (nom et adresse d'un client) : **le dossier est vidé à chaque démarrage** de l'application
+  (`desktop-gpui/src/printing.rs`).
+- **La clé de récupération** s'imprime de la même façon, seule sur une page
+  (`recovery::key_page`). Son PDF contient la clé en clair, sur ce poste : il est effacé dès
+  que la clé est confirmée, et au démarrage suivant si un lecteur le retenait encore. Svelte
+  ne laissait aucun fichier ; c'est le prix du passage par un PDF.
+- Un avoir et un ticket s'impriment avec le modèle de facture, comme dans Svelte : un avoir
+  porte donc une « Échéance » et les conditions de paiement de la facture.
+- Les modèles de base ne montrent pas le logo ; un modèle qui le montre (ou qui porte une image
+  dans son texte) est couvert par un test, pas par un essai dans l'application.
+- En développement, `MOTODESK_DEV_SAVE_DIR` reçoit aussi ces PDF, qui ne sont alors pas
+  ouverts : c'est ainsi que les essais ont relu ce qui a été écrit.
+- Vérifié dans l'application sur des dossiers de démonstration : une facture imprimée deux
+  fois (original sans mention, puis « duplicata 2 » barré DUPLICATA, messages à l'écran), un
+  avoir, un devis créé puis imprimé (il prend son numéro, la fiche et la liste suivent ; une
+  seconde impression garde le numéro), la clé de récupération à la création d'un réseau local
+  (page relue, fichier effacé à la confirmation). Non essayés : l'ouverture réelle dans un
+  lecteur de PDF et une impression sur papier, un lecteur qui retient un fichier, un ticket
+  de caisse imprimé depuis Ventes, l'absence de modèle (couverte par un test), « Nouvelle
+  clé » depuis Employés (même fenêtre).
 
 Sur l'écran Ventes, la fiche d'un document montre aussi son client, que la fiche Svelte ne
 montrait pas. Les totaux affichés pendant la saisie viennent de `motodesk_fiscal::vat`, le calcul
@@ -125,7 +168,8 @@ Sur les Modèles :
   curseur, ajout d'un texte et d'une image, logo de l'atelier, propriétés d'un tableau,
   premier plan, suppression au clavier, annuler, paysage, zoom, enregistrement, aperçu, export
   PDF (relu : logo compris), demande avant de quitter. Les PDF des modèles de base ont été
-  relus un à un. Non essayés : « Ouvrir pour imprimer » (ouvre un autre programme) et une
+  relus un à un. « Ouvrir pour imprimer » écrit son PDF au même endroit que l'impression d'une
+  vente (`printing.rs`). Non essayés : « Ouvrir pour imprimer » (ouvre un autre programme) et une
   impression sur papier, les raccourcis avec Ctrl, Ctrl+molette, la copie d'une variable
   dans le presse-papiers, l'édition des colonnes d'un tableau champ par champ, un modèle fait
   sous Svelte ouvert ici (le format est fixé par un test), et la vue d'un employé.
@@ -371,9 +415,8 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : impression des documents (Ventes, clé de récupération). Viennent ensuite l'icône de la zone
-de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
-Svelte et de Tauri.
+Ordre prévu : l'icône de la zone de notification, le démarrage avec Windows, les mises à jour et
+l'installateur, puis le retrait de Svelte et de Tauri.
 
 ## Comment un écran parle au service
 

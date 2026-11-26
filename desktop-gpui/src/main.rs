@@ -17,6 +17,7 @@ mod backend;
 mod format;
 mod pages;
 mod pos;
+mod printing;
 mod router;
 mod shell;
 
@@ -65,6 +66,8 @@ fn main() {
     // Before anything reads the data folder: an install made under the former product name
     // hands its data over to the current folder.
     previous_install::adopt_previous_install();
+    // The documents handed to a PDF reader during earlier runs do not stay on this PC.
+    printing::sweep();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

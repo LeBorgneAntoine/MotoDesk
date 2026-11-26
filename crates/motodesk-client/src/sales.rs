@@ -280,6 +280,13 @@ pub async fn validate(api: &Api, id: &str) -> ApiResult<Sale> {
     api.post(format!("/api/sales/{id}/validate"), &serde_json::json!({})).await
 }
 
+/// Give a quote its number. It takes one the first time it is handed to a customer (printed,
+/// or turned into an invoice or a repair order), not when its draft is created; asking again
+/// changes nothing.
+pub async fn issue_quote(api: &Api, id: &str) -> ApiResult<Sale> {
+    api.post(format!("/api/sales/{id}/issue-quote"), &serde_json::json!({})).await
+}
+
 /// Make a draft invoice from a quote. The quote is kept; asking again returns the draft that
 /// already exists.
 pub async fn convert_quote(api: &Api, id: &str) -> ApiResult<Sale> {
@@ -289,6 +296,25 @@ pub async fn convert_quote(api: &Api, id: &str) -> ApiResult<Sale> {
 /// A sealed credit note cancelling the whole document.
 pub async fn create_credit_note(api: &Api, id: &str) -> ApiResult<Sale> {
     api.post(format!("/api/sales/{id}/credit-note"), &serde_json::json!({ "reason": null })).await
+}
+
+/// What the journal says of a print.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Reprint {
+    /// False for the original, true from the second copy onwards.
+    pub duplicata: bool,
+    pub copy_number: i64,
+    /// `DUPLICATA` on a copy, nothing on the original.
+    #[serde(default)]
+    pub mention: Option<String>,
+    pub journal_seq: i64,
+}
+
+/// Write a print of a sealed document into the journal, before the page is drawn: the answer
+/// says whether this one is the original or a copy, which must then carry DUPLICATA. Never
+/// undone: a print that fails afterwards has still been counted.
+pub async fn log_reprint(api: &Api, sale_id: &str) -> ApiResult<Reprint> {
+    api.post(format!("/api/sales/{sale_id}/reprint"), &serde_json::json!({})).await
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]

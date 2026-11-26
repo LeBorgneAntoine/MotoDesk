@@ -5,6 +5,8 @@ edition = "2021"
 description = "Typed access to Motodesk's local API and cloud accounts, for the native interface"
 
 [dependencies]
+# The amounts of a printed line come from the engine the service seals documents with.
+motodesk-fiscal = { path = "../motodesk-fiscal" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

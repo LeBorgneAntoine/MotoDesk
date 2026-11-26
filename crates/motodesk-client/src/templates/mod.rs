@@ -5,10 +5,14 @@
 //! may hold variables (`{{client.full_name}}`) that are replaced when a document is printed
 //! ([`interpolate`], [`variables`]). [`render`] turns a template and its data into what is drawn
 //! on each page, once, for the screen and for paper alike; [`pdf`] writes those pages to a file.
+//! [`document`] is the data of a real sale, and [`print`] takes one all the way to its PDF,
+//! with the trace the fiscal journal keeps of it.
 
+pub mod document;
 pub mod interpolate;
 pub mod metrics;
 pub mod pdf;
+pub mod print;
 pub mod render;
 pub mod sample;
 pub mod schema;
