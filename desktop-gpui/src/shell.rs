@@ -4,7 +4,10 @@
 use std::time::Duration;
 
 use chrono::Datelike as _;
+use motodesk_client::backup::{self, Reminder};
+use motodesk_client::fiscal::{self, ProfileCheck};
 use motodesk_client::network::{self, MeshStatus};
+use motodesk_client::recovery;
 use motodesk_client::settings;
 use motodesk_client::sync::{self, SyncStatus};
 use motodesk_ui::gpui::prelude::FluentBuilder as _;
@@ -14,7 +17,8 @@ use motodesk_ui::*;
 use crate::appearance;
 use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
-use crate::format::humanize_error;
+use crate::format::{self, humanize_error};
+use crate::notices::NoticesState;
 use crate::pages::atelier::AtelierPage;
 use crate::pages::billing::BillingPage;
 use crate::pages::data::DataPage;
@@ -30,6 +34,7 @@ use crate::pages::stock::StockPage;
 use crate::pages::templates::TemplatesPage;
 use crate::pages::not_migrated;
 use crate::pages::updates as update_screens;
+use crate::pos::PosState;
 use crate::router::{self, Router};
 use crate::updates::UpdateState;
 
@@ -82,7 +87,31 @@ pub struct Shell {
     /// Where this PC stands among the PCs of the shop (local networks only).
     mesh: MeshStatus,
     reconnect: Option<Reconnect>,
+    // What the shop must be told, above every screen (see `banners`).
+    /// What an invoice issued now would be missing.
+    profile: Option<ProfileCheck>,
+    /// Past days with trading and no daily closure, oldest first. Closing is manual and
+    /// mandatory, and nothing else reminds anyone to do it.
+    late_closures: Vec<String>,
+    /// Changes the cloud holds from this PC that this base lacks (a restored backup).
+    restore_gap: i64,
+    recovering_gap: bool,
+    backup_note: Option<Reminder>,
+    /// A local network without a recovery key written down.
+    recovery_missing: bool,
+    /// The screen the notices were last read for: they are read again when it changes.
+    noticed_for: SharedString,
     _subscriptions: Vec<Subscription>,
+}
+
+/// « Une journée d'activité n'est pas clôturée (la plus ancienne : 20/11/2026). … »
+fn late_closures_message(days: &[String]) -> String {
+    let count = match days.len() {
+        1 => "Une journée d'activité n'est pas clôturée".to_string(),
+        many => format!("{many} journées d'activité ne sont pas clôturées"),
+    };
+    let oldest = days.first().map(|day| format::date(day)).unwrap_or_default();
+    format!("{count} (la plus ancienne : {oldest}). La clôture journalière est obligatoire et se fait dans l'ordre.")
 }
 
 impl Shell {
@@ -91,6 +120,11 @@ impl Shell {
             cx.observe(&Router::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&AuthStore::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&UpdateState::global(cx), |_, _, cx| cx.notify()),
+            cx.observe(&NoticesState::global(cx), |this, _, cx| {
+                this.refresh_backup_note(cx);
+                cx.notify();
+            }),
+            cx.observe(&PosState::global(cx), |_, _, cx| cx.notify()),
         ];
         // Someone is signed in: from now on the app looks for a newer version by itself.
         UpdateState::global(cx).update(cx, |updates, cx| updates.start(cx));
@@ -99,6 +133,7 @@ impl Shell {
                 let alive = this.update(cx, |this, cx| {
                     this.refresh_sync(cx);
                     this.refresh_mesh(cx);
+                    this.refresh_restore_gap(cx);
                 });
                 if alive.is_err() {
                     break;
@@ -133,6 +168,13 @@ impl Shell {
             sync: None,
             mesh: MeshStatus::default(),
             reconnect: None,
+            profile: None,
+            late_closures: Vec::new(),
+            restore_gap: 0,
+            recovering_gap: false,
+            backup_note: None,
+            recovery_missing: false,
+            noticed_for: SharedString::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -248,10 +290,166 @@ impl Shell {
         );
     }
 
-    /// What the shop must know about its network, above every screen.
-    fn banners(&self, is_admin: bool, cx: &mut Context<Self>) -> Vec<Alert> {
+    // ---- notices --------------------------------------------------------------------------------
+
+    /// Read again what the notices are made of. Called when the screen changes: a profile is
+    /// completed in the settings, a day is closed in Comptabilité, a key is noted in Employés,
+    /// and the notice should be gone by the time one leaves.
+    fn refresh_notices(&mut self, cx: &mut Context<Self>) {
+        let (is_admin, is_local) = {
+            let auth = AuthStore::global(cx).read(cx);
+            (auth.is_admin(), auth.is_local())
+        };
+        cx.api(
+            |client| async move { fiscal::check_profile(&client).await },
+            |this, profile, cx| {
+                if let Ok(profile) = profile {
+                    this.profile = Some(profile);
+                    cx.notify();
+                }
+            },
+        );
+        if !is_admin {
+            self.late_closures.clear();
+            self.backup_note = None;
+            self.recovery_missing = false;
+            return;
+        }
+        cx.api(
+            |client| async move { fiscal::pending_closures(&client).await },
+            |this, days, cx| {
+                this.late_closures = days.unwrap_or_default();
+                cx.notify();
+            },
+        );
+        self.refresh_backup_note(cx);
+        if !is_local {
+            self.recovery_missing = false;
+            return;
+        }
+        cx.api(
+            |client| async move { recovery::status(&client).await },
+            |this, status, cx| {
+                this.recovery_missing = status.is_ok_and(|status| !status.exists || !status.confirmed);
+                cx.notify();
+            },
+        );
+    }
+
+    /// The shop's data is only as safe as its last backup: say so, once a day, to those who
+    /// can do something about it.
+    fn refresh_backup_note(&mut self, cx: &mut Context<Self>) {
+        if !AuthStore::global(cx).read(cx).is_admin() || NoticesState::global(cx).read(cx).backup_reminder_snoozed() {
+            self.backup_note = None;
+            return;
+        }
+        cx.api(
+            |client| async move { backup::status(&client).await },
+            |this, status, cx| {
+                this.backup_note = status.ok().and_then(|status| backup::reminder(&status, chrono::Utc::now()));
+                cx.notify();
+            },
+        );
+    }
+
+    fn refresh_restore_gap(&mut self, cx: &mut Context<Self>) {
+        if !AuthStore::global(cx).read(cx).is_admin() {
+            self.restore_gap = 0;
+            return;
+        }
+        cx.api(
+            |client| async move { sync::restore_gap(&client).await },
+            |this, missing, cx| {
+                this.restore_gap = missing.unwrap_or(0);
+                cx.notify();
+            },
+        );
+    }
+
+    /// Fetch this PC's own changes back from the cloud and rebuild the register from them.
+    fn recover_gap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.recovering_gap {
+            return;
+        }
+        self.recovering_gap = true;
+        cx.notify();
+        cx.api_in(
+            window,
+            |client| async move { sync::recover_from_cloud(&client).await },
+            |this, result, window, cx| {
+                this.recovering_gap = false;
+                match result {
+                    Ok(recovered) => {
+                        this.restore_gap = 0;
+                        toast::success(recovered.message(), window, cx);
+                    }
+                    Err(error) => toast::error(humanize_error(&error, "La récupération a échoué."), window, cx),
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    /// Go on without recovering: the notice is not shown again for this gap.
+    fn dismiss_gap(&mut self, cx: &mut Context<Self>) {
+        self.restore_gap = 0;
+        cx.notify();
+        cx.api(|client| async move { sync::dismiss_restore_gap(&client).await }, |_, _, _| {});
+    }
+
+    /// What the shop must know, above every screen. `current` is the screen shown: a notice
+    /// is not repeated on the screen where it is dealt with.
+    fn banners(&self, is_admin: bool, current: &str, cx: &mut Context<Self>) -> Vec<Alert> {
         let m = cx.ui().m;
         let mut banners = Vec::new();
+        let go = |screen: &'static str, parameter: Option<(&'static str, &'static str)>| {
+            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                Router::global(cx).update(cx, |router, cx| match parameter {
+                    Some(parameter) => router.go_with(screen, [parameter], cx),
+                    None => router.go(screen, cx),
+                })
+            }
+        };
+        let actions = || row().mt(m.space_1).gap(m.space_2);
+
+        // An invoice cannot be validated without its mandatory mentions: said before anyone
+        // has typed a whole document. Otherwise, once, that this PC could be a till.
+        let till = PosState::global(cx).read(cx).config.enabled;
+        let till_hint_dismissed = NoticesState::global(cx).read(cx).notices.till_hint_dismissed;
+        if let Some(blocker) = self.profile.as_ref().and_then(ProfileCheck::blocker) {
+            banners.push(
+                Alert::warning()
+                    .flush()
+                    .title("Profil fiscal incomplet")
+                    .child(format!("{blocker}. Complétez Réglages › Légal & fiscal avant de valider une facture."))
+                    .child(actions().child(Button::new("notice-profile").link().small().label("Ouvrir les réglages").on_click(go(router::SETTINGS, Some(("cat", "legal")))))),
+            );
+        } else if !till && !till_hint_dismissed && current != router::SETTINGS {
+            banners.push(
+                Alert::info()
+                    .flush()
+                    .title("Caisse")
+                    .child("Cet ordinateur n'est pas encore une caisse. Activez-la dans Réglages › Caisse si vous encaissez au comptoir.")
+                    .child(
+                        actions()
+                            .child(Button::new("notice-till").link().small().label("Configurer").on_click(go(router::SETTINGS, Some(("cat", "caisse")))))
+                            .child(Button::new("notice-till-later").link().small().label("Plus tard").on_click(|_, _, cx| {
+                                NoticesState::global(cx).update(cx, |notices, cx| notices.dismiss_till_hint(cx))
+                            })),
+                    ),
+            );
+        }
+        // A network without a recovery key written down is one forgotten password from being stuck.
+        let key_on_screen = AuthStore::global(cx).read(cx).recovery_key.is_some();
+        if self.recovery_missing && !key_on_screen && current != router::EMPLOYEES {
+            banners.push(
+                Alert::warning()
+                    .flush()
+                    .title("Clé de récupération à noter")
+                    .child("Sans elle, un mot de passe administrateur perdu bloque les comptes pour de bon.")
+                    .child(actions().child(Button::new("notice-key").link().small().label("Créer la clé").on_click(go(router::EMPLOYEES, None)))),
+            );
+        }
         let (behind, other) = (self.mesh.behind_count, self.mesh.other_version_count);
         if self.mesh.needs_reconnect {
             banners.push(
@@ -293,6 +491,51 @@ impl Shell {
                             UpdateState::global(cx).update(cx, |updates, cx| updates.later(cx))
                         })),
                 ),
+            );
+        }
+        if let Some(note) = self.backup_note.filter(|_| current != router::SETTINGS) {
+            banners.push(
+                Alert::warning().flush().title("Données non sauvegardées").child(note.message()).child(
+                    actions()
+                        .child(Button::new("notice-backup").primary().small().label("Ouvrir les sauvegardes").on_click(go(router::SETTINGS, Some(("cat", "system")))))
+                        .child(Button::new("notice-backup-later").link().small().label("Demain").on_click(|_, _, cx| {
+                            NoticesState::global(cx).update(cx, |notices, cx| notices.snooze_backup_reminder(cx))
+                        })),
+                ),
+            );
+        }
+        if self.restore_gap > 0 {
+            banners.push(
+                Alert::warning()
+                    .flush()
+                    .title("Base plus ancienne que le cloud")
+                    .child(format!(
+                        "Le cloud conserve au moins {} modification(s) de ce poste qui ne sont pas dans cette base (une sauvegarde plus ancienne \
+                         a-t-elle été restaurée ?). Tant qu'elles ne sont pas récupérées, aucun document ne peut être émis : il bifurquerait du \
+                         registre fiscal conservé dans le cloud.",
+                        self.restore_gap
+                    ))
+                    .child(
+                        actions()
+                            .child(
+                                Button::new("notice-gap")
+                                    .primary()
+                                    .small()
+                                    .label("Récupérer depuis le cloud")
+                                    .loading(self.recovering_gap)
+                                    .on_click(cx.listener(|this, _, window, cx| this.recover_gap(window, cx))),
+                            )
+                            .child(Button::new("notice-gap-skip").link().small().label("Continuer sans récupérer").on_click(cx.listener(|this, _, _, cx| this.dismiss_gap(cx)))),
+                    ),
+            );
+        }
+        if !self.late_closures.is_empty() && is_admin && current != router::BILLING {
+            banners.push(
+                Alert::warning()
+                    .flush()
+                    .title("Clôtures à faire")
+                    .child(late_closures_message(&self.late_closures))
+                    .child(actions().child(Button::new("notice-closures").link().small().label("Clôturer").on_click(go(router::BILLING, Some(("section", "closures")))))),
             );
         }
         banners
@@ -469,7 +712,12 @@ impl Render for Shell {
         };
 
         let (dot, sync_label) = self.sync_state(cx);
-        let banners = self.banners(is_admin, cx);
+        // The notices follow the screen: read again when it changes.
+        if self.noticed_for != current {
+            self.noticed_for = current.clone();
+            self.refresh_notices(cx);
+        }
+        let banners = self.banners(is_admin, current.as_ref(), cx);
 
         col()
             .size_full()
@@ -513,5 +761,16 @@ impl Render for Shell {
                     .left(div().opacity(0.72).child(today()))
                     .right(div().opacity(0.72).child(concat!("v", env!("CARGO_PKG_VERSION")))),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn late_closures_are_counted_and_the_oldest_named() {
+        let one = super::late_closures_message(&["2026-11-20".to_string()]);
+        assert!(one.starts_with("Une journée d'activité n'est pas clôturée (la plus ancienne : 20/11/2026)."), "{one}");
+        let three = super::late_closures_message(&["2026-11-18".to_string(), "2026-11-19".to_string(), "2026-11-20".to_string()]);
+        assert!(three.starts_with("3 journées d'activité ne sont pas clôturées (la plus ancienne : 18/11/2026)."), "{three}");
     }
 }

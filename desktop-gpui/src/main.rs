@@ -16,6 +16,7 @@ mod auth;
 mod backend;
 mod background;
 mod format;
+mod notices;
 mod pages;
 mod pos;
 mod printing;
@@ -117,6 +118,7 @@ fn main() {
         pos::PosState::init(&pos_dir.clone().unwrap_or_default(), cx);
         assistant::AssistantState::init(&pos_dir.clone().unwrap_or_default(), cx);
         updates::UpdateState::init(&pos_dir.clone().unwrap_or_default(), cx);
+        notices::NoticesState::init(&pos_dir.clone().unwrap_or_default(), cx);
 
         // Started by the Windows session: stay out of the way until the user asks.
         let hidden = background::SUPPORTED && background::started_in_background();
