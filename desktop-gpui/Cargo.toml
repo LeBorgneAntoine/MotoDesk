@@ -3,10 +3,33 @@ name = "motodesk-gpui"
 version = "0.1.0"
 description = "Motodesk desktop client (native GPUI interface)"
 edition = "2024"
+build = "build.rs"
 
+# The program an installation holds: `motodesk.exe`.
 [[bin]]
-name = "motodesk-gpui"
+name = "motodesk"
 path = "src/main.rs"
+
+# The Windows installer, built by cargo-packager (see docs/migration/GPUI.md, « Sur
+# l'installateur »): `cargo packager --release -p motodesk-gpui`. Per user, without
+# administrator rights. The shop's data is in another folder and is never touched, neither
+# by an update nor by an uninstall.
+[package.metadata.packager]
+product-name = "Motodesk"
+identifier = "com.motodesk.app"
+publisher = "Motodesk"
+description = "Gestion des ateliers et concessions moto et cycle : atelier, stock, caisse et comptabilité fiscale"
+category = "Business"
+formats = ["nsis"]
+icons = ["assets/icon.ico"]
+before-packaging-command = "cargo build --release -p motodesk-gpui"
+
+[package.metadata.packager.nsis]
+installMode = "currentUser"
+installer-icon = "assets/icon.ico"
+languages = ["French", "English"]
+display-language-selector = false
+compression = "lzma"
 
 [dependencies]
 motodesk-ui = { path = "../crates/motodesk-ui" }
@@ -28,6 +51,10 @@ tray-icon = { version = "0.25", default-features = false }
 auto-launch = "0.6"
 raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+# The icon of the program: the one of its window, of its shortcuts and of the task bar.
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net"] }

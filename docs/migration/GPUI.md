@@ -13,7 +13,8 @@ sont pas passés.
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
 | Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), impression d'une vente (données du document, trace au journal, PDF), réglage de l'arrière-plan, mises à jour (recherche, téléchargement, vérification de la signature), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
-| Application native | `desktop-gpui` | fenêtre, connexion, coquille |
+| Application native | `desktop-gpui` | fenêtre, connexion, coquille ; le programme s'appelle `motodesk.exe` |
+| Outil de publication (notes, signature, manifeste des mises à jour) | `tools/release` | fait, pas encore utilisé par le workflow Release |
 
 | Écran | État |
 |---|---|
@@ -35,7 +36,8 @@ sont pas passés.
 | Assistant (conversations, échange, canevas, clé et modèle du poste) | migré, sans échange avec un vrai modèle |
 | Modèles (bibliothèque, éditeur de mise en page, aperçu, export PDF) | migré |
 | Arrière-plan (icône près de l'horloge, fenêtre cachée à la fermeture, démarrage avec Windows, une seule copie à la fois) | migré, sous Windows ; l'icône, son menu et l'entrée de démarrage n'ont pas été essayés |
-| Mises à jour (recherche automatique, bandeau, nouveautés, téléchargement vérifié, carte des réglages) | migré ; le lancement de l'installateur n'a pas pu être essayé, et l'installateur de l'application native reste à faire |
+| Mises à jour (recherche automatique, bandeau, nouveautés, téléchargement vérifié, carte des réglages) | migré ; le lancement de l'installateur n'a pas été essayé |
+| Installateur Windows de l'application native (cargo-packager, par utilisateur) | construit et relu, **jamais lancé** ; le workflow qui le construit n'a pas encore tourné |
 | Impression des documents (facture, avoir, ticket ou devis depuis Ventes avec sa trace et son DUPLICATA, clé de récupération) | migré : un PDF confié au lecteur du poste, pas d'envoi direct à une imprimante |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
@@ -98,14 +100,13 @@ Sur les mises à jour (`motodesk_client::updates`, `desktop-gpui/src/updates.rs`
 - **Rien n'est lancé sans vérification** : l'installateur est téléchargé en mémoire, sa
   signature vérifiée, et seulement alors écrit sur le disque (`%TEMP%\motodesk\update`, vidé
   au démarrage suivant) et lancé. Jamais de version plus ancienne ni identique ; jamais en
-  HTTP ; une signature qui nomme une version doit nommer celle annoncée (une signature qui
-  n'en nomme pas est acceptée, comme le faisait Tauri par défaut).
-- **L'installateur est lancé comme le lançait Tauri** : `/P /UPDATE /R /ARGS …` (sans
-  question, en mise à jour, puis relance de l'application, cachée si elle avait démarré avec
-  Windows), après quoi l'application se ferme. Cela suppose un installateur NSIS qui
-  comprend ces options : c'est une contrainte pour l'installateur de l'application native,
-  qui devra aussi s'installer par-dessus l'installation Tauri pour que la dernière version
-  Tauri puisse se mettre à jour vers la première version native.
+  HTTP ; la signature doit nommer la version annoncée (Tauri acceptait par défaut une
+  signature qui n'en nommait aucune : ici elle est refusée, ce que permet le fait qu'aucune
+  version n'est encore installée nulle part).
+- **L'installateur est lancé avec `/P /R /NS`** : sans question (il ferme le programme qui
+  tourne et installe par-dessus), puis relance de l'application, sans recréer les raccourcis
+  que l'utilisateur aurait retirés. Ce sont les options de l'installateur que construit
+  cargo-packager (voir « Sur l'installateur ») ; l'application se ferme aussitôt après.
 - **Une version de développement ne lance jamais d'installateur** (elle remplacerait
   l'application installée) et ne cherche pas seule auprès du serveur des versions publiées.
   Pour regarder les écrans : `cargo run -p motodesk-gpui --example release_server` annonce
@@ -126,6 +127,47 @@ Sur les mises à jour (`motodesk_client::updates`, `desktop-gpui/src/updates.rs`
   avec une clé de test. **Non essayés** : le lancement d'un vrai installateur et la relance de
   l'application (aucun installateur natif n'existe encore), et une recherche auprès du vrai
   serveur (aucune version n'y est publiée).
+
+Sur l'installateur :
+
+- **Aucune version n'est installée dans un atelier** (l'application est en pré-version) : il
+  n'y a donc pas d'installation Tauri à remplacer en place, ni de mise à jour de Tauri vers
+  l'application native à assurer. L'installateur natif est construit par
+  [cargo-packager](https://github.com/crabnebula-dev/cargo-packager) (0.11.8), un outil Rust :
+  la publication n'a plus besoin de Node ni de l'outillage Tauri.
+- Sa configuration est dans `desktop-gpui/Cargo.toml` (`[package.metadata.packager]`) :
+  installateur NSIS, **par utilisateur, sans droits d'administrateur**, en français et en
+  anglais, même nom de produit et même identifiant qu'avant (« Motodesk »,
+  `com.motodesk.app`). Il installe `motodesk.exe` ; les données de l'atelier sont dans un autre
+  dossier (`%APPDATA%\com.motodesk.app`) et ne sont touchées ni par une mise à jour ni par une
+  désinstallation.
+- Le programme porte maintenant son icône (`desktop-gpui/build.rs`, `assets/app.rc`) : celle
+  de sa fenêtre, de la barre des tâches et des raccourcis.
+- Construire l'installateur sur un poste :
+  `cargo install cargo-packager --locked --version 0.11.8`, puis
+  `cargo packager --release -p motodesk-gpui`. Il sort dans `target/release`
+  (`motodesk_<version>_x64-setup.exe`, 17 Mo). Sans la variable `MOTODESK_CLOUD_URL` au moment
+  de la construction, l'application installée ne peut pas se connecter en ligne.
+- **L'outil de publication** (`tools/release`, en Rust) remplace le script Node
+  `updater-manifest.mjs` et la signature par l'outillage Tauri : `notes` découpe la section
+  de la version dans `CHANGELOG.md`, `sign` signe l'installateur avec la clé du mainteneur
+  (même format de clé qu'aujourd'hui : les secrets du dépôt n'ont pas à changer) en y
+  inscrivant la version, `manifest` écrit `latest.json`. Ses tests donnent ce qu'il signe et
+  ce qu'il écrit à la vérification de l'application elle-même.
+- `.github/workflows/native-installer.yml` construit l'installateur **à la demande**
+  (bouton « Run workflow »), le signe si la clé est là, et le garde avec l'exécution. Il ne
+  publie rien. Le workflow *Release* construit toujours l'application Tauri : il basculera
+  sur l'application native au moment du retrait de Svelte et de Tauri, avec `tools/release`
+  pour les notes, la signature et le manifeste.
+- Une désinstallation laisse l'entrée de démarrage de Windows, si le mode arrière-plan l'avait
+  écrite : elle pointe alors sur un programme absent, ce que Windows ignore.
+- **Vérifié** : l'installateur se construit sur ce poste ; son script généré a été relu (nom
+  du produit, installation par utilisateur, programme principal, icône) ; la signature et le
+  manifeste sont couverts par des tests. **Non essayés** : lancer l'installateur (il
+  s'installerait sur le poste de développement), une mise à jour réelle d'une version
+  installée vers une autre, la désinstallation, et le workflow lui-même (il n'a jamais
+  tourné : la branche n'est pas poussée). Le premier essai réel doit se faire sur un poste de
+  test.
 
 Sur l'impression :
 
@@ -489,8 +531,9 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : l'installateur de l'application native (et le workflow de publication qui va
-avec), puis le retrait de Svelte et de Tauri.
+Ordre prévu : essayer l'installateur sur un poste de test, puis le retrait de Svelte et de
+Tauri (avec la bascule du workflow *Release* sur l'application native). Reste aussi ce qui
+n'est pas repris sur les écrans migrés, noté plus haut.
 
 ## Comment un écran parle au service
 

@@ -5585,6 +5585,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "embed-resource",
  "futures-util",
  "hex",
  "minisign",
@@ -5599,6 +5600,17 @@ dependencies = [
  "tracing",
  "tray-icon",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "motodesk-release"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "minisign",
+ "motodesk-client",
+ "serde_json",
 ]
 
 [[package]]

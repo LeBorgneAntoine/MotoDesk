@@ -8,8 +8,8 @@
 //! - The installer is signed with a private key held only by the maintainer; the matching
 //!   public key is compiled in ([`PUBLIC_KEY`]). An installer whose signature does not verify is
 //!   never handed over, whoever served it.
-//! - A version that is not newer than the running one is never offered (no downgrade), and a
-//!   signature that names a version must name the one that was announced.
+//! - A version that is not newer than the running one is never offered (no downgrade), and the
+//!   signature must name the version that was announced.
 //!
 //! This module looks, downloads and verifies. Running the installer is the app's part.
 
@@ -211,14 +211,16 @@ fn signed_version(trusted_comment: &str) -> Option<&str> {
 /// its address and signature point at. The signature's own version (read only once the
 /// signature has verified: it is covered by it) is what stops a tampered manifest from
 /// dressing an older installer up as a new version. A signature that names no version is
-/// accepted, as it was by the updater this one replaces.
+/// refused: the release tool always writes it (`tools/release`).
 pub fn verify(installer: &[u8], signature: &str, public_key: &str, announced_version: &str) -> Result<(), UpdateError> {
     let invalid = |error: minisign_verify::Error| UpdateError::Signature(error.to_string());
     let key = PublicKey::decode(&text_of(public_key)?).map_err(invalid)?;
     let signature = Signature::decode(&text_of(signature)?).map_err(invalid)?;
     key.verify(installer, &signature, true).map_err(invalid)?;
 
-    let Some(signed) = signed_version(signature.trusted_comment()) else { return Ok(()) };
+    let Some(signed) = signed_version(signature.trusted_comment()) else {
+        return Err(UpdateError::Signature("the signature does not say which version it was made for".into()));
+    };
     let same = match (version(signed), version(announced_version)) {
         (Some(signed), Some(announced)) => signed == announced,
         _ => signed == announced_version,
@@ -257,44 +259,14 @@ pub async fn download(source: &Source, update: &Update, mut progress: impl FnMut
 
 /// What the installer of a version is called on disk.
 pub fn installer_name(version: &str) -> String {
-    format!("Motodesk_{version}_x64-setup.exe")
+    format!("motodesk_{version}_x64-setup.exe")
 }
 
-/// One argument of the relaunched program, as the installer wants it written. Besides the
-/// usual quoting, an argument holding `/` is quoted: the installer would read it as one of its
-/// own switches.
-fn installer_argument(argument: &str) -> String {
-    let quote = argument.is_empty() || argument.contains([' ', '\t', '/']);
-    let mut out = String::new();
-    if quote {
-        out.push('"');
-    }
-    let mut backslashes = 0;
-    for c in argument.chars() {
-        if c == '\\' {
-            backslashes += 1;
-        } else {
-            if c == '"' {
-                out.extend(std::iter::repeat_n('\\', backslashes + 1));
-            }
-            backslashes = 0;
-        }
-        out.push(c);
-    }
-    if quote {
-        out.extend(std::iter::repeat_n('\\', backslashes));
-        out.push('"');
-    }
-    out
-}
-
-/// The command line the installer is run with: no questions asked (`/P`), as an update
-/// (`/UPDATE`), and the program started again afterwards (`/R`) the way this run was started.
-pub fn installer_parameters(started_with: &[String]) -> String {
-    let mut parameters: Vec<String> = ["/P", "/UPDATE", "/R", "/ARGS"].map(String::from).into();
-    parameters.extend(started_with.iter().map(|argument| installer_argument(argument)));
-    parameters.join(" ")
-}
+/// The command line the installer is run with, in the words of the installer cargo-packager
+/// builds: no questions asked (`/P`: it closes the running program and installs over it), the
+/// program started again afterwards (`/R`), and the shortcuts left as the user has them
+/// (`/NS`: without it an update puts back a desktop shortcut that was removed).
+pub const INSTALLER_PARAMETERS: &str = "/P /R /NS";
 
 // ---- what this PC keeps about updates --------------------------------------------------------
 
@@ -464,9 +436,9 @@ mod tests {
 
         // An older installer announced as a newer version: its signature says which it is.
         assert!(matches!(verify(&installer, &signature, &key, "0.3.0"), Err(UpdateError::Signature(_))));
-        // A signature that names no version is taken as it was before versions were recorded.
+        // A signature that names no version proves nothing about which release it is: refused.
         let unnamed = maintainer.sign(&installer, None);
-        assert_eq!(verify(&installer, &unnamed, &key, "0.3.0"), Ok(()));
+        assert!(matches!(verify(&installer, &unnamed, &key, "0.2.0"), Err(UpdateError::Signature(_))));
     }
 
     #[test]
@@ -485,12 +457,9 @@ mod tests {
     }
 
     #[test]
-    fn the_installer_is_run_as_an_update_and_starts_the_program_again() {
-        assert_eq!(installer_parameters(&[]), "/P /UPDATE /R /ARGS");
-        assert_eq!(installer_parameters(&["--background".into()]), "/P /UPDATE /R /ARGS --background");
-        // An argument the installer could take for one of its own is quoted.
-        assert_eq!(installer_parameters(&["/S".into(), "deux mots".into(), r#"a"b\"#.into()]), r#"/P /UPDATE /R /ARGS "/S" "deux mots" a\"b\"#);
-        assert_eq!(installer_name("0.2.0"), "Motodesk_0.2.0_x64-setup.exe");
+    fn the_installer_is_run_without_questions_and_starts_the_program_again() {
+        assert_eq!(INSTALLER_PARAMETERS, "/P /R /NS");
+        assert_eq!(installer_name("0.2.0"), "motodesk_0.2.0_x64-setup.exe");
     }
 
     #[test]

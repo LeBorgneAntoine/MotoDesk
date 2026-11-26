@@ -17,7 +17,6 @@ use motodesk_client::updates::{self, Prefs, PrefsStore, Source, Update, UpdateEr
 use motodesk_ui::gpui::{App, AppContext as _, Context, Entity, Global, SharedString, Task};
 
 use crate::backend::ApiExt as _;
-use crate::background;
 
 /// The version running now.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -262,10 +261,7 @@ impl UpdateState {
                         this.note = Some("Installateur téléchargé et vérifié. Une version de développement ne le lance pas.".into());
                     }
                     Ok(installer) => {
-                        // Started again the way this run was: hidden if Windows started it.
-                        let started_with: Vec<String> =
-                            if background::started_in_background() { vec![background::BACKGROUND_ARG.into()] } else { Vec::new() };
-                        match run_installer(&installer, &updates::installer_parameters(&started_with)) {
+                        match run_installer(&installer, updates::INSTALLER_PARAMETERS) {
                             Ok(()) => {
                                 tracing::info!("update handed to its installer: closing");
                                 cx.quit();
