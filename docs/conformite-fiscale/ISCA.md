@@ -164,7 +164,7 @@ Chaque manque est restitué avec le motif qui le rend obligatoire, et l'écran
 Toute réimpression d'un document déjà émis porte la mention **DUPLICATA** en
 filigrane et fait l'objet d'une entrée `document_reprinted` au journal ; la
 première impression est distinguée sous `document_printed`
-(`lib/templates/print.ts`, `routes/sales.rs`).
+(`motodesk_client::templates::print`, `routes/sales.rs`).
 
 ## Ce que ce document ne couvre pas
 

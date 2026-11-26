@@ -71,12 +71,12 @@ L'interface est en français et ciblée sur Windows 10 et 11.
 ## Architecture
 
 ```
-┌──────────────────────── Poste (application Tauri 2) ────────────────────────┐
-│  Interface Svelte 5 + TypeScript                                             │
-│        │  HTTP, boucle locale 127.0.0.1:17300 (jeton par session)            │
+┌──────────────────────── Poste (application native) ─────────────────────────┐
+│  Interface native (Rust, GPUI)                                               │
+│        │  appels directs, dans le même processus (jeton par session)         │
 │        ▼                                                                     │
-│  API locale Rust (Axum) ──► SQLite (WAL) : données + journal fiscal signé    │
-│        │                                                                     │
+│  Service de données Rust (Axum) ──► SQLite (WAL) : données + journal fiscal  │
+│        │                                                          signé      │
 │        ├── Réseau local : mDNS _motodesk._tcp, échange de lots de changements│
 │        └── Cloud : envoi et réception périodiques des changements            │
 └──────────────────────────────────────┬───────────────────────────────────────┘
@@ -88,12 +88,12 @@ L'interface est en français et ciblée sur Windows 10 et 11.
                           └─────────────────────────┘
 ```
 
-- **Le poste est la référence.** L'interface ne parle jamais directement au cloud : elle parle à l'API locale, qui parle à la base locale.
+- **Le poste est la référence.** L'interface ne parle jamais directement au cloud : elle parle au service de données du poste, qui parle à la base locale.
 - **Synchronisation par journal de changements.** Chaque modification est consignée puis propagée aux autres postes (réseau local) et au cloud. La fusion se fait **champ par champ** (le plus récent l'emporte) ; une modification refusée par le cloud n'en bloque pas d'autres, elle est retentée avec un délai croissant.
 - **Reprise après restauration.** Un poste restauré depuis une sauvegarde retrouve auprès du cloud les changements qu'il avait émis depuis.
 - **Le cloud est facultatif.** Motodesk fonctionne seul ou en réseau local sans aucun serveur ; le serveur cloud, un projet séparé, ajoute les comptes en ligne, la réplication entre sites et la sauvegarde des changements.
 
-Technologies : Rust (Axum, SQLx), SQLite, Tauri 2, Svelte 5, Vite, TypeScript.
+Technologies : Rust de bout en bout (Axum, SQLx, [GPUI](https://gpui.rs) pour l'interface), SQLite.
 
 ## Conformité fiscale
 
@@ -118,30 +118,26 @@ Le journal d'un historique repris depuis un ancien logiciel n'est **pas** recons
 ### Prérequis
 
 - Windows 10 ou 11 (cible principale ; le code compile aussi sous Linux, utilisé par l'intégration continue)
-- [Rust](https://rustup.rs) (chaîne stable récente) et [Node.js](https://nodejs.org) 22
-- Les [prérequis système de Tauri 2](https://v2.tauri.app/start/prerequisites/)
+- [Rust](https://rustup.rs) (chaîne stable récente), avec les outils de compilation C++ de Visual Studio sous Windows
 
 ### Lancer l'application
 
 ```powershell
-cd desktop
-npm install
-npm run tauri:dev
+cargo run -p motodesk-gpui
 ```
 
 L'application démarre **sans aucun serveur**. À l'écran d'accès, l'interrupteur **Local** permet de créer le réseau de l'atelier à partir d'un identifiant et d'un mot de passe ([détails et état d'avancement](docs/standalone.md)). Pour essayer les comptes en ligne, il faut un serveur cloud (projet séparé) dont l'adresse se règle avec `MOTODESK_CLOUD_URL`.
 
 ### Lancer une seconde instance isolée
 
-Pour une démonstration ou des captures d'écran, sans toucher aux données ni au trousseau de l'installation réelle, donnez un profil et un identifiant propres à la copie. Créez un fichier `demo.json` contenant `{ "identifier": "com.motodesk.demo" }`, puis :
+Pour une démonstration ou des captures d'écran, sans toucher aux données ni au trousseau de l'installation réelle, donnez un profil à la copie :
 
 ```powershell
 $env:MOTODESK_PROFILE = "demo"
-cd desktop
-npm run tauri:dev -- --config C:\chemin\vers\demo.json
+cargo run -p motodesk-gpui
 ```
 
-`MOTODESK_PROFILE` range les secrets de la copie sous leur propre nom dans le trousseau et empêche la reprise des données d'une installation précédente ; l'identifiant donne à la copie son propre dossier de données.
+`MOTODESK_PROFILE` range les secrets de la copie sous leur propre nom dans le trousseau, lui donne son propre dossier de données (`%APPDATA%\com.motodesk.app.demo`) et empêche la reprise des données d'une installation précédente. Une copie ainsi isolée ne s'inscrit jamais au démarrage de Windows. `MOTODESK_DATA_DIR` désigne un autre dossier de données ; `cargo run -p motodesk-gpui --example seed -- <dossier>` en remplit un de données fictives.
 
 ## Configuration
 
@@ -159,26 +155,22 @@ Sans `MOTODESK_CLOUD_URL`, une version pointe sur `http://127.0.0.1:8080`, ce qu
 ```powershell
 cargo clippy --workspace --all-targets
 cargo test --workspace
-
-cd desktop
-npm run lint:ui     # respect du système de design
-npm run check       # svelte-check
-npm test            # vitest
+cargo run -p motodesk-ui --example gallery     # tous les composants du kit d'interface
 ```
+
+Les règles du kit d'interface (pas de couleur ni de taille en dur dans un écran, coins carrés) sont vérifiées par un test (`desktop-gpui/tests/ui_rules.rs`).
 
 L'intégration continue ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) les exécute à chaque *push*.
 
 ## Produire une version
 
 ```powershell
-cd desktop
+cargo install cargo-packager --locked --version 0.11.8     # une fois
 $env:MOTODESK_CLOUD_URL = "https://votre-cloud.example"
-npm run tauri:build
+cargo packager --release -p motodesk-gpui
 ```
 
-L'installateur est produit dans `target/release/bundle/`.
-
-`tauri:build` produit aussi les fichiers de mise à jour et exige donc la clé de signature (`TAURI_SIGNING_PRIVATE_KEY`, voir [`docs/mises-a-jour.md`](docs/mises-a-jour.md)) ; pour un essai local sans cette clé, utilisez `npm run tauri:build:unsigned`.
+L'installateur Windows (par utilisateur, sans droits d'administrateur) est produit dans `target/release/`. Il n'est pas signé pour les mises à jour : la signature se fait à la publication.
 
 Publier une version aux installations existantes (installateur signé, notes de version, bandeau « Nouvelle version disponible ») : [`docs/mises-a-jour.md`](docs/mises-a-jour.md).
 
@@ -188,7 +180,7 @@ Publier une version aux installations existantes (installateur signé, notes de 
 - **Clé de signature de caisse perdue.** L'outil en ligne de commande `motodesk-keytool` diagnostique la clé de chaque caisse et la répare en déclarant la nouvelle clé dans le journal, sans casser la chaîne :
 
   ```powershell
-  cargo run -p motodesk-desktop --bin motodesk-keytool -- diagnose --db "$env:APPDATA\com.motodesk.app\local.db"
+  cargo run -p motodesk-gpui --bin motodesk-keytool -- diagnose --db "$env:APPDATA\com.motodesk.app\local.db"
   ```
 
   Procédure complète (en anglais) : [`docs/KEY-REPAIR.md`](docs/KEY-REPAIR.md).
@@ -203,12 +195,10 @@ Publier une version aux installations existantes (installateur signé, notes de 
 │  ├─ motodesk-sync/         application des changements et fusion champ par champ
 │  ├─ motodesk-db/           accès partagé au journal de changements
 │  ├─ motodesk-server/       service de données embarqué : API locale, SQLite, migrations, journal fiscal, synchronisation
-│  ├─ motodesk-client/       accès typé à l'API locale pour l'interface native
-│  └─ motodesk-ui/           kit d'interface natif (GPUI) : jetons, thèmes, composants, galerie
-├─ desktop-gpui/             interface native en cours de migration (voir docs/migration/GPUI.md)
-├─ desktop/
-│  ├─ src/                   interface Svelte 5 (routes, composants, système de design)
-│  └─ src-tauri/             coquille Tauri : fenêtre, zone de notification, mises à jour, outils
+│  ├─ motodesk-client/       accès typé au service de données pour l'interface ; documents imprimés, mises à jour
+│  └─ motodesk-ui/           kit d'interface (GPUI) : jetons, thèmes, composants, galerie
+├─ desktop-gpui/             l'application : fenêtre, écrans, zone de notification, mises à jour, installateur, outil de réparation de clé
+├─ tools/release/            outil de publication : notes de version, signature de l'installateur, manifeste des mises à jour
 └─ docs/                     caisse, conformité fiscale, assistant, bascule, réseau local, réparation de clé
 ```
 
@@ -229,16 +219,16 @@ Le serveur cloud n'est pas dans ce dépôt : c'est un projet séparé qui réuti
 | Mises à jour (signature, publication, clé) | [`docs/mises-a-jour.md`](docs/mises-a-jour.md) |
 | Bascule depuis un ancien logiciel, nouveau poste | [`docs/migration/CUTOVER.md`](docs/migration/CUTOVER.md) |
 | Réparation d'une clé de signature | [`docs/KEY-REPAIR.md`](docs/KEY-REPAIR.md) |
-| Migration de l'interface vers GPUI (état, règles du kit, méthode) | [`docs/migration/GPUI.md`](docs/migration/GPUI.md) |
+| Interface native : journal de la migration depuis Svelte et Tauri, règles du kit, méthode | [`docs/migration/GPUI.md`](docs/migration/GPUI.md) |
 
 ## Contribuer
 
 1. Partir de `master` et créer une branche par sujet (`feat/…`, `fix/…`, `chore/…`).
-2. Écrire les tests avec le changement ; la CI doit être verte (Rust et interface).
+2. Écrire les tests avec le changement ; la CI doit être verte.
 3. Messages de commit au format [Conventional Commits](https://www.conventionalcommits.org/fr/).
 4. Ouvrir une *pull request* vers `master` ; elle est fusionnée par rebase une fois la CI verte.
 
-Pour ajouter un module : créer `desktop/src/routes/<Module>.svelte`, l'ajouter au menu de `Shell.svelte`, puis exposer ses routes côté API locale (`crates/motodesk-server/src/local_server/routes/`). Les couleurs et tailles viennent exclusivement des jetons CSS de `desktop/src/lib/styles/` : `npm run lint:ui` refuse les valeurs en dur.
+Pour ajouter un module : exposer ses routes côté service (`crates/motodesk-server/src/local_server/routes/`), leurs appels typés dans `crates/motodesk-client`, puis son écran dans `desktop-gpui/src/pages/`, à brancher dans `shell.rs`. Un écran n'importe que le kit (`motodesk_ui`) : couleurs et tailles viennent de ses jetons, et un test refuse les valeurs en dur (voir « Les règles du kit » dans [`docs/migration/GPUI.md`](docs/migration/GPUI.md)).
 
 ## Feuille de route
 

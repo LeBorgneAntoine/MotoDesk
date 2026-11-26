@@ -11,7 +11,7 @@ Motodesk prévient quand une nouvelle version existe, montre ce qu'elle apporte,
 
 ## Pourquoi on peut s'y fier
 
-1. **Origine** : l'adresse de recherche est fixée dans le programme (`tauri.conf.json`) : les versions publiées de ce dépôt GitHub, en HTTPS. Un test refuse toute autre adresse et tout transport non sécurisé.
+1. **Origine** : l'adresse de recherche est fixée dans le programme (`motodesk_client::updates::ENDPOINT`) : les versions publiées de ce dépôt GitHub, en HTTPS. Un test refuse toute autre adresse et tout transport non sécurisé.
 2. **Signature** : chaque installateur est signé avec une clé privée que seul le mainteneur détient. La clé publique correspondante est **compilée dans l'application**. Un installateur dont la signature ne se vérifie pas n'est jamais lancé, d'où qu'il vienne : même un serveur compromis, ou un `latest.json` modifié, ne peut pas faire installer autre chose que ce que le mainteneur a signé. (Au pire, un `latest.json` modifié fait échouer la mise à jour ou en affiche de fausses notes, qui sont rendues sans HTML ni script.)
 3. **Pas de retour en arrière** : seule une version strictement plus récente que celle qui tourne est proposée.
 4. **Brouillon d'abord** : le workflow de publication crée une version *brouillon*, invisible des applications installées. Elle n'est proposée à personne tant que quelqu'un ne l'a pas relue et publiée.
@@ -21,7 +21,7 @@ Ce que la signature **ne** remplace **pas** : la signature de code Windows (Auth
 
 ## Publier une version
 
-1. Mettre à jour la version dans `desktop/package.json`, `desktop/src-tauri/tauri.conf.json` et `desktop/src-tauri/Cargo.toml` (le workflow vérifie qu'elles concordent avec le tag).
+1. Mettre à jour la version dans `desktop-gpui/Cargo.toml` (le workflow vérifie qu'elle concorde avec le tag).
 2. Dans `CHANGELOG.md`, renommer `## [Non publié]` en `## [X.Y.Z] - AAAA-MM-JJ` (le workflow refuse une version sans section : c'est ce texte que les utilisateurs liront), puis rouvrir une section `[Non publié]` vide au-dessus.
 3. Fusionner, puis pousser le tag : `git tag vX.Y.Z && git push origin vX.Y.Z`.
 4. Le workflow *Release* construit l'installateur, le signe, écrit `latest.json` et crée la version **brouillon**.
@@ -29,9 +29,9 @@ Ce que la signature **ne** remplace **pas** : la signature de code Windows (Auth
 
 ## La clé de signature
 
-- Elle se génère une seule fois, sur le poste du mainteneur : `npx tauri signer generate -w "$HOME\.tauri\motodesk-updater.key"` (un mot de passe est demandé).
-- La **clé publique** (`.key.pub`) va dans `plugins.updater.pubkey` de `tauri.conf.json`. Elle n'est pas secrète.
-- La **clé privée** et son mot de passe vont dans les secrets du dépôt (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) **et** dans une sauvegarde hors ligne (gestionnaire de mots de passe). Ne jamais la committer.
+- Elle se génère une seule fois, sur le poste du mainteneur : `cargo packager signer generate --path "$HOME\.motodesk\motodesk-updater.key"` (un mot de passe est demandé). C'est une clé minisign, au format de celle que produisait l'outillage Tauri : une clé déjà créée ainsi reste valable.
+- La **clé publique** (`.key.pub`) va dans `PUBLIC_KEY` de `crates/motodesk-client/src/updates.rs`. Elle n'est pas secrète.
+- La **clé privée** et son mot de passe vont dans les secrets du dépôt (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` : ils gardent le nom sous lequel ils ont été créés) **et** dans une sauvegarde hors ligne (gestionnaire de mots de passe). Ne jamais la committer.
 - **Perdue**, aucune installation existante ne peut plus être mise à jour automatiquement : il faudrait réinstaller à la main une version portant une nouvelle clé publique. **Divulguée**, quelqu'un pourrait signer de fausses mises à jour : même remède, plus vite.
 
 ## Limites connues

@@ -1,7 +1,0 @@
-/* Order matters: font, then tokens, then resets/base. */
-@import "@fontsource-variable/inter";
-@import "./colors.css";
-@import "./dimensions.css";
-@import "./typography.css";
-@import "./elevation.css";
-@import "./global.css";

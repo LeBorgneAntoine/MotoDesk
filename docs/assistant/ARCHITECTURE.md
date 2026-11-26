@@ -26,10 +26,10 @@ Un MCP exposé sur le loopback (ou pire, le LAN) serait une deuxième surface d'
 | le modèle choisit un outil | OpenRouter, API compatible OpenAI *tools* |
 | l'hôte exécute | la route locale déjà existante (`/api/clients`, `/api/products`, `/api/sales`, …) |
 
-Le registre vit en Rust, à côté de SQLite. Le webview n'implémente pas de couche métier parallèle. Pas de `fetch` OpenRouter depuis Svelte : la clé ne quitte pas le process local.
+Le registre vit en Rust, à côté de SQLite. L'interface n'implémente pas de couche métier parallèle. Aucun appel à OpenRouter depuis l'interface : la clé ne quitte pas le service local.
 
 ```text
-Composer (Svelte)
+Composer (interface)
     → POST /api/assistant/chat
         → OpenRouter (clé keychain, SSE)
     ← start / delta / done
@@ -45,7 +45,7 @@ Composer (Svelte)
 
 **Écritures.** Un outil `write` ou `fiscal` s'arrête sur une carte d'autorisation **dans le canevas** — pas un `window.confirm`. Refuser n'écrit rien. Les lignes du journal fiscal restent append-only : l'assistant ne « corrige » pas une facture scellée. Un avoir emprunte le chemin `seal_in_tx` déjà en place.
 
-**Web.** Jamais implicite. Soit un réglage, soit une autorisation une fois par tour (`risk: web`). Pas de scraping depuis le webview.
+**Web.** Jamais implicite. Soit un réglage, soit une autorisation une fois par tour (`risk: web`). Pas de lecture du web depuis l'interface.
 
 ## OpenRouter
 

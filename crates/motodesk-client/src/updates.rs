@@ -27,8 +27,8 @@ use crate::device_store::DeviceFile;
 /// Where a newer version is announced: the manifest attached to the latest published release.
 pub const ENDPOINT: &str = "https://github.com/LeBorgneAntoine/MotoDesk/releases/latest/download/latest.json";
 
-/// The key installers are verified against. It is the one installed copies already trust: the
-/// same value as `plugins.updater.pubkey` in the Tauri shell's configuration.
+/// The key installers are verified against: the public half of the maintainer's signing key
+/// (docs/mises-a-jour.md). Changing it cuts every installed copy off from its updates.
 pub const PUBLIC_KEY: &str =
     "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk3QUE4ODg0MzI4MDE5MjEKUldRaEdZQXloSWlxbHpZRFdhZldEbVVtVExJZkRFSU9yWlZrbzMvNmRtd04zQStrUkpyM2tJWVAK";
 
@@ -442,18 +442,13 @@ mod tests {
     }
 
     #[test]
-    fn the_address_and_the_key_are_those_installed_copies_already_trust() {
+    fn updates_come_from_the_projects_releases_under_the_maintainers_key() {
         assert!(ENDPOINT.starts_with("https://github.com/LeBorgneAntoine/MotoDesk/releases/"), "an update may only come from the project's releases");
         let official = Source::official();
         assert!(!official.insecure, "updates are never looked for over plain HTTP");
         let key = text_of(PUBLIC_KEY).unwrap();
         assert!(key.starts_with("untrusted comment: minisign public key"), "{key}");
         assert!(PublicKey::decode(&key).is_ok());
-
-        // While the Tauri shell is still here, both read the same address and trust the same key.
-        let tauri: serde_json::Value = serde_json::from_str(include_str!("../../../desktop/src-tauri/tauri.conf.json")).unwrap();
-        assert_eq!(tauri["plugins"]["updater"]["pubkey"], PUBLIC_KEY);
-        assert_eq!(tauri["plugins"]["updater"]["endpoints"], serde_json::json!([ENDPOINT]));
     }
 
     #[test]

@@ -14,26 +14,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      # The version of the application is the one of its package: what it reports as running,
+      # what the installer is named after, and what an update is compared with.
       - name: The tag must match the application version
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          for file in desktop/package.json desktop/src-tauri/tauri.conf.json; do
-            found=$(node -p "require('./$file').version")
-            if [ "$found" != "$tag" ]; then
-              echo "::error file=$file::version is $found but the tag is $tag"
-              exit 1
-            fi
-          done
-          found=$(grep -m1 '^version' desktop/src-tauri/Cargo.toml | cut -d'"' -f2)
+          found=$(grep -m1 '^version' desktop-gpui/Cargo.toml | cut -d'"' -f2)
           if [ "$found" != "$tag" ]; then
-            echo "::error file=desktop/src-tauri/Cargo.toml::version is $found but the tag is $tag"
+            echo "::error file=desktop-gpui/Cargo.toml::version is $found but the tag is $tag"
             exit 1
           fi
 
@@ -52,7 +44,8 @@ jobs:
           esac
 
       # Installed copies only accept updates signed with this key (see docs/mises-a-jour.md).
-      # Without it the installer could not be updated, so refuse to produce one.
+      # Without it the installer could not be updated, so refuse to produce one. The secrets
+      # keep the names they were created under.
       - name: The signing key must be set
         shell: bash
         env:
@@ -63,39 +56,39 @@ jobs:
             exit 1
           fi
 
+      # The release notes are this version's section of the changelog; the application shows
+      # the same text before the update is installed. A version without a section is not built.
+      - name: Release notes
+        shell: bash
+        run: cargo run -p motodesk-release -- notes "${GITHUB_REF_NAME#v}" CHANGELOG.md release-notes.md
+
       - name: Tests
         run: cargo test --workspace
-      - name: Frontend dependencies
-        working-directory: desktop
-        run: npm ci
+
+      # Pinned: the installer's options the application relies on (/P /R /NS) are this version's.
+      - name: Packaging tool
+        run: cargo install cargo-packager --locked --version 0.11.8
+
       - name: Build the installer
-        working-directory: desktop
         env:
           MOTODESK_CLOUD_URL: ${{ vars.MOTODESK_CLOUD_URL }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build
+        run: cargo packager --release -p motodesk-gpui
 
-      - name: Checksums
+      # Signed the way installed copies verify it, with the version it is for; then the file
+      # they read to learn that this version exists.
+      - name: Signature, update manifest and checksums
         shell: bash
-        run: |
-          cd target/release/bundle/nsis
-          sha256sum *.exe > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      # The release notes are this version's section of the changelog; the application shows
-      # the same text before the update is installed.
-      - name: Release notes and update manifest
-        shell: bash
+        env:
+          MOTODESK_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          MOTODESK_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          awk -v v="$version" '$0 ~ "^## \[" v "\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::CHANGELOG.md has no section for $version."
-            exit 1
-          fi
-          installer=$(ls target/release/bundle/nsis/*-setup.exe)
-          node .github/scripts/updater-manifest.mjs "$version" "$installer" "$GITHUB_REPOSITORY" release-notes.md target/release/bundle/nsis/latest.json
+          installer=$(ls target/release/*-setup.exe)
+          cargo run -p motodesk-release -- sign "$installer" "$version"
+          cargo run -p motodesk-release -- manifest "$version" "$installer" "$GITHUB_REPOSITORY" release-notes.md target/release/latest.json
+          cd target/release
+          sha256sum *-setup.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       # A draft is invisible to installed copies: they see `latest.json` only once the release
       # is published, which is the moment someone has read it. A pre-release (v1.2.0-rc.1) is
@@ -107,4 +100,8 @@ jobs:
         run: |
           flags=""
           case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME"             target/release/bundle/nsis/*-setup.exe target/release/bundle/nsis/*-setup.exe.sig             target/release/bundle/nsis/latest.json target/release/bundle/nsis/SHA256SUMS.txt             --draft $flags --verify-tag --title "Motodesk ${GITHUB_REF_NAME#v}"             --notes-file release-notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            target/release/*-setup.exe target/release/*-setup.exe.sig \
+            target/release/latest.json target/release/SHA256SUMS.txt \
+            --draft $flags --verify-tag --title "Motodesk ${GITHUB_REF_NAME#v}" \
+            --notes-file release-notes.md
