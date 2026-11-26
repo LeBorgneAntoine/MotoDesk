@@ -1,5 +1,4 @@
-//! Customers and their vehicles (port of `Clients.svelte`, `ClientPanel.svelte` and
-//! `VehiclePanel.svelte`).
+//! Customers and their vehicles.
 //!
 //! The page is a paged, searchable list. A row opens the customer's panel; a vehicle of the
 //! customer opens a second panel above it. Each panel shows its record, or the form that

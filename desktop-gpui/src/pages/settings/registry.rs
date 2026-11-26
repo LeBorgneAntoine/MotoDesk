@@ -1,10 +1,11 @@
-//! Every setting the screen shows (port of `desktop/src/lib/settings/registry.ts`), and how
-//! each one goes from the stored value to the text of its field and back.
+//! Every setting the screen shows, and how each one goes from the stored value to the text
+//! of its field and back.
 //!
 //! To add a setting: one entry in [`SETTINGS`]. The screen draws it and the service stores it.
 //!
-//! Two settings of the Svelte interface are not here: the corners (`system.radius`), because
-//! every corner is square, and the blur (`system.blur`), which this interface does not draw.
+//! Two settings a shop's data may still hold are not here: the corners (`system.radius`),
+//! because every corner is square, and the blur (`system.blur`), which this interface does not
+//! draw.
 
 use motodesk_ui::IconName;
 use serde_json::Value;

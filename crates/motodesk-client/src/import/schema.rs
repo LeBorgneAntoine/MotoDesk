@@ -1,6 +1,6 @@
-//! What can be imported, field by field (port of `desktop/src/lib/import/schema.ts`): the
-//! columns a file can fill, their type (which drives how a value is read and checked), and
-//! the fields that can tell an existing row from a new one.
+//! What can be imported, field by field: the columns a file can fill, their type (which
+//! drives how a value is read and checked), and the fields that can tell an existing row
+//! from a new one.
 //!
 //! Field keys are the ones the service reads (`local_server/routes/import`).
 

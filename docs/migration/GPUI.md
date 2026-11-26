@@ -8,8 +8,8 @@ sur une branche à part.
 > **La migration est terminée : Svelte et Tauri ont été retirés du dépôt** (dossier `desktop/`,
 > outillage Node, workflows). Ce document en reste le journal. Ce qu'il dit « sous Svelte » ou
 > « comme dans Svelte » décrit l'ancienne interface, et les fichiers `.svelte` et `.ts` qu'il
-> cite (de même que les commentaires « port of … » du code) se lisent dans l'historique git : le
-> dernier commit qui les contient est `052d9f1`. Les sections « Lancer », « Les règles du kit »
+> cite se lisent dans l'historique git : le dernier commit qui les contient est `052d9f1`. Le
+> code de l'interface, lui, ne renvoie plus à ces fichiers. Les sections « Lancer », « Les règles du kit »
 > et « Comment un écran parle au service » décrivent l'état présent.
 
 ## Ce qui est en place

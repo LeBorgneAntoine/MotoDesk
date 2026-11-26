@@ -1,5 +1,5 @@
-//! The Assistant (port of `desktop/src/routes/assistant/`): the conversations of this PC on the
-//! left, the exchange in the middle, and on the right the canvas where the answer is laid out.
+//! The Assistant: the conversations of this PC on the left, the exchange in the middle, and on
+//! the right the canvas where the answer is laid out.
 //!
 //! With an OpenRouter key on this PC, a message goes to the model and its answer is written as
 //! it arrives. Without one, the screen is a demonstration: the suggestions show what the canvas

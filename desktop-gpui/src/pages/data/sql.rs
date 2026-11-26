@@ -1,6 +1,6 @@
-//! The SQL console (port of `routes/data/AdvancedTab.svelte`): one statement at a time. A
-//! read is run by its preview; a write is only estimated, and runs after a confirmation.
-//! The service refuses changes to the structure and writes to the application's own tables.
+//! The SQL console: one statement at a time. A read is run by its preview; a write is only
+//! estimated, and runs after a confirmation. The service refuses changes to the structure
+//! and writes to the application's own tables.
 
 use std::rc::Rc;
 

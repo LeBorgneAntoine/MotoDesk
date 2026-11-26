@@ -1,6 +1,5 @@
-//! The tables of the local database, one page at a time (port of `routes/data/BasicTab.svelte`):
-//! look into a table, search it, save a page as CSV, and empty a table after seeing what
-//! that removes and typing its name.
+//! The tables of the local database, one page at a time: look into a table, search it, save a
+//! page as CSV, and empty a table after seeing what that removes and typing its name.
 
 use std::rc::Rc;
 

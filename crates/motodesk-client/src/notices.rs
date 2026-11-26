@@ -1,5 +1,5 @@
-//! The notices a PC has put off (the Svelte interface kept these in the browser's storage): the
-//! backup reminder until tomorrow, the hint about the till for good.
+//! The notices a PC has put off: the backup reminder until tomorrow, the hint about the till
+//! for good.
 
 use std::path::Path;
 use std::time::Duration;

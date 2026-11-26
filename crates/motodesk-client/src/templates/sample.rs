@@ -1,6 +1,5 @@
 //! Complete sample documents, to look at a template with realistic content before it prints a
-//! real one (port of `desktop/src/lib/templates/sampleFixtures.ts` and `sampleData.ts`), and
-//! the block that says who the shop is (the shop half of `documentData.ts`).
+//! real one, and the block that says who the shop is.
 //!
 //! The shop's own identity is used where it is filled in; a shop that has not said who it is
 //! yet still gets a full page, from a made-up garage.

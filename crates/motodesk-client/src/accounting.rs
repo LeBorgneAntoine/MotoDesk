@@ -1,4 +1,4 @@
-//! The accounting reports (port of `desktop/src/lib/api/accounting.ts`).
+//! The accounting reports.
 //!
 //! Every figure comes from documents already sealed into the fiscal journal, so these reports
 //! cannot disagree with the invoices. Nothing here writes.

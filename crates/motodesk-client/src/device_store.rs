@@ -1,8 +1,8 @@
 //! What one PC keeps for itself between two runs, outside the shop's database: whether it is a
 //! till, which model its assistant uses.
 //!
-//! These are the files the Tauri interface wrote with its store plugin (one JSON object, one
-//! entry per key), so a PC keeps its choices when it changes interface.
+//! Each is a small file in the data folder: one JSON object, one entry per key. The format has
+//! not changed since the first version, so a PC keeps its choices from one version to the next.
 
 use std::path::{Path, PathBuf};
 

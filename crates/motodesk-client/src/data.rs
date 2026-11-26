@@ -1,5 +1,5 @@
-//! The administrator's tools on the local database (port of `desktop/src/lib/api/data.ts`):
-//! looking into a table, emptying one, and running a single SQL statement. Administrators only.
+//! The administrator's tools on the local database: looking into a table, emptying one, and
+//! running a single SQL statement. Administrators only.
 //!
 //! Nothing here writes without two steps: an impact report or a preview first, which hands
 //! back a token, then the action itself with that token.

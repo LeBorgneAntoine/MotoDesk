@@ -1,4 +1,4 @@
-//! Online accounts (port of `desktop/src/lib/api/auth.ts`).
+//! Online accounts.
 
 use axum::http::Method;
 use serde::Serialize;

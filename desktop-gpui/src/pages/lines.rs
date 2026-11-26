@@ -1,5 +1,4 @@
-//! The line editor of a document: the same for a sale (`SaleForm.svelte`) and for a repair
-//! order (`WorkshopForm.svelte`), which in Svelte each carried a copy of it.
+//! The line editor of a document: the same for a sale and for a repair order.
 //!
 //! Lines are edited as text, because a half-typed number is not a number; they are turned
 //! into whole cents and thousandths when they are totalled and when they are sent. The totals

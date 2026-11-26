@@ -26,8 +26,8 @@ base64 = "0.22"
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
 resvg = "0.45"
-# Updates: which version is newer, and whether an installer is the maintainer's (the check the
-# Tauri updater made, with the same library).
+# Updates: which version is newer, and whether an installer is the maintainer's (its
+# signature).
 semver = "1"
 minisign-verify = "0.3"
 

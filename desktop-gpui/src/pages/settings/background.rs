@@ -1,6 +1,6 @@
-//! Paramètres › Synchronisation, the card « Arrière-plan » (port of
-//! `routes/BackgroundCard.svelte`): keep this PC in the shop's network when nobody has the
-//! window open. See `crate::background` for what the mode does.
+//! Paramètres › Synchronisation, the card « Arrière-plan »: keep this PC in the shop's
+//! network when nobody has the window open. See `crate::background` for what the mode
+//! does.
 
 use motodesk_client::background::{self as api, BackgroundSetting};
 use motodesk_ui::gpui::prelude::FluentBuilder as _;

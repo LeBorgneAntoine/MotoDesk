@@ -1,5 +1,5 @@
-//! Reading a CSV file the way people export one (port of `desktop/src/lib/import/csv.ts`):
-//! whatever the separator, whatever the encoding Excel chose, quotes and all.
+//! Reading a CSV file the way people export one: whatever the separator, whatever the
+//! encoding Excel chose, quotes and all.
 
 /// A CSV file, read.
 #[derive(Debug, Clone, PartialEq, Default)]

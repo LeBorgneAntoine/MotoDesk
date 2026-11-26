@@ -1,5 +1,4 @@
-//! Application updates (port of `desktop/src-tauri/src/updates.rs`, of what Tauri's updater did
-//! for it, and of the rules in `desktop/src/lib/updates.ts`).
+//! Application updates.
 //!
 //! The shop is told when a new version exists and decides when to install it; nothing is
 //! installed on its own. What makes an update trustworthy:

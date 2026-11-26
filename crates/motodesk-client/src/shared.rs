@@ -1,5 +1,5 @@
-//! The shared folder (port of `desktop/src/lib/api/shared.ts` and `desktop/src/lib/sharedFolder.ts`):
-//! the shop's sensitive files, encrypted on disk and kept on every PC of the network.
+//! The shared folder: the shop's sensitive files, encrypted on disk and kept on every PC of the
+//! network.
 //!
 //! A file travels in chunks, so a big one is never held whole in memory: it is read from the
 //! disk a chunk at a time on its way in, and written to the disk as it arrives on its way out.

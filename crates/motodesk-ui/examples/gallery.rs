@@ -48,6 +48,15 @@ impl Gallery {
         let on_name = name.on_event(window, cx, |_, _, _, cx| cx.notify());
         let panels = cx.new(PanelStack::new);
         let on_panels = cx.observe(&panels, |_, _, cx| cx.notify());
+        // A key pressed anywhere runs the menu entry that advertises it, as in the application.
+        // In a text field, copy, paste and undo stay the field's.
+        let on_keys = cx.observe_keystrokes(|this, event, window, cx| {
+            let Some(pressed) = pressed_shortcut(&event.keystroke, typing_in_a_field(window)) else { return };
+            let menus = Self::menus(&cx.entity(), &this.panels);
+            window.defer(cx, move |window, cx| {
+                MenuGroup::run_shortcut(&menus, &pressed, window, cx);
+            });
+        });
 
         let buyer = ComboModel::new("Nom, téléphone…", window, cx);
         let for_query = buyer.clone();
@@ -96,12 +105,53 @@ impl Gallery {
             clicks: 0,
             selected_row: Some(2),
             page: 0,
-            _subscriptions: vec![on_name, on_panels],
+            _subscriptions: vec![on_name, on_panels, on_keys],
         };
         if args.iter().any(|a| a == "--panel") {
             Self::open_demo_panels(&this.panels, cx);
         }
         this
+    }
+
+    /// The menus of the title bar, with every kind of entry: an icon, keys that run the entry
+    /// from anywhere (`shortcut`), keys that are only named because the screen handles them
+    /// itself (`hint`), an entry that cannot be used now, a separator.
+    fn menus(gallery: &Entity<Self>, panels: &Entity<PanelStack>) -> Vec<MenuGroup> {
+        let show = |section: &'static str| {
+            let gallery = gallery.clone();
+            move |_: &mut Window, cx: &mut App| {
+                gallery.update(cx, |this, cx| {
+                    this.section = section.into();
+                    cx.notify();
+                })
+            }
+        };
+        let (to_open, to_close) = (panels.clone(), panels.clone());
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![
+                    MenuEntry::new("Nouveau client", |window, cx| toast::success("« Nouveau client », depuis le menu ou Ctrl+N.", window, cx))
+                        .icon(IconName::Plus)
+                        .shortcut("Ctrl+N"),
+                    MenuEntry::new("Imprimer…", |_, _| {}).icon(IconName::Printer).shortcut("Ctrl+P").disabled(true),
+                    MenuEntry::separator(),
+                    MenuEntry::new("Actualiser", |window, cx| toast::info("Actualisé.", window, cx)).icon(IconName::RefreshCw).shortcut("F5"),
+                ],
+            ),
+            MenuGroup::new(
+                "Affichage",
+                vec![
+                    MenuEntry::new("Contrôles", show("controls")).shortcut("Ctrl+1"),
+                    MenuEntry::new("Contenu", show("content")).shortcut("Ctrl+2"),
+                    MenuEntry::new("Table et panneaux", show("table")).shortcut("Ctrl+3"),
+                    MenuEntry::separator(),
+                    MenuEntry::new("Ouvrir les panneaux", move |_, cx| Self::open_demo_panels(&to_open, cx)).icon(IconName::Layers),
+                    // Escape is the panel's own key: the menu names it, the panel handles it.
+                    MenuEntry::new("Fermer le panneau", move |window, cx| request_close(&to_close, window, cx)).hint("Échap"),
+                ],
+            ),
+        ]
     }
 
     fn open_demo_panels(panels: &Entity<PanelStack>, cx: &mut App) {
@@ -697,6 +747,7 @@ impl Render for Gallery {
                     .child(Icon::new(IconName::Bike).color(c.accent))
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Motodesk"))
                     .child(div().text_color(c.text_muted).child("Galerie du kit"))
+                    .child(div().ml(m.space_2).child(MenuStrip::new(Self::menus(&nav, &self.panels))))
                     .trailing(Button::new("mode").small().ghost().icon(if theme.is_dark() { IconName::Sun } else { IconName::Moon }).label(if theme.is_dark() { "Clair" } else { "Sombre" }).on_click(|_, _, cx| {
                         UiTheme::update(cx, |t| t.mode = if t.mode == Mode::Dark { Mode::Light } else { Mode::Dark })
                     }))

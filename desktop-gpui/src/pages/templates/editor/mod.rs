@@ -1,7 +1,6 @@
-//! The template editor (port of `routes/templates/TemplateEditor.svelte` and its panels): a
-//! page on which texts, pictures, tables and frames are placed, moved and resized; the
-//! variables to put in them on the left, the layers and the properties of the selection on
-//! the right.
+//! The template editor: a page on which texts, pictures, tables and frames are placed,
+//! moved and resized; the variables to put in them on the left, the layers and the
+//! properties of the selection on the right.
 //!
 //! The page is drawn by the same layout that prints it ([`motodesk_client::templates::render`]),
 //! in its editing mode: variables show their name instead of a value.

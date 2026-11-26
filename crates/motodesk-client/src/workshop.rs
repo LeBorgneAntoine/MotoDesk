@@ -1,4 +1,4 @@
-//! Repair orders (port of `desktop/src/lib/api/workshop.ts`).
+//! Repair orders.
 //!
 //! An order goes through the workshop by hand: waiting, in progress, ready. It becomes
 //! "invoiced" only when the invoice made from it is validated, never by hand.

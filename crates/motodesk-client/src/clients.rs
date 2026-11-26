@@ -1,4 +1,4 @@
-//! Customers and their vehicles (port of `desktop/src/lib/api/clients.ts`).
+//! Customers and their vehicles.
 
 use serde::{Deserialize, Serialize};
 

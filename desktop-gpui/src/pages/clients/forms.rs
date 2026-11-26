@@ -1,5 +1,4 @@
-//! The customer form (port of `ClientForm.svelte`). The vehicle form is shared with Parc VN/VO:
-//! see `pages/vehicle.rs`.
+//! The customer form. The vehicle form is shared with Parc VN/VO: see `pages/vehicle.rs`.
 //!
 //! A form owns its fields, knows whether they differ from what it started with, and turns
 //! them into what the API takes. It is created when its panel opens and dropped when it closes.

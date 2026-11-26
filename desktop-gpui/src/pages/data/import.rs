@@ -1,6 +1,5 @@
-//! Importing a CSV file, step by step (port of `routes/ImportData.svelte` and
-//! `routes/import/*`): the file, where it goes, which column fills which field, a look at
-//! the rows before anything is written, then the outcome.
+//! Importing a CSV file, step by step: the file, where it goes, which column fills which
+//! field, a look at the rows before anything is written, then the outcome.
 //!
 //! The rules (what a field is, how a value is read) are in `motodesk_client::import`; this
 //! is the screen around them. The file is read and its rows prepared off the interface's

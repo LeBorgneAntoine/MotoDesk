@@ -1,6 +1,6 @@
-//! What this PC remembers about its assistant while the app runs (port of the device half of
-//! `desktop/src/lib/assistant/store.svelte.ts`): the model it talks to, whether the list of
-//! conversations is folded, and the demonstration conversations of a PC without a key.
+//! What this PC remembers about its assistant while the app runs: the model it talks to,
+//! whether the list of conversations is folded, and the demonstration conversations of a PC
+//! without a key.
 //!
 //! The demonstration conversations live here, not in the screen, so that leaving the screen
 //! and coming back finds them. They are not kept between two runs.

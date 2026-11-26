@@ -1,4 +1,4 @@
-//! Inventaire (port of `routes/Stock.svelte` and `routes/stock/*`): the catalogue.
+//! Inventaire: the catalogue.
 //!
 //! A rail that narrows the list (everything, low stock, one category), a search, the table of
 //! products. A row opens the product's panel: read it, edit it in place, add a variant. A

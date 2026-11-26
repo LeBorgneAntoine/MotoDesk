@@ -1,4 +1,4 @@
-//! Whether this PC is a till (port of the state half of `desktop/src/lib/pos/store.svelte.ts`).
+//! Whether this PC is a till.
 //!
 //! The choice is this PC's own (see `motodesk_client::pos::PosConfig`). A PC set up as a till
 //! opens on the till, full screen; an administrator can step out to the office screens

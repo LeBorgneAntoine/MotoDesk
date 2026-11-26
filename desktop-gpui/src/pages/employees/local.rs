@@ -1,5 +1,4 @@
-//! The accounts and the PCs of a local network (port of `NetworkAccounts.svelte`,
-//! `RecoveryCard.svelte` and `NetworkDevices.svelte`).
+//! The accounts and the PCs of a local network.
 //!
 //! Three things an administrator looks after here: who can sign in on the shop's PCs, the
 //! recovery key that saves the network if the administrator's password is lost, and the PCs

@@ -1,12 +1,11 @@
 //! Typed access to Motodesk's data service, for the native interface.
 //!
-//! The interface never touches the database: it asks the local API, exactly as the Svelte
-//! interface did over `http://127.0.0.1:17300`. Here the API is called in the same process
-//! ([`Local`]), so a request is a function call with the same handlers and the same JSON, and
-//! no socket in between.
+//! The interface never touches the database: it asks the local API. The API is called in the
+//! same process ([`Local`]): a request is a function call into the service's handlers, with
+//! their JSON, and no socket in between.
 //!
-//! One module per area of the API, each a port of `desktop/src/lib/api/<area>.ts`:
-//! the types the server answers with, and one function per endpoint taking a [`Client`].
+//! One module per area of the API: the types the server answers with, and one function per
+//! endpoint taking a [`Client`].
 
 pub mod accounting;
 pub mod assistant;

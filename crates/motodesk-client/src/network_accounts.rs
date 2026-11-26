@@ -1,4 +1,4 @@
-//! The accounts of a local network (port of `desktop/src/lib/api/networkAccounts.ts`).
+//! The accounts of a local network.
 //!
 //! They open a session on every PC of the shop's network. An online company manages its team
 //! with [`crate::employees`] instead.

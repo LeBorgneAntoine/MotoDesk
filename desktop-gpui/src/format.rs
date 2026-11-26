@@ -1,5 +1,4 @@
-//! How values are shown (port of the parts of `desktop/src/lib/format.ts` and
-//! `recoveryKey.ts` the migrated screens use).
+//! How values are shown.
 
 use motodesk_client::ApiError;
 

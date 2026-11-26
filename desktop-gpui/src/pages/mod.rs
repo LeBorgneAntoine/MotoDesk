@@ -1,4 +1,4 @@
-//! The screens. One module per screen of `desktop/src/routes`, migrated one at a time.
+//! The screens, one module each.
 //!
 //! A screen imports its controls from `motodesk_ui` and nothing else: no colour written by
 //! hand, no rounded corner, no GPUI Kit type (see `tests/ui_rules.rs`).

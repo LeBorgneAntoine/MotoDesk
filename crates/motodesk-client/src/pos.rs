@@ -1,6 +1,5 @@
-//! The till (port of `desktop/src/lib/api/pos.ts` and of the device half of
-//! `desktop/src/lib/pos/store.svelte.ts`): the cash session, the checkout that seals a ticket
-//! with its payments, the drawer, the printer, the card terminal, and the tickets put aside.
+//! The till: the cash session, the checkout that seals a ticket with its payments, the
+//! drawer, the printer, the card terminal, and the tickets put aside.
 //!
 //! Whether a PC is a till is a choice of that PC. It is kept in a file of its own, never in
 //! the shop's settings: those travel to every PC, and would turn each of them into a till.
@@ -100,8 +99,8 @@ impl PosDocument {
     }
 }
 
-/// The till role of this PC. Same fields, same file as the Svelte interface, so a PC that was
-/// a till stays one.
+/// The till role of this PC. The file and its fields keep the names they have always had, so
+/// a PC that is a till stays one from one version to the next.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PosConfig {
@@ -385,10 +384,10 @@ mod tests {
     }
 
     #[test]
-    fn the_file_is_the_one_the_svelte_interface_wrote() {
+    fn the_file_keeps_the_format_it_has_always_had() {
         let dir = std::env::temp_dir().join(format!("motodesk-pos-{}-{}", std::process::id(), line!()));
         std::fs::create_dir_all(&dir).unwrap();
-        // As Tauri's store plugin writes it; a field this version does not know is left alone.
+        // The file as the first version wrote it; a field this version does not know is left alone.
         let written = json!({ "pos.config.v1": {
             "enabled": true, "printerTarget": "COM4", "drawerKickOnCash": false, "tpeMode": "manual",
             "favoriteProductIds": ["p1"], "defaultDocument": "invoice", "somethingNew": 1

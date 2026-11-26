@@ -1,6 +1,5 @@
-//! La Caisse (port of `routes/pos/Pos.svelte`): counter sales, full screen. The cart stays in
-//! memory until the checkout seals a ticket; a correction after that is a credit note, never
-//! an edit.
+//! La Caisse: counter sales, full screen. The cart stays in memory until the checkout seals a
+//! ticket; a correction after that is a credit note, never an edit.
 
 mod cart;
 

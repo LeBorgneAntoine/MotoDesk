@@ -1,5 +1,4 @@
-//! The catalogue: categories, products and their variants (port of
-//! `desktop/src/lib/api/products.ts` and `productVariants.ts`).
+//! The catalogue: categories, products and their variants.
 
 use serde::{Deserialize, Serialize};
 

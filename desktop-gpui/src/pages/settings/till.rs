@@ -1,5 +1,5 @@
-//! Whether this PC is a till, and what is plugged into it (port of `routes/pos/PosSettings.svelte`).
-//! Administrators only. Nothing here goes to the shop's settings: it stays on this PC.
+//! Whether this PC is a till, and what is plugged into it. Administrators only. Nothing here goes
+//! to the shop's settings: it stays on this PC.
 
 use motodesk_client::pos::{self, PosConfig, PosDocument, TpeMode};
 use motodesk_ui::gpui::prelude::FluentBuilder as _;

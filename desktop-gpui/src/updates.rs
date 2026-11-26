@@ -1,6 +1,5 @@
 //! What the application knows about updates: whether one is waiting, and the install in
-//! progress (port of `desktop/src/lib/stores/updates.svelte.ts` and of the last step of
-//! `src-tauri/src/updates.rs`: running the installer).
+//! progress.
 //!
 //! It looks by itself a little after start and then every few hours, unless the shop switched
 //! that off; a failed automatic look is silent (a shop without Internet is normal). Nothing is

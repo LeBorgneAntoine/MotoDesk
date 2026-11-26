@@ -1,5 +1,4 @@
-//! Backups and the application's own logs (port of `routes/BackupSettings.svelte` and
-//! `routes/DiagnosticsCard.svelte`). Administrators only.
+//! Backups and the application's own logs. Administrators only.
 //!
 //! One encrypted file holds the database, the fiscal archives and the signing keys, so a new
 //! PC can pick up where this one stopped.

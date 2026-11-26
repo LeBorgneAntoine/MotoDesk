@@ -1,6 +1,5 @@
-//! One conversation as the screen holds it, and what each step of an exchange does to it (port
-//! of the logic of `desktop/src/lib/assistant/store.svelte.ts`, `conversation.ts` and `demo.ts`).
-//! Nothing here draws or calls the service.
+//! One conversation as the screen holds it, and what each step of an exchange does to it. Nothing
+//! here draws or calls the service.
 
 use chrono::{DateTime, Datelike as _, Local, Utc};
 use motodesk_client::assistant::{Artifact, ArtifactBody, ChatEvent, Conversation, ConversationSummary, Kpi, Message, Permission, Role, title_from_prompt};

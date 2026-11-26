@@ -1,5 +1,5 @@
-//! Tableau de bord (port of `routes/Dashboard.svelte`): the screen the app opens on. Four
-//! figures, a way into every module, and the documents touched last.
+//! Tableau de bord: the screen the app opens on. Four figures, a way into every module,
+//! and the documents touched last.
 
 use std::rc::Rc;
 

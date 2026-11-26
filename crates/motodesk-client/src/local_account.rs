@@ -1,5 +1,4 @@
-//! Standalone mode: an installation with no cloud behind it
-//! (port of `desktop/src/lib/api/localAccount.ts` and `desktop/src/lib/stores/accessMode.ts`).
+//! Standalone mode: an installation with no cloud behind it.
 //!
 //! Its first administrator is created on this PC (a username and a password), and an
 //! administrator can later put the installation online. The rules mirror

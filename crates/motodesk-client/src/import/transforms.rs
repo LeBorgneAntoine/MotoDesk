@@ -1,6 +1,6 @@
-//! From the cells of a file to the rows the service takes (port of
-//! `desktop/src/lib/import/transforms.ts`): which column fills which field, how its text is
-//! cleaned, read as a number, a rate or a yes/no, and what is wrong with it when it is not.
+//! From the cells of a file to the rows the service takes: which column fills which field,
+//! how its text is cleaned, read as a number, a rate or a yes/no, and what is wrong with it
+//! when it is not.
 
 use std::collections::{BTreeSet, HashMap};
 

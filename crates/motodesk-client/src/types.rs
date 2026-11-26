@@ -1,4 +1,4 @@
-//! Shapes shared by several areas of the API (port of `desktop/src/lib/api/types.ts`).
+//! Shapes shared by several areas of the API.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};

@@ -1,5 +1,4 @@
-//! The assistant of this PC: its OpenRouter key and the model it talks to (port of
-//! `routes/assistant/AssistantSettings.svelte`).
+//! The assistant of this PC: its OpenRouter key and the model it talks to.
 //!
 //! Neither goes to the shop's settings, which travel to every PC: the key is kept by the
 //! service beside the database (and in the system's keychain), the model in a file of this PC.
@@ -316,7 +315,8 @@ mod tests {
     fn a_stored_choice_shows_as_a_listed_model_or_as_another() {
         assert_eq!(shown_choice(DEFAULT_MODEL, ""), (DEFAULT_MODEL.to_string(), String::new()));
         assert_eq!(shown_choice("mistralai/mistral-large", ""), (CUSTOM_MODEL.to_string(), "mistralai/mistral-large".to_string()));
-        // What the Svelte screen stored: the typed identifier in both places, or beside a listed model.
+        // What an earlier version stored: the typed identifier in both places, or beside a listed
+        // model.
         assert_eq!(shown_choice("mistralai/mistral-large", " mistralai/mistral-large "), (CUSTOM_MODEL.to_string(), "mistralai/mistral-large".to_string()));
         assert_eq!(shown_choice("openai/gpt-4.1", "x-ai/grok-4"), (CUSTOM_MODEL.to_string(), "x-ai/grok-4".to_string()));
     }
