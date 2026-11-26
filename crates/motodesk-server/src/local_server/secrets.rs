@@ -37,74 +37,110 @@ fn service_for(profile: Option<&str>) -> String {
     }
 }
 
-fn service() -> String {
-    service_for(profile().as_deref())
+/// Where secrets are kept: the keychain service names, and the store they are in.
+struct Keychain {
+    /// The name secrets are written under, and looked for first.
+    service: String,
+    /// The name secrets were kept under before the product was renamed. An isolated
+    /// profile has none: it never borrows from the real installation.
+    former: Option<String>,
+    /// Opens an entry of the store, which is the platform's credential store. Tests of
+    /// what is done with a store put one of their own here.
+    open: fn(&str, &str) -> keyring::Result<Entry>,
+}
+
+impl Keychain {
+    /// This run's: the real installation's names, or an isolated profile's.
+    fn current() -> Self {
+        Self::of(profile().as_deref())
+    }
+
+    fn of(profile: Option<&str>) -> Self {
+        Self {
+            service: service_for(profile),
+            former: profile.is_none().then(|| FORMER_SERVICE.to_string()),
+            open: Entry::new,
+        }
+    }
+
+    fn entry(&self, user: &str) -> keyring::Result<Entry> {
+        (self.open)(&self.service, user)
+    }
+
+    /// Read a secret, looking under the product's former name when the current one has
+    /// nothing, so a renamed install keeps its session, mesh secret and signing keys.
+    fn read_secret(&self, user: &str) -> anyhow::Result<Option<String>> {
+        match self.entry(user)?.get_password() {
+            Ok(s) if !s.is_empty() => return Ok(Some(s)),
+            Ok(_) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(e.into()),
+        }
+        self.adopt_former(user)
+    }
+
+    fn adopt_former(&self, user: &str) -> anyhow::Result<Option<String>> {
+        let Some(former) = &self.former else { return Ok(None) };
+        let found = match (self.open)(former, user).and_then(|e| e.get_password()) {
+            Ok(s) if !s.is_empty() => s,
+            Ok(_) | Err(keyring::Error::NoEntry) => return Ok(None),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not read the keychain entry kept under the former name");
+                return Ok(None);
+            }
+        };
+        // The former entry is left where it is: a copy that failed must not lose the secret.
+        match self.set_verified(user, &found) {
+            Ok(()) => tracing::info!(entry = user, "keychain entry carried over from the former name"),
+            Err(e) => tracing::warn!(error = %e, entry = user, "keychain entry read under the former name but not copied"),
+        }
+        Ok(Some(found))
+    }
+
+    /// Delete a secret under both names: signing out must not leave a copy behind.
+    fn delete_everywhere(&self, user: &str) -> keyring::Result<()> {
+        if let Some(former) = &self.former {
+            if let Ok(former) = (self.open)(former, user) {
+                let _ = former.delete_credential();
+            }
+        }
+        self.entry(user)?.delete_credential()
+    }
+
+    /// Write a secret and prove it can be read back through a *fresh* handle.
+    ///
+    /// A platform without a real credential backend (or a build that forgot to
+    /// enable one) hands out in-memory entries: `set_password` returns `Ok`, the
+    /// value is dropped, and the next `Entry::new` finds nothing. Reading back
+    /// through the same handle would not notice, so a new one is opened. Callers
+    /// use the `Err` to fall back to another store instead of believing the secret
+    /// was kept.
+    fn set_verified(&self, user: &str, value: &str) -> anyhow::Result<()> {
+        self.entry(user)?.set_password(value)?;
+        match self.entry(user)?.get_password() {
+            Ok(read) if read == value => Ok(()),
+            Ok(_) => anyhow::bail!("le trousseau du système a renvoyé une autre valeur que celle écrite"),
+            Err(keyring::Error::NoEntry) => anyhow::bail!(
+                "le trousseau du système a accepté l'écriture mais ne la conserve pas"
+            ),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 fn entry(user: &str) -> anyhow::Result<Entry> {
-    Ok(Entry::new(&service(), user)?)
+    Ok(Keychain::current().entry(user)?)
 }
 
-/// Read a secret, looking under the product's former name when the current one has
-/// nothing, so a renamed install keeps its session, mesh secret and signing keys.
 fn read_secret(user: &str) -> anyhow::Result<Option<String>> {
-    match entry(user)?.get_password() {
-        Ok(s) if !s.is_empty() => return Ok(Some(s)),
-        Ok(_) | Err(keyring::Error::NoEntry) => {}
-        Err(e) => return Err(e.into()),
-    }
-    adopt_former(user)
+    Keychain::current().read_secret(user)
 }
 
-fn adopt_former(user: &str) -> anyhow::Result<Option<String>> {
-    // An isolated profile never borrows from the real installation.
-    if profile().is_some() {
-        return Ok(None);
-    }
-    let found = match Entry::new(FORMER_SERVICE, user).and_then(|e| e.get_password()) {
-        Ok(s) if !s.is_empty() => s,
-        Ok(_) | Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(e) => {
-            tracing::warn!(error = %e, "could not read the keychain entry kept under the former name");
-            return Ok(None);
-        }
-    };
-    // The former entry is left where it is: a copy that failed must not lose the secret.
-    match set_verified(user, &found) {
-        Ok(()) => tracing::info!(entry = user, "keychain entry carried over from the former name"),
-        Err(e) => tracing::warn!(error = %e, entry = user, "keychain entry read under the former name but not copied"),
-    }
-    Ok(Some(found))
-}
-
-/// Delete a secret under both names: signing out must not leave a copy behind.
 fn delete_everywhere(user: &str) -> keyring::Result<()> {
-    if profile().is_none() {
-        if let Ok(former) = Entry::new(FORMER_SERVICE, user) {
-            let _ = former.delete_credential();
-        }
-    }
-    Entry::new(&service(), user)?.delete_credential()
+    Keychain::current().delete_everywhere(user)
 }
 
-/// Write a secret and prove it can be read back through a *fresh* handle.
-///
-/// A platform without a real credential backend (or a build that forgot to
-/// enable one) hands out in-memory entries: `set_password` returns `Ok`, the
-/// value is dropped, and the next `Entry::new` finds nothing. Reading back
-/// through the same handle would not notice, so a new one is opened. Callers
-/// use the `Err` to fall back to another store instead of believing the secret
-/// was kept.
 fn set_verified(user: &str, value: &str) -> anyhow::Result<()> {
-    entry(user)?.set_password(value)?;
-    match entry(user)?.get_password() {
-        Ok(read) if read == value => Ok(()),
-        Ok(_) => anyhow::bail!("le trousseau du système a renvoyé une autre valeur que celle écrite"),
-        Err(keyring::Error::NoEntry) => anyhow::bail!(
-            "le trousseau du système a accepté l'écriture mais ne la conserve pas"
-        ),
-        Err(e) => Err(e.into()),
-    }
+    Keychain::current().set_verified(user, value)
 }
 
 pub fn store_tokens(json: &str) -> anyhow::Result<()> {
@@ -348,7 +384,95 @@ pub fn clear_on_sign_out(local_network: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
     use uuid::Uuid;
+
+    // What is done with a credential store (carrying a secret over from the former name,
+    // deleting it everywhere, noticing a store that keeps nothing) is tested on stores
+    // held in memory. The operating system's store is not a place to assert on step by
+    // step: under load Windows reports a write as done before a read can see it, and
+    // can bring an entry back after it was deleted. One test, at the end, goes to it.
+
+    thread_local! {
+        /// A store that keeps what it is given. Each test runs on a thread of its own,
+        /// so each has its own.
+        static KEPT: RefCell<HashMap<(String, String), Vec<u8>>> = RefCell::default();
+    }
+
+    struct KeptEntry(String, String);
+
+    impl KeptEntry {
+        fn key(&self) -> (String, String) {
+            (self.0.clone(), self.1.clone())
+        }
+    }
+
+    impl keyring::credential::CredentialApi for KeptEntry {
+        fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+            KEPT.with(|kept| kept.borrow_mut().insert(self.key(), secret.to_vec()));
+            Ok(())
+        }
+
+        fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+            KEPT.with(|kept| kept.borrow().get(&self.key()).cloned()).ok_or(keyring::Error::NoEntry)
+        }
+
+        fn delete_credential(&self) -> keyring::Result<()> {
+            KEPT.with(|kept| kept.borrow_mut().remove(&self.key())).map(|_| ()).ok_or(keyring::Error::NoEntry)
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn keeping(service: &str, user: &str) -> keyring::Result<Entry> {
+        Ok(Entry::new_with_credential(Box::new(KeptEntry(service.to_string(), user.to_string()))))
+    }
+
+    /// The store a build without a platform backend gets from `keyring`: every handle
+    /// accepts a write, and the next handle knows nothing of it.
+    fn forgetting(service: &str, user: &str) -> keyring::Result<Entry> {
+        keyring::mock::default_credential_builder()
+            .build(None, service, user)
+            .map(Entry::new_with_credential)
+    }
+
+    /// An installation that was renamed, on the given store.
+    fn renamed(open: fn(&str, &str) -> keyring::Result<Entry>) -> Keychain {
+        Keychain { service: "current".to_string(), former: Some("former".to_string()), open }
+    }
+
+    const USER: &str = "a-secret";
+
+    /// Deletes what a test wrote under `USER`, however the test ends: a failed assertion
+    /// must not leave an entry behind.
+    struct Cleanup<'a> {
+        keychain: &'a Keychain,
+        /// How long to keep deleting. The operating system's store can show a write
+        /// late, after a delete found nothing to delete.
+        patience: Duration,
+    }
+
+    impl Drop for Cleanup<'_> {
+        fn drop(&mut self) {
+            let keychain = self.keychain;
+            let until = Instant::now() + self.patience;
+            loop {
+                for name in [Some(&keychain.service), keychain.former.as_ref()].into_iter().flatten() {
+                    if let Ok(entry) = (keychain.open)(name, USER) {
+                        let _ = entry.delete_credential();
+                    }
+                }
+                if Instant::now() >= until {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        }
+    }
 
     #[test]
     fn signing_out_of_a_local_network_keeps_its_secret() {
@@ -371,34 +495,49 @@ mod tests {
     /// not treated as a successful save.
     #[test]
     fn set_verified_is_honest_about_the_backend() {
-        let user = format!("selftest-{}", Uuid::new_v4());
-        let outcome = set_verified(&user, "value");
-        let readable = matches!(entry(&user).and_then(|e| Ok(e.get_password())), Ok(Ok(v)) if v == "value");
-        // Whatever the host provides, the two answers must agree.
-        assert_eq!(outcome.is_ok(), readable);
-        // Windows always has Credential Manager: this is the regression test for
-        // the build that shipped without the `windows-native` backend.
-        #[cfg(windows)]
-        assert!(outcome.is_ok(), "Credential Manager did not keep the secret: {outcome:?}");
-        let _ = entry(&user).map(|e| e.delete_credential());
+        let kept = renamed(keeping);
+        kept.set_verified(USER, "value").unwrap();
+        assert_eq!(kept.entry(USER).unwrap().get_password().unwrap(), "value");
+
+        let dropped = renamed(forgetting);
+        let outcome = dropped.set_verified(USER, "value");
+        assert!(outcome.is_err(), "a store that keeps nothing was believed");
+        assert!(matches!(dropped.entry(USER).unwrap().get_password(), Err(keyring::Error::NoEntry)));
     }
 
     /// A secret saved by an installation made before the rename is found, and carried
     /// over so the next read no longer needs the former name.
     #[test]
     fn a_secret_kept_under_the_former_name_is_found_and_carried_over() {
-        let user = format!("rename-selftest-{}", Uuid::new_v4());
-        let Ok(former) = Entry::new(FORMER_SERVICE, &user) else { return };
-        if former.set_password("kept").is_err() || former.get_password().ok().as_deref() != Some("kept") {
-            return; // no usable credential store on this host
-        }
-        assert_eq!(read_secret(&user).unwrap().as_deref(), Some("kept"));
-        let carried = Entry::new(SERVICE, &user).and_then(|e| e.get_password());
-        assert_eq!(carried.as_deref().ok(), Some("kept"), "copied under the current name");
+        let keychain = renamed(keeping);
+        keeping("former", USER).unwrap().set_password("kept").unwrap();
+
+        assert_eq!(keychain.read_secret(USER).unwrap().as_deref(), Some("kept"));
+        let carried = keeping("current", USER).unwrap().get_password();
+        assert_eq!(carried.as_deref().ok(), Some("kept"), "copied under the current name: {carried:?}");
+        let left = keeping("former", USER).unwrap().get_password();
+        assert_eq!(left.as_deref().ok(), Some("kept"), "the former entry is left where it was: {left:?}");
+
         // Signing out removes it from both places.
-        delete_everywhere(&user).unwrap();
-        assert_eq!(read_secret(&user).unwrap(), None);
-        let _ = former.delete_credential();
+        keychain.delete_everywhere(USER).unwrap();
+        assert_eq!(keychain.read_secret(USER).unwrap(), None);
+        assert!(KEPT.with(|kept| kept.borrow().is_empty()));
+    }
+
+    /// The secret is still handed over when it cannot be copied under the current name.
+    #[test]
+    fn a_secret_under_the_former_name_is_read_even_if_it_cannot_be_copied() {
+        fn only_the_former_is_kept(service: &str, user: &str) -> keyring::Result<Entry> {
+            if service == "former" {
+                keeping(service, user)
+            } else {
+                forgetting(service, user)
+            }
+        }
+        let keychain = renamed(only_the_former_is_kept);
+        keeping("former", USER).unwrap().set_password("kept").unwrap();
+        assert_eq!(keychain.read_secret(USER).unwrap().as_deref(), Some("kept"));
+        assert_eq!(keeping("former", USER).unwrap().get_password().unwrap(), "kept");
     }
 
     /// An isolated profile gets its own keychain service, apart from the real one.
@@ -407,6 +546,90 @@ mod tests {
         assert_eq!(service_for(None), SERVICE);
         assert_eq!(service_for(Some("shots")), format!("{SERVICE}.shots"));
         assert_ne!(service_for(Some("shots")), FORMER_SERVICE);
+    }
+
+    /// An isolated profile neither reads nor deletes what the real installation kept
+    /// under the former name.
+    #[test]
+    fn an_isolated_profile_leaves_the_former_name_alone() {
+        assert_eq!(Keychain::of(None).former.as_deref(), Some(FORMER_SERVICE));
+        assert_eq!(Keychain::of(Some("shots")).former, None);
+
+        let isolated = Keychain { former: None, ..renamed(keeping) };
+        keeping("former", USER).unwrap().set_password("kept").unwrap();
+        assert_eq!(isolated.read_secret(USER).unwrap(), None);
+        isolated.set_verified(USER, "its own").unwrap();
+        isolated.delete_everywhere(USER).unwrap();
+        assert_eq!(keeping("former", USER).unwrap().get_password().unwrap(), "kept");
+    }
+
+    /// The guard the test of the real store relies on.
+    #[test]
+    fn a_keychain_test_that_fails_leaves_nothing_behind() {
+        let keychain = renamed(keeping);
+        let failed = std::panic::catch_unwind(|| {
+            let _cleanup = Cleanup { keychain: &keychain, patience: Duration::ZERO };
+            keychain.set_verified(USER, "value").unwrap();
+            keeping("former", USER).unwrap().set_password("value").unwrap();
+            assert_eq!(KEPT.with(|kept| kept.borrow().len()), 2);
+            panic!("a failed assertion (expected: this test checks what it leaves behind)");
+        });
+        assert!(failed.is_err());
+        assert!(KEPT.with(|kept| kept.borrow().is_empty()));
+    }
+
+    /// The profile the test of the real store writes under. Its service name is the
+    /// test's own, never the real installation's, and it is the same at every run: an
+    /// entry Windows brings back after its deletion is overwritten and deleted again by
+    /// the next run, where a name drawn at random would add one more each time.
+    const SELFTEST_PROFILE: &str = "selftest";
+
+    fn selftest() -> Keychain {
+        Keychain::of(Some(SELFTEST_PROFILE))
+    }
+
+    #[test]
+    fn the_test_of_the_real_store_has_names_of_its_own() {
+        let (selftest, real) = (selftest(), Keychain::of(None));
+        assert_eq!(selftest.service, format!("{SERVICE}.selftest"));
+        assert_ne!(selftest.service, real.service);
+        assert_eq!(selftest.former, None, "nothing is written under the former name");
+        let kept_by_the_app = [TOKENS_USER, MESH_USER, BACKUP_USER, OPENROUTER_USER];
+        assert!(!kept_by_the_app.contains(&USER) && !USER.starts_with(&fiscal_user("")));
+    }
+
+    /// The build is linked with the platform's credential store, and that store keeps
+    /// what `set_verified` gives it. Windows always has Credential Manager: this is the
+    /// regression test for the build that shipped without the `windows-native` backend,
+    /// where every secret went to an in-memory stand-in and was lost.
+    #[test]
+    fn the_platform_store_keeps_a_secret() {
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        assert!(
+            !matches!(
+                keyring::default::default_credential_builder().persistence(),
+                keyring::credential::CredentialPersistence::EntryOnly
+            ),
+            "keyring was built without this platform's backend: secrets would only be kept in memory"
+        );
+
+        let keychain = selftest();
+        // Credential Manager can answer "no such entry" just after a write it reported
+        // as done (seen on Windows 11 while the whole suite runs); the entry is there a
+        // moment later. A store that keeps nothing never passes, however long it is given.
+        let patience = if cfg!(windows) { Duration::from_secs(10) } else { Duration::ZERO };
+        let _cleanup = Cleanup { keychain: &keychain, patience: patience.min(Duration::from_millis(250)) };
+        let until = Instant::now() + patience;
+        let outcome = loop {
+            let outcome = keychain.set_verified(USER, "value");
+            if outcome.is_ok() || Instant::now() >= until {
+                break outcome;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        if cfg!(windows) {
+            assert!(outcome.is_ok(), "Credential Manager did not keep the secret: {outcome:?}");
+        }
     }
 
     #[test]
