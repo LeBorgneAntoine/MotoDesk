@@ -13,6 +13,8 @@ use std::time::Duration;
 use motodesk_client::clients::{
     self, ClientDetail, ClientListItem, ListQuery, Vehicle, format_client_name, format_vehicle_label,
 };
+use motodesk_client::sales::{self, SaleListItem, status_label};
+use motodesk_client::workshop::{self, WorkshopOrder};
 use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
@@ -55,6 +57,8 @@ pub struct ClientsPage {
     detail: Option<ClientDetail>,
     detail_loading: bool,
     detail_error: Option<SharedString>,
+    /// What the customer has bought and had repaired lately, shown under their vehicles.
+    history: History,
     pub(self) client_form: Option<ClientForm>,
     client_saving: bool,
     client_save_error: Option<SharedString>,
@@ -66,6 +70,36 @@ pub struct ClientsPage {
     vehicle_save_error: Option<SharedString>,
 
     _subscriptions: Vec<Subscription>,
+}
+
+/// How many documents and orders a customer's panel lists.
+const HISTORY_ROWS: usize = 8;
+
+/// A customer's recent documents and repair orders.
+#[derive(Default)]
+struct History {
+    sales: Vec<SaleListItem>,
+    orders: Vec<WorkshopOrder>,
+}
+
+/// « Facture · 05/11/2026 · 83,39 € »
+fn sale_meta(sale: &SaleListItem) -> String {
+    let mut parts = vec![status_label(&sale.status).to_string()];
+    parts.extend(sale.sale_date.as_deref().map(format::date));
+    parts.extend(sale.total_ttc_cents.map(format::euros));
+    parts.join(" · ")
+}
+
+/// « Yamaha MT-07 (2023) · 28/11/2026 »: the status has its own tag.
+fn order_meta(order: &WorkshopOrder) -> String {
+    let mut parts: Vec<String> = order.vehicle_label.clone().filter(|label| !label.trim().is_empty()).into_iter().collect();
+    parts.extend(order.promised_at.as_deref().map(format::date));
+    parts.join(" · ")
+}
+
+/// « 3 documents récents », « 1 ordre »
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count > 1 { many } else { one })
 }
 
 impl ClientsPage {
@@ -94,6 +128,7 @@ impl ClientsPage {
             detail: None,
             detail_loading: false,
             detail_error: None,
+            history: History::default(),
             client_form: None,
             client_saving: false,
             client_save_error: None,
@@ -208,6 +243,7 @@ impl ClientsPage {
         self.detail = None;
         self.detail_error = None;
         self.detail_loading = true;
+        self.history = History::default();
         let layer = PanelLayer::new(CLIENT, id.clone(), name.unwrap_or_else(|| "Client".into())).icon(IconName::CircleUser);
         self.update_panels(cx, |stack| {
             stack.close_all();
@@ -216,7 +252,29 @@ impl ClientsPage {
         self.load_detail(id, cx);
     }
 
+    /// Read what the customer has bought and had repaired lately. Nothing is said when it
+    /// cannot be read: the panel is the customer's, with or without their history.
+    fn load_history(&mut self, id: String, cx: &mut Context<Self>) {
+        let asked = id.clone();
+        cx.api(
+            move |client| async move {
+                let query = sales::ListQuery { client_id: Some(id.clone()), limit: Some(HISTORY_ROWS as u32), ..Default::default() };
+                let sales = sales::list(&client, &query).await.unwrap_or_default();
+                let mut orders = workshop::list_for_client(&client, &id).await.unwrap_or_default();
+                orders.truncate(HISTORY_ROWS);
+                History { sales, orders }
+            },
+            move |this, history, cx| {
+                if this.panels.read(cx).key_of(CLIENT).as_deref() == Some(asked.as_str()) {
+                    this.history = history;
+                    cx.notify();
+                }
+            },
+        );
+    }
+
     fn load_detail(&mut self, id: String, cx: &mut Context<Self>) {
+        self.load_history(id.clone(), cx);
         let asked = id.clone();
         cx.api(
             move |client| async move { clients::get(&client, &id).await },
@@ -722,6 +780,31 @@ impl ClientsPage {
             )
             .child(PanelSection::new("Coordonnées").icon(IconName::CircleUser).child(contact))
             .child(vehicles)
+            .children((!self.history.sales.is_empty()).then(|| {
+                PanelSection::new("Ventes").subtitle(counted(self.history.sales.len(), "document récent", "documents récents")).icon(IconName::Receipt).flush().child(
+                    col().children(self.history.sales.iter().map(|sale| {
+                        let title = sale.reference.clone().filter(|reference| !reference.is_empty()).unwrap_or_else(|| status_label(&sale.status).to_string());
+                        let panel = format!("sale:{}", sale.id);
+                        ListRow::new(ElementId::Name(format!("client-sale-{}", sale.id).into()), title)
+                            .meta(sale_meta(sale))
+                            .icon(IconName::Receipt)
+                            .trailing(Icon::new(IconName::ChevronRight).sm())
+                            .on_click(move |_, _, cx| Router::global(cx).update(cx, |router, cx| router.go_with("sales", [("panel", panel.as_str())], cx)))
+                    })),
+                )
+            }))
+            .children((!self.history.orders.is_empty()).then(|| {
+                PanelSection::new("Atelier").subtitle(counted(self.history.orders.len(), "ordre", "ordres")).icon(IconName::Wrench).flush().child(
+                    col().children(self.history.orders.iter().map(|order| {
+                        let panel = format!("order:{}", order.id);
+                        ListRow::new(ElementId::Name(format!("client-order-{}", order.id).into()), order.title())
+                            .meta(order_meta(order))
+                            .icon(IconName::Wrench)
+                            .trailing(Tag::new(order.status.label()).status(Status::Muted))
+                            .on_click(move |_, _, cx| Router::global(cx).update(cx, |router, cx| router.go_with("atelier", [("panel", panel.as_str())], cx)))
+                    })),
+                )
+            }))
             .child(div().h(m.space_1))
             .footer(Button::new("client-close").ghost().label("Fermer").on_click(move |_, window, cx| request_close(&stack, window, cx)))
             .footer(Button::new("client-modify").primary().icon(IconName::Pencil).label("Modifier").on_click(
@@ -850,5 +933,32 @@ impl Render for ClientsPage {
             )
             .child(div().flex_1().min_h_0().child(self.list(cx)))
             .child(PanelHost::new(&self.panels).children(panels))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: it would bring in GPUI's own `test` attribute in place of Rust's.
+    use motodesk_client::sales::SaleListItem;
+    use motodesk_client::workshop::WorkshopOrder;
+
+    use super::{counted, order_meta, sale_meta};
+
+    #[test]
+    fn a_document_and_an_order_say_what_matters_in_one_line() {
+        let sale: SaleListItem =
+            serde_json::from_value(serde_json::json!({ "id": "s1", "status": "invoice", "sale_date": "2026-11-05", "total_ttc_cents": 8339 })).unwrap();
+        assert_eq!(sale_meta(&sale), "Facture · 05/11/2026 · 83,39\u{a0}€");
+        let draft: SaleListItem = serde_json::from_value(serde_json::json!({ "id": "s2", "status": "draft" })).unwrap();
+        assert_eq!(sale_meta(&draft), "Brouillon");
+
+        let order: WorkshopOrder =
+            serde_json::from_value(serde_json::json!({ "id": "o1", "vehicle_label": "Yamaha MT-07 (2023)", "promised_at": "2026-11-28" })).unwrap();
+        assert_eq!(order_meta(&order), "Yamaha MT-07 (2023) · 28/11/2026");
+        let bare: WorkshopOrder = serde_json::from_value(serde_json::json!({ "id": "o2", "vehicle_label": " " })).unwrap();
+        assert_eq!(order_meta(&bare), "");
+
+        assert_eq!(counted(1, "ordre", "ordres"), "1 ordre");
+        assert_eq!(counted(3, "document récent", "documents récents"), "3 documents récents");
     }
 }
