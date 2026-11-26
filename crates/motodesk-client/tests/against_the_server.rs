@@ -16,7 +16,7 @@ use motodesk_client::sales::{self, DraftStatus, ListQuery as ListSales, PaymentI
 use motodesk_client::stock::{self, MovementInput, SupplierInput};
 use motodesk_client::workshop::{NewOrder, OrderEdit, Step, WorkshopLineInput};
 use motodesk_client::{
-    accounting, auth, backup, company, dashboard, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local,
+    accounting, auth, backup, company, dashboard, data, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local,
     TokenStore,
 };
 use motodesk_server::local_server::{loopback_api, test_support};
@@ -898,4 +898,59 @@ async fn a_csv_file_becomes_customers_and_products() {
     assert_eq!((oil.name.as_str(), oil.selling_price_ttc_cents, oil.vat_rate_bp), ("Huile 5W40 1L", Some(1290), 2000));
     assert_eq!(oil.stock_milli, 7_500);
     assert!(products::list_categories(&api).await.unwrap().iter().any(|c| c.name == "Lubrifiants"));
+}
+
+#[tokio::test]
+async fn an_administrator_looks_into_a_table_runs_sql_and_empties_a_table() {
+    let (api, _) = local_network().await;
+    for name in ["Martin", "Dubois", "Moreau"] {
+        clients::create(&api, &ClientInput { last_name: name.into(), ..Default::default() }).await.unwrap();
+    }
+
+    let tables = data::list_tables(&api).await.unwrap();
+    let listed = tables.iter().find(|t| t.name == "clients").expect("the customers are a table");
+    assert_eq!((listed.row_count, listed.is_system(), listed.can_clear), (3, false, true));
+    assert!(tables.iter().any(|t| t.is_system() && !t.can_clear), "what the application keeps for itself cannot be emptied");
+
+    // A page, and a search in its text columns.
+    let page = data::preview_table(&api, "clients", "", 2, 0).await.unwrap();
+    assert_eq!((page.total, page.rows.len()), (3, 2));
+    assert!(page.columns.iter().any(|c| c == "last_name"));
+    let found = data::preview_table(&api, "clients", " dub ", 100, 0).await.unwrap();
+    // The count is the table's, whatever was searched for: the rows of the page say what was found.
+    assert_eq!((found.rows.len(), found.total), (1, 3));
+    assert_eq!(data::cell_text(found.rows[0].get("last_name")).as_deref(), Some("Dubois"));
+    assert!(data::rows_to_csv(&found.columns, &found.rows).contains("Dubois"));
+
+    // A read is run by its preview and has nothing to execute.
+    let read = data::preview_sql(&api, "SELECT last_name FROM clients ORDER BY last_name").await.unwrap();
+    assert!(read.read_only && read.token_to_execute().is_none());
+    assert_eq!(read.rows.as_ref().map(Vec::len), Some(3));
+    assert_eq!(read.columns.as_deref(), Some(&["last_name".to_string()][..]));
+
+    // A write is only estimated, then run with the token of its preview.
+    let statement = "UPDATE clients SET notes = 'à rappeler' WHERE last_name = 'Martin'";
+    let write = data::preview_sql(&api, statement).await.unwrap();
+    assert!(!write.read_only);
+    assert_eq!(write.rows_affected, Some(1));
+    let untouched = data::preview_table(&api, "clients", "martin", 10, 0).await.unwrap();
+    assert_ne!(data::cell_text(untouched.rows[0].get("notes")).as_deref(), Some("à rappeler"), "a preview writes nothing");
+    let token = write.token_to_execute().expect("a write can be run").to_string();
+    let done = data::execute_sql(&api, statement, &token).await.unwrap();
+    assert_eq!(done.rows_affected, 1);
+    let changed = data::preview_table(&api, "clients", "martin", 10, 0).await.unwrap();
+    assert_eq!(data::cell_text(changed.rows[0].get("notes")).as_deref(), Some("à rappeler"));
+
+    // Not without its token, and not another statement with it.
+    assert!(data::execute_sql(&api, statement, "pas le bon").await.is_err());
+    assert!(data::preview_sql(&api, "DROP TABLE clients").await.is_err(), "the structure is not touched from here");
+
+    // Emptying a table: what it would remove first, then the action with that token.
+    let impact = data::impact_clear(&api, "clients").await.unwrap();
+    assert_eq!((impact.table.as_str(), impact.rows_affected), ("clients", 3));
+    assert!(data::clear_table(&api, "clients", "pas le bon").await.is_err());
+    let cleared = data::clear_table(&api, "clients", &impact.confirm_token).await.unwrap();
+    assert_eq!(cleared.rows_affected, 3);
+    assert_eq!(clients::list(&api, &ListQuery::default()).await.unwrap().total, 0);
+    assert!(data::impact_clear(&api, "change_log").await.is_err(), "a system table is not emptied");
 }

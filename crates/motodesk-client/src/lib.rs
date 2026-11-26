@@ -15,6 +15,7 @@ pub mod clients;
 pub mod cloud;
 pub mod company;
 pub mod dashboard;
+pub mod data;
 pub mod employees;
 pub mod error;
 pub mod fiscal;

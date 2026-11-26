@@ -16,6 +16,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::menu::ContextMenuExt as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, CursorStyle, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -98,10 +99,14 @@ pub struct DataTable {
     compact: bool,
     row_height: Option<Pixels>,
     auto_height: bool,
+    scroll_x: bool,
     muted: Option<RowTest>,
     on_row_click: Option<RowHandler>,
     row_menu: Option<RowMenu>,
 }
+
+/// The width a column takes, per share, in a table that scrolls sideways.
+const SCROLLED_COLUMN: f32 = 170.;
 
 impl DataTable {
     /// `cell(row, column)` draws one cell. It is called only for the rows on screen.
@@ -120,6 +125,7 @@ impl DataTable {
             compact: false,
             row_height: None,
             auto_height: false,
+            scroll_x: false,
             muted: None,
             on_row_click: None,
             row_menu: None,
@@ -152,6 +158,14 @@ impl DataTable {
     }
 
     /// Rows written in muted ink: an account switched off, an archived record.
+    /// For a table with more columns than fit (a database table as it is): every column
+    /// keeps a readable width and the table scrolls sideways, with a scrollbar. A column's
+    /// share becomes a multiple of a standard width.
+    pub fn scroll_x(mut self) -> Self {
+        self.scroll_x = true;
+        self
+    }
+
     pub fn muted_rows(mut self, is_muted: impl Fn(usize) -> bool + 'static) -> Self {
         self.muted = Some(Rc::new(is_muted));
         self
@@ -185,7 +199,21 @@ impl RenderOnce for DataTable {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.ui();
         let (c, m) = (theme.colors, theme.m);
-        let columns = Rc::new(self.columns);
+        // Sideways scrolling: every column has a width of its own, and the table their sum.
+        let mut columns = self.columns;
+        let scrolled_width = self.scroll_x.then(|| {
+            let mut total = px(0.);
+            for column in &mut columns {
+                let width = match column.width {
+                    Width::Flex(share) => px(SCROLLED_COLUMN * share),
+                    Width::Fixed(width) => width,
+                };
+                column.width = Width::Fixed(width);
+                total += width;
+            }
+            total
+        });
+        let columns = Rc::new(columns);
         let last = columns.len().saturating_sub(1);
         let (pad_y, standard_h) = if self.compact { (px(8.), px(33.)) } else { (px(12.), px(41.)) };
         let row_h = self.row_height.unwrap_or(standard_h);
@@ -253,11 +281,22 @@ impl RenderOnce for DataTable {
         let frame = col().w_full().bg(c.bg_surface).text_color(c.text).child(header);
         if self.auto_height {
             let lines: Vec<AnyElement> = (0..rows).map(|ix| draw_row(ix, window, cx)).collect();
-            return frame.children(lines);
+            return frame.children(lines).into_any_element();
         }
         let body = uniform_list(self.id, rows, move |range, window, cx| {
             range.map(|ix| draw_row(ix, window, cx)).collect::<Vec<_>>()
         });
-        frame.size_full().min_h_0().child(div().flex_1().min_h_0().child(body.size_full()))
+        let table = frame.size_full().min_h_0().child(div().flex_1().min_h_0().child(body.size_full()));
+        match scrolled_width {
+            // The table keeps its full width inside a frame that scrolls it; a frame wider
+            // than the table is filled.
+            Some(width) => div()
+                .size_full()
+                .bg(c.bg_surface)
+                .overflow_x_scrollbar()
+                .child(table.w(width).min_w_full().flex_none())
+                .into_any_element(),
+            None => table.into_any_element(),
+        }
     }
 }

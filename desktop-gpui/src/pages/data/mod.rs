@@ -1,14 +1,17 @@
 //! Données (port of `routes/DataManager.svelte`): the administrator's tools on the local
-//! database, one per tab. The CSV import is here; the two tabs that browse and edit the
-//! tables arrive with their own migration.
+//! database, one per tab. The tables one page at a time, a SQL console, and the CSV import.
 
 mod import;
+mod sql;
+mod tables;
 
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
 
 use crate::router::Router;
 use import::ImportWizard;
+use sql::SqlConsole;
+use tables::TablesTab;
 
 const BASIC: &str = "basic";
 const ADVANCED: &str = "advanced";
@@ -16,16 +19,23 @@ const IMPORT: &str = "import";
 
 pub struct DataPage {
     tab: SharedString,
+    // Each tab keeps what was done in it while another is looked at.
+    tables: Entity<TablesTab>,
+    sql: Entity<SqlConsole>,
     import: Entity<ImportWizard>,
 }
 
 impl DataPage {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // `tab=import` opens a tab directly. Until the two others are migrated, the import
-        // is the one the screen opens on.
+        // `tab=import` opens a tab directly.
         let asked = Router::global(cx).read(cx).param("tab").map(str::to_string);
-        let tab = asked.filter(|tab| [BASIC, ADVANCED, IMPORT].contains(&tab.as_str())).unwrap_or_else(|| IMPORT.to_string());
-        Self { tab: tab.into(), import: cx.new(|cx| ImportWizard::new(window, cx)) }
+        let tab = asked.filter(|tab| [BASIC, ADVANCED, IMPORT].contains(&tab.as_str())).unwrap_or_else(|| BASIC.to_string());
+        Self {
+            tab: tab.into(),
+            tables: cx.new(|cx| TablesTab::new(window, cx)),
+            sql: cx.new(|cx| SqlConsole::new(window, cx)),
+            import: cx.new(|cx| ImportWizard::new(window, cx)),
+        }
     }
 
     fn select(&mut self, tab: &SharedString, cx: &mut Context<Self>) {
@@ -49,15 +59,10 @@ impl Render for DataPage {
         )
         .on_change(cx.listener(|this, tab: &SharedString, _, cx| this.select(tab, cx)));
 
-        let body = if self.tab.as_ref() == IMPORT {
-            self.import.clone().into_any_element()
-        } else {
-            StateView::empty()
-                .icon(IconName::Hourglass)
-                .title("Pas encore dans cette interface")
-                .body("Le gestionnaire des tables arrive avec la migration de l'écran Données. L'import CSV, lui, est prêt.")
-                .action("Ouvrir l'import CSV", cx.listener(|this, _, _, cx| this.select(&IMPORT.into(), cx)))
-                .into_any_element()
+        let body = match self.tab.as_ref() {
+            ADVANCED => self.sql.clone().into_any_element(),
+            IMPORT => self.import.clone().into_any_element(),
+            _ => self.tables.clone().into_any_element(),
         };
 
         col()
