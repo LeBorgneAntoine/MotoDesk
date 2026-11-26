@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), impression d'une vente (données du document, trace au journal, PDF), réglage de l'arrière-plan, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), impression d'une vente (données du document, trace au journal, PDF), réglage de l'arrière-plan, mises à jour (recherche, téléchargement, vérification de la signature), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -35,6 +35,7 @@ sont pas passés.
 | Assistant (conversations, échange, canevas, clé et modèle du poste) | migré, sans échange avec un vrai modèle |
 | Modèles (bibliothèque, éditeur de mise en page, aperçu, export PDF) | migré |
 | Arrière-plan (icône près de l'horloge, fenêtre cachée à la fermeture, démarrage avec Windows, une seule copie à la fois) | migré, sous Windows ; l'icône, son menu et l'entrée de démarrage n'ont pas été essayés |
+| Mises à jour (recherche automatique, bandeau, nouveautés, téléchargement vérifié, carte des réglages) | migré ; le lancement de l'installateur n'a pas pu être essayé, et l'installateur de l'application native reste à faire |
 | Impression des documents (facture, avoir, ticket ou devis depuis Ventes avec sa trace et son DUPLICATA, clé de récupération) | migré : un PDF confié au lecteur du poste, pas d'envoi direct à une imprimante |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
@@ -85,6 +86,46 @@ Sur l'arrière-plan (`desktop-gpui/src/background.rs`, port de `src-tauri/src/ba
   est coupé, « Quitter Motodesk maintenant ». Non essayés, faute de pouvoir cliquer près de
   l'horloge depuis un essai automatique : le clic sur l'icône et son menu. Non essayée non
   plus : l'entrée de démarrage de Windows (voir plus haut).
+
+Sur les mises à jour (`motodesk_client::updates`, `desktop-gpui/src/updates.rs`, port de
+`src-tauri/src/updates.rs` et de ce que le module de mise à jour de Tauri faisait pour lui) :
+
+- **Même canal, même clé.** L'application native lit le même `latest.json` (les versions
+  publiées de ce dépôt, en HTTPS) et vérifie les installateurs avec la même clé publique que
+  l'application Tauri : un test échoue si l'une ou l'autre diverge de `tauri.conf.json`. Ce
+  qui est décrit dans `docs/mises-a-jour.md` reste vrai ; ce document sera à retoucher au
+  moment de la bascule (il cite `tauri.conf.json`).
+- **Rien n'est lancé sans vérification** : l'installateur est téléchargé en mémoire, sa
+  signature vérifiée, et seulement alors écrit sur le disque (`%TEMP%\motodesk\update`, vidé
+  au démarrage suivant) et lancé. Jamais de version plus ancienne ni identique ; jamais en
+  HTTP ; une signature qui nomme une version doit nommer celle annoncée (une signature qui
+  n'en nomme pas est acceptée, comme le faisait Tauri par défaut).
+- **L'installateur est lancé comme le lançait Tauri** : `/P /UPDATE /R /ARGS …` (sans
+  question, en mise à jour, puis relance de l'application, cachée si elle avait démarré avec
+  Windows), après quoi l'application se ferme. Cela suppose un installateur NSIS qui
+  comprend ces options : c'est une contrainte pour l'installateur de l'application native,
+  qui devra aussi s'installer par-dessus l'installation Tauri pour que la dernière version
+  Tauri puisse se mettre à jour vers la première version native.
+- **Une version de développement ne lance jamais d'installateur** (elle remplacerait
+  l'application installée) et ne cherche pas seule auprès du serveur des versions publiées.
+  Pour regarder les écrans : `cargo run -p motodesk-gpui --example release_server` annonce
+  une version 9.9.9 signée avec une clé faite sur le moment, et affiche les deux variables
+  (`MOTODESK_DEV_UPDATE_ENDPOINT`, `MOTODESK_DEV_UPDATE_KEY`) qui font regarder l'application
+  de ce côté. Ces variables n'existent pas dans une version publiée.
+- **Écarts avec Svelte** : un serveur qui répond qu'aucune version n'est publiée est dit tel
+  quel (Svelte disait « impossible de joindre le serveur ») ; les choix du poste (recherche
+  automatique, « Plus tard ») sont dans `updates.store.json` du dossier de données, plus dans
+  la mémoire du navigateur : ils ne sont donc pas repris de l'interface Svelte.
+- Le bandeau « Nouvelle version disponible » est montré aux administrateurs, au-dessus de
+  tous les écrans ; la carte est dans Paramètres › Sauvegardes, comme dans Svelte.
+- Vérifié dans l'application contre le serveur de démonstration : la recherche automatique
+  20 secondes après l'ouverture, le bandeau, les nouveautés, le téléchargement avec sa
+  progression, la vérification, « Plus tard » (retenu dans le fichier du poste), la carte des
+  réglages, une recherche à la main (version trouvée, puis serveur arrêté). Les refus
+  (installateur modifié, autre clé, version plus ancienne, HTTP) sont couverts par des tests
+  avec une clé de test. **Non essayés** : le lancement d'un vrai installateur et la relance de
+  l'application (aucun installateur natif n'existe encore), et une recherche auprès du vrai
+  serveur (aucune version n'y est publiée).
 
 Sur l'impression :
 
@@ -360,8 +401,8 @@ Sur les Paramètres :
 - Un nombre hors de ses bornes ou une couleur mal écrite est signalé sous son champ et bloque
   « Enregistrer » ; Svelte l'enregistrait tel quel. L'apparence (thème, accent, mode compact)
   change à l'enregistrement, pas pendant la saisie.
-- La carte de l'arrière-plan est là (voir « Sur l'arrière-plan ») ; celle des mises à jour
-  arrive avec les mises à jour.
+- La carte de l'arrière-plan (Synchronisation) et celle des mises à jour (Sauvegardes) sont
+  là : voir « Sur l'arrière-plan » et « Sur les mises à jour ».
 - Sur un réseau local, vider la raison sociale la retire vraiment (Svelte envoyait `null`, que
   le service lit comme « ne rien changer »).
 - **Défaut du service trouvé en chemin, présent aussi sous Svelte** : « Synchroniser », dans
@@ -448,7 +489,8 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : les mises à jour et l'installateur, puis le retrait de Svelte et de Tauri.
+Ordre prévu : l'installateur de l'application native (et le workflow de publication qui va
+avec), puis le retrait de Svelte et de Tauri.
 
 ## Comment un écran parle au service
 

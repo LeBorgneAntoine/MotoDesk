@@ -21,6 +21,7 @@ mod pos;
 mod printing;
 mod router;
 mod shell;
+mod updates;
 
 use std::path::PathBuf;
 
@@ -83,6 +84,8 @@ fn main() {
     previous_install::adopt_previous_install();
     // The documents handed to a PDF reader during earlier runs do not stay on this PC.
     printing::sweep();
+    // Nor does the installer of an update that has been through.
+    updates::sweep();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -113,6 +116,7 @@ fn main() {
         AuthStore::init(cx);
         pos::PosState::init(&pos_dir.clone().unwrap_or_default(), cx);
         assistant::AssistantState::init(&pos_dir.clone().unwrap_or_default(), cx);
+        updates::UpdateState::init(&pos_dir.clone().unwrap_or_default(), cx);
 
         // Started by the Windows session: stay out of the way until the user asks.
         let hidden = background::SUPPORTED && background::started_in_background();

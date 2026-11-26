@@ -29,7 +29,9 @@ use crate::pages::sales::SalesPage;
 use crate::pages::stock::StockPage;
 use crate::pages::templates::TemplatesPage;
 use crate::pages::not_migrated;
+use crate::pages::updates as update_screens;
 use crate::router::{self, Router};
+use crate::updates::UpdateState;
 
 /// How often the status bar asks the service where the sync stands.
 const SYNC_POLL: Duration = Duration::from_secs(60);
@@ -88,7 +90,10 @@ impl Shell {
         let subscriptions = vec![
             cx.observe(&Router::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&AuthStore::global(cx), |_, _, cx| cx.notify()),
+            cx.observe(&UpdateState::global(cx), |_, _, cx| cx.notify()),
         ];
+        // Someone is signed in: from now on the app looks for a newer version by itself.
+        UpdateState::global(cx).update(cx, |updates, cx| updates.start(cx));
         cx.spawn(async move |this, cx| {
             loop {
                 let alive = this.update(cx, |this, cx| {
@@ -272,6 +277,23 @@ impl Shell {
                 if other > 1 { format!("{other} postes utilisent") } else { "Un autre poste utilise".to_string() },
                 if other > 1 { "eux" } else { "lui" }
             )));
+        }
+        // A newer version, for those who can install it. « Plus tard » brings it back tomorrow.
+        let waiting = UpdateState::global(cx).read(cx).notice().map(|update| update.version.clone());
+        if let Some(version) = waiting.filter(|_| is_admin) {
+            banners.push(
+                Alert::info().flush().title(format!("Nouvelle version disponible : Motodesk {version}")).child(
+                    row()
+                        .mt(m.space_1)
+                        .gap(m.space_2)
+                        .child(Button::new("update-open").primary().small().label("Voir les nouveautés").on_click(|_, window, cx| {
+                            update_screens::open_dialog(window, cx)
+                        }))
+                        .child(Button::new("update-snooze").link().small().label("Plus tard").on_click(|_, _, cx| {
+                            UpdateState::global(cx).update(cx, |updates, cx| updates.later(cx))
+                        })),
+                ),
+            );
         }
         banners
     }
