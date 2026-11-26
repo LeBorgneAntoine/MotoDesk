@@ -13,7 +13,17 @@ use uuid::Uuid;
 
 use crate::local_server::error::{LocalError, LocalResult};
 
-const OPENROUTER_CHAT: &str = "https://openrouter.ai/api/v1/chat/completions";
+/// OpenRouter's API. The service state carries it (`LocalState::openrouter_url`) so that tests
+/// can stand a local server in its place; nothing else ever replaces it.
+pub const OPENROUTER_API: &str = "https://openrouter.ai/api/v1";
+
+pub fn chat_completions_url(base: &str) -> String {
+    format!("{base}/chat/completions")
+}
+
+pub fn models_url(base: &str) -> String {
+    format!("{base}/models")
+}
 
 pub const SYSTEM_PROMPT: &str = "\
 Tu es l'assistant de Motodesk, un logiciel de gestion pour un atelier moto en France.
@@ -64,10 +74,14 @@ pub fn parse_sse_data(data: &str) -> Option<SsePayload> {
 }
 
 /// Pull complete `data:` payloads out of a chunked SSE buffer.
-pub fn drain_sse_lines(buffer: &mut String) -> Vec<String> {
+///
+/// The buffer holds bytes, not text: a chunk from the network can end between the bytes of one
+/// character (the « é » of « réglée »), and only a whole line is sure to be whole characters.
+pub fn drain_sse_lines(buffer: &mut Vec<u8>) -> Vec<String> {
     let mut out = Vec::new();
-    while let Some(idx) = buffer.find('\n') {
-        let mut line: String = buffer.drain(..=idx).collect();
+    while let Some(idx) = buffer.iter().position(|b| *b == b'\n') {
+        let raw: Vec<u8> = buffer.drain(..=idx).collect();
+        let mut line = String::from_utf8_lossy(&raw).into_owned();
         if line.ends_with('\n') {
             line.pop();
         }
@@ -146,8 +160,10 @@ pub(crate) fn llm_client() -> &'static reqwest::Client {
     })
 }
 
-/// Stream a completion; each content delta is forwarded on `deltas`.
+/// Stream a completion from the OpenRouter API at `base`; each content delta is forwarded on
+/// `deltas`.
 pub async fn complete_chat_stream(
+    base: &str,
     key: &str,
     model: &str,
     history: &[(String, String)],
@@ -162,7 +178,7 @@ pub async fn complete_chat_stream(
     }
 
     let response = llm_client()
-        .post(OPENROUTER_CHAT)
+        .post(chat_completions_url(base))
         .header("Authorization", format!("Bearer {key}"))
         .header("HTTP-Referer", "https://motodesk.local")
         .header("X-Title", "Motodesk")
@@ -184,12 +200,12 @@ pub async fn complete_chat_stream(
     }
 
     let mut full = String::new();
-    let mut buf = String::new();
+    let mut buf: Vec<u8> = Vec::new();
     let mut response = response;
     loop {
         match response.chunk().await {
             Ok(Some(chunk)) => {
-                buf.push_str(&String::from_utf8_lossy(&chunk));
+                buf.extend_from_slice(&chunk);
                 for data in drain_sse_lines(&mut buf) {
                     match parse_sse_data(&data) {
                         Some(SsePayload::Text(t)) => {
@@ -517,10 +533,21 @@ mod tests {
 
     #[test]
     fn drain_holds_a_partial_line() {
-        let mut buf = String::from("data: {\"a\":");
+        let mut buf = b"data: {\"a\":".to_vec();
         assert!(drain_sse_lines(&mut buf).is_empty());
-        buf.push_str("1}\n");
+        buf.extend_from_slice(b"1}\n");
         assert_eq!(drain_sse_lines(&mut buf), vec![r#"{"a":1}"#]);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn drain_waits_for_the_rest_of_a_character_cut_in_two() {
+        let line = "data: {\"t\":\"réglée\"}\r\n".as_bytes();
+        let cut = line.iter().position(|b| *b == 0xC3).unwrap() + 1;
+        let mut buf = line[..cut].to_vec();
+        assert!(drain_sse_lines(&mut buf).is_empty());
+        buf.extend_from_slice(&line[cut..]);
+        assert_eq!(drain_sse_lines(&mut buf), vec![r#"{"t":"réglée"}"#]);
     }
 
     #[test]

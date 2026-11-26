@@ -22,8 +22,6 @@ use crate::local_server::error::{LocalError, LocalResult};
 use crate::local_server::secrets;
 use crate::local_server::state::SharedState;
 
-const OPENROUTER_MODELS: &str = "https://openrouter.ai/api/v1/models";
-
 pub fn router() -> Router<SharedState> {
     Router::new()
         .route(
@@ -151,7 +149,7 @@ async fn test_connection(
     let key = require_stored_key(secrets::load_openrouter_key(&state.data_dir)?)?;
 
     let response = assistant::llm_client()
-        .get(OPENROUTER_MODELS)
+        .get(assistant::models_url(&state.openrouter_url))
         .header("Authorization", format!("Bearer {key}"))
         .header("HTTP-Referer", "https://motodesk.local")
         .header("X-Title", "Motodesk")
@@ -281,12 +279,15 @@ async fn chat(
 
     let assistant_id = assistant_msg.id;
     let db = state.db.clone();
+    let openrouter = state.openrouter_url.clone();
     tokio::spawn(async move {
         let (delta_tx, mut delta_rx) = mpsc::channel::<String>(64);
         let complete = tokio::spawn({
             let key = key.clone();
             let model = model.clone();
-            async move { complete_chat_stream(&key, &model, &history, &delta_tx).await }
+            async move {
+                complete_chat_stream(&openrouter, &key, &model, &history, &delta_tx).await
+            }
         });
 
         while let Some(text) = delta_rx.recv().await {
@@ -338,6 +339,9 @@ async fn chat(
 
     Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
 }
+
+#[cfg(test)]
+mod chat_tests;
 
 #[cfg(test)]
 mod tests {

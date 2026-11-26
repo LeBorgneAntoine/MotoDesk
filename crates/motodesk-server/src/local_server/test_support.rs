@@ -16,6 +16,18 @@ use crate::local_server::state::{LocalState, SharedState};
 
 /// A database with a complete company profile and an empty journal.
 pub async fn shop() -> SharedState {
+    Arc::new(shop_state().await)
+}
+
+/// The same shop, whose assistant talks to `openrouter` (a stand-in started by the test on this
+/// PC) instead of OpenRouter.
+pub async fn shop_with_openrouter(openrouter: &str) -> SharedState {
+    let mut state = shop_state().await;
+    state.openrouter_url = openrouter.to_string();
+    Arc::new(state)
+}
+
+async fn shop_state() -> LocalState {
     // Tests would otherwise leave one key per throwaway register behind in the
     // developer's real credential store.
     std::env::set_var("MOTODESK_FISCAL_NO_KEYCHAIN", "1");
@@ -57,14 +69,14 @@ pub async fn shop() -> SharedState {
             .unwrap();
     }
 
-    Arc::new(LocalState::new(
+    LocalState::new(
         pool,
         dir,
         "http://127.0.0.1:8080".into(),
         None,
         None,
         "test-local-token".into(),
-    ))
+    )
 }
 
 /// A catalogue row the till can scan. Stock is a whole unit; services skip it.

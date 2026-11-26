@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 use tokio::sync::{Notify, RwLock};
 use uuid::Uuid;
 
+use crate::local_server::assistant::OPENROUTER_API;
 use crate::local_server::mesh::PeerInfo;
 use crate::local_server::mesh_auth::NonceCache;
 
@@ -15,6 +16,10 @@ pub struct LocalState {
     /// so that a backup of the app folder carries the archives too.
     pub data_dir: PathBuf,
     pub cloud_url: String,
+    /// Where the assistant reaches OpenRouter. Always [`OPENROUTER_API`] in the app: no setting,
+    /// file or variable changes it. Tests point it at a stand-in on this PC before the state is
+    /// shared, so the assistant's routes run without the network.
+    pub openrouter_url: String,
     pub local_token: String,
     pub mesh_nonces: NonceCache,
     /// Cloud-issued company mesh secret (LAN trust root). `None` until login.
@@ -55,6 +60,7 @@ impl LocalState {
             db,
             data_dir,
             cloud_url,
+            openrouter_url: OPENROUTER_API.into(),
             local_token,
             mesh_nonces: NonceCache::new(),
             mesh_secret: RwLock::new(mesh_secret),
