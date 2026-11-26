@@ -5,12 +5,13 @@
 //! Whether a PC is a till is a choice of that PC. It is kept in a file of its own, never in
 //! the shop's settings: those travel to every PC, and would turn each of them into a till.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use axum::http::Method;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
+use crate::device_store::DeviceFile;
 use crate::error::ApiResult;
 use crate::products::Product;
 use crate::sales::{Sale, SaleLineInput};
@@ -146,34 +147,22 @@ const CONFIG_KEY: &str = "pos.config.v1";
 /// Where the till role of this PC is kept between two runs.
 #[derive(Debug, Clone)]
 pub struct PosConfigStore {
-    path: PathBuf,
+    file: DeviceFile,
 }
 
 impl PosConfigStore {
     /// `data_dir` is the app's data folder.
     pub fn in_dir(data_dir: &Path) -> Self {
-        Self { path: data_dir.join(CONFIG_FILE) }
-    }
-
-    fn read(&self) -> Map<String, Value> {
-        std::fs::read(&self.path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+        Self { file: DeviceFile::in_dir(data_dir, CONFIG_FILE) }
     }
 
     /// The stored role, or the defaults (not a till) when nothing readable is stored.
     pub fn load(&self) -> PosConfig {
-        self.read().remove(CONFIG_KEY).and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default()
+        self.file.get(CONFIG_KEY).unwrap_or_default()
     }
 
-    /// Replace the file in one step, so a crash mid-write cannot leave half a configuration.
     pub fn save(&self, config: &PosConfig) -> std::io::Result<()> {
-        let mut map = self.read();
-        map.insert(CONFIG_KEY.into(), serde_json::to_value(config).unwrap_or(Value::Null));
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec(&map).unwrap_or_default())?;
-        std::fs::rename(&tmp, &self.path)
+        self.file.set(CONFIG_KEY, config)
     }
 }
 

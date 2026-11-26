@@ -1,9 +1,10 @@
 //! Paramètres (port of `routes/Settings.svelte`): a rail of categories and, for most of them,
 //! a grid of fields whose changes wait in a bar at the bottom until they are saved together.
 //!
-//! Four categories draw themselves: the company's identity, the backups, the sync, and the
-//! two that arrive with their own screens (the till and the assistant).
+//! Five categories draw themselves: the company's identity, the backups, the sync, the till
+//! and the assistant.
 
+mod assistant;
 mod company;
 mod registry;
 mod sync;
@@ -164,6 +165,7 @@ impl SettingsPage {
                 "system" if Self::is_admin(cx) => Some(cx.new(|cx| system::SystemView::new(window, cx)).into()),
                 "sync" if Self::is_admin(cx) => Some(cx.new(|cx| sync::SyncView::new(window, cx)).into()),
                 "caisse" if Self::is_admin(cx) => Some(cx.new(|cx| till::TillSettings::new(window, cx)).into()),
+                "assistant" => Some(cx.new(|cx| assistant::AssistantSettings::new(window, cx)).into()),
                 _ => None,
             };
         } else {
@@ -481,16 +483,6 @@ impl SettingsPage {
         col().gap(m.space_4).when(locked, |this| this.opacity(0.75)).children(lines)
     }
 
-    fn later(screen: &'static str) -> Div {
-        div().h(px(260.)).child(
-            StateView::empty()
-                .compact()
-                .icon(IconName::Hourglass)
-                .title("Pas encore dans cette interface")
-                .body(format!("Ces réglages arrivent avec l'écran {screen}.")),
-        )
-    }
-
     fn body(&self, locked: bool, cx: &mut Context<Self>) -> Div {
         let m = cx.ui().m;
         let is_admin = Self::is_admin(cx);
@@ -509,7 +501,7 @@ impl SettingsPage {
                     body.child(Alert::info().child("La synchronisation est gérée par les administrateurs."))
                 }
                 ("caisse", None) => body.child(Alert::info().child("Le rôle de caisse est réservé aux administrateurs.")),
-                _ => body.child(Self::later("Assistant")),
+                _ => body,
             };
         }
         if locked {

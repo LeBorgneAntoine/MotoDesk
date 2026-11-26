@@ -19,6 +19,7 @@ use crate::pages::atelier::AtelierPage;
 use crate::pages::billing::BillingPage;
 use crate::pages::data::DataPage;
 use crate::pages::settings::SettingsPage;
+use crate::pages::assistant::AssistantPage;
 use crate::pages::shared::SharedPage;
 use crate::pages::clients::ClientsPage;
 use crate::pages::dashboard::{DashboardPage, Module};
@@ -70,6 +71,7 @@ pub struct Shell {
     settings: Option<Entity<SettingsPage>>,
     data: Option<Entity<DataPage>>,
     shared: Option<Entity<SharedPage>>,
+    assistant: Option<Entity<AssistantPage>>,
     /// The team of an online company, or the accounts of a local network.
     employees: Option<AnyView>,
     sync: Option<SyncStatus>,
@@ -118,6 +120,7 @@ impl Shell {
             settings: None,
             data: None,
             shared: None,
+            assistant: None,
             employees: None,
             sync: None,
             mesh: MeshStatus::default(),
@@ -363,6 +366,9 @@ impl Render for Shell {
         if current.as_ref() != router::SHARED {
             self.shared = None;
         }
+        if current.as_ref() != router::ASSISTANT {
+            self.assistant = None;
+        }
         if current.as_ref() != router::EMPLOYEES {
             self.employees = None;
         }
@@ -409,6 +415,10 @@ impl Render for Shell {
             }
             router::SHARED => {
                 let page = self.shared.get_or_insert_with(|| cx.new(|cx| SharedPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::ASSISTANT => {
+                let page = self.assistant.get_or_insert_with(|| cx.new(|cx| AssistantPage::new(window, cx))).clone();
                 page.into_any_element()
             }
             router::DATA => {

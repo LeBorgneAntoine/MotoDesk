@@ -144,6 +144,17 @@ impl Client {
         self.inner.local.download(path, sink).await
     }
 
+    /// Send `body` and hand the answer to `sink` piece by piece, as the service writes it.
+    pub async fn stream<B: Serialize + ?Sized>(
+        &self,
+        method: Method,
+        path: &str,
+        body: &B,
+        sink: impl FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> ApiResult<u64> {
+        self.inner.local.stream(method, path, serde_json::to_vec(body).ok(), sink).await
+    }
+
     pub fn call(&self, method: Method, path: impl Into<String>) -> Call<'_> {
         Call { client: self, method, path: path.into(), body: None, auth: true }
     }

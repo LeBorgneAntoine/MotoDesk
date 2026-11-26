@@ -9,6 +9,7 @@
 //! the types the server answers with, and one function per endpoint taking a [`Client`].
 
 pub mod accounting;
+pub mod assistant;
 pub mod auth;
 pub mod backup;
 pub mod clients;
@@ -16,6 +17,7 @@ pub mod cloud;
 pub mod company;
 pub mod dashboard;
 pub mod data;
+mod device_store;
 pub mod employees;
 pub mod error;
 pub mod fiscal;

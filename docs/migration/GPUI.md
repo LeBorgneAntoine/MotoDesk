@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -25,14 +25,15 @@ sont pas passés.
 | Ventes (devis, factures, validation, avoirs, règlements) | migré, sans l'impression |
 | L'Atelier (tableau des ordres de réparation, fiche, facturation) | migré |
 | Comptabilité (journaux des ventes et de caisse, TVA, balance âgée, FEC, caisse et intégrité, clôtures, archives, journal fiscal) | migré |
-| Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré, sans les réglages de l'Assistant |
+| Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré |
 | Données : tables (aperçu, recherche, export d'une page, vidage), console SQL, import CSV | migré |
 | Dossier partagé (dossiers, visibilité, envoi et téléchargement de fichiers, historique) | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
 | Caisse (ouverture de session, recherche et lecture de codes, panier, encaissement en espèces, carte, chèque ou à plusieurs, tickets en attente, tiroir, clôture) | migré, sans imprimante, tiroir ni terminal réels |
-| Modèles, Assistant | à faire |
+| Assistant (conversations, échange, canevas, clé et modèle du poste) | migré, sans échange avec un vrai modèle |
+| Modèles | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -74,6 +75,47 @@ depuis un essai automatique. En développement seulement (`desktop-gpui/src/back
 `MOTODESK_DEV_PICK_FILES=<fichiers>` répond à la place d'une fenêtre « Ouvrir » et
 `MOTODESK_DEV_SAVE_DIR=<dossier>` à la place d'une fenêtre « Enregistrer sous ». Ces deux
 variables n'existent pas dans une version publiée.
+
+Sur l'Assistant :
+
+- La clé OpenRouter et le modèle sont ceux du poste : la clé est gardée par le service à côté
+  de la base, le modèle dans `assistant.store.json`, le fichier de l'interface Svelte
+  (`motodesk_client::assistant::PrefsStore`). Sans clé, l'écran est une démonstration : les
+  quatre suggestions montrent ce que le canevas sait afficher (tableau, indicateurs, demande
+  d'autorisation, document), avec des données inventées, et rien n'est demandé à personne.
+- La réponse du modèle arrive par morceaux qui peuvent finir n'importe où, au milieu d'une
+  ligne ou d'une lettre accentuée : `assistant::EventLines` les recolle, `ApiExt::api_stream`
+  (`desktop-gpui/src/backend.rs`) les amène à l'écran un par un. Ce que chaque événement fait
+  à la conversation est dans `pages/assistant/thread.rs`, sans dessin ni appel, avec ses tests.
+- Le texte de l'assistant est du markdown dessiné par `Prose` (titres, listes, tableaux,
+  citations, code). **Un lien écrit par un modèle n'ouvre que le web ou un écran de
+  l'application** (`#/sales`) : un lien vers un fichier ou un autre protocole ne fait rien.
+- Le champ de message est `Composer` : il grandit avec le texte, Entrée envoie, Maj+Entrée va
+  à la ligne.
+- Changer de conversation pendant qu'une réponse s'écrit cesse de l'écouter ; le service la
+  termine et la garde. Sous Svelte, la suite de la réponse s'écrivait dans la conversation
+  qu'on venait d'ouvrir.
+- **Correction par rapport à Svelte** : choisir un modèle de la liste après avoir saisi un
+  identifiant à la main prend effet. Svelte gardait l'identifiant saisi, qui l'emportait
+  toujours sur la liste, champ masqué compris. Un identifiant saisi est enregistré dès qu'il
+  est valide, sans attendre que le champ soit quitté.
+- Avec une clé, les suggestions affichent la question qu'elles posent au modèle, et non
+  « exemple de tableau ».
+- Les conversations de démonstration durent le temps de l'application (Svelte les gardait
+  dans le navigateur intégré). Le raccourci Ctrl+N arrive avec les menus de la barre de titre.
+- **Aucun échange avec OpenRouter n'a été fait**, ni par les tests ni dans l'application :
+  cela enverrait une requête à un service extérieur. L'adresse d'OpenRouter est fixée dans le
+  service. En développement seulement, `MOTODESK_DEV_ASSISTANT_REPLY=<fichier markdown>` fait
+  écrire ce fichier à l'écran comme le ferait un modèle, sans rien enregistrer.
+- Vérifié dans l'application sur un dossier de démonstration : les quatre suggestions et
+  leurs canevas, l'autorisation accordée, un message libre, la liste des documents, un lien
+  vers l'écran Ventes, le retour sur l'écran (conversations retrouvées), la recherche, la
+  suppression (démonstration et conversation enregistrée), l'historique replié et déplié,
+  l'enregistrement et l'effacement d'une clé d'essai (dans le dossier de démonstration, hors
+  trousseau), le choix du modèle, l'ouverture de conversations enregistrées, et une réponse
+  écrite au fil de l'eau par le fichier de développement. Non essayés : « Tester la
+  connexion » et un vrai message (OpenRouter), le refus d'une clé par OpenRouter, Maj+Entrée,
+  le trousseau du système, et la vue d'un employé non administrateur.
 
 Sur la Caisse :
 
@@ -188,9 +230,8 @@ Sur les Paramètres :
 - Un nombre hors de ses bornes ou une couleur mal écrite est signalé sous son champ et bloque
   « Enregistrer » ; Svelte l'enregistrait tel quel. L'apparence (thème, accent, mode compact)
   change à l'enregistrement, pas pendant la saisie.
-- La catégorie Assistant affiche qu'elle arrive avec son écran. La carte des
-  mises à jour et celle de l'arrière-plan (rester actif fenêtre fermée, démarrer avec Windows)
-  arrivent avec la zone de notification et les mises à jour.
+- La carte des mises à jour et celle de l'arrière-plan (rester actif fenêtre fermée, démarrer
+  avec Windows) arrivent avec la zone de notification et les mises à jour.
 - Sur un réseau local, vider la raison sociale la retire vraiment (Svelte envoyait `null`, que
   le service lit comme « ne rien changer »).
 - **Défaut du service trouvé en chemin, présent aussi sous Svelte** : « Synchroniser », dans
@@ -276,7 +317,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
+Ordre prévu : Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
 

@@ -10,6 +10,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod assistant;
 mod appearance;
 mod auth;
 mod backend;
@@ -77,7 +78,8 @@ fn main() {
     let local_token = local_auth::generate_token();
     let token = local_token.clone();
     let dir = data_dir();
-    // Whether this PC is a till is read from the same folder, before the window opens.
+    // What this PC keeps for itself (whether it is a till, the model of its assistant) is
+    // read from the same folder, before the window opens.
     let pos_dir = dir.clone();
     runtime.spawn(async move {
         let result = match dir {
@@ -92,6 +94,7 @@ fn main() {
         Router::init(cx);
         AuthStore::init(cx);
         pos::PosState::init(&pos_dir.clone().unwrap_or_default(), cx);
+        assistant::AssistantState::init(&pos_dir.clone().unwrap_or_default(), cx);
 
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx))),
