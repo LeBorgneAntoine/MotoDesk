@@ -10,6 +10,8 @@ use crate::error::{ApiError, ApiResult};
 /// Must match `local_server::local_auth::LOCAL_TOKEN_HEADER`.
 const LOCAL_TOKEN_HEADER: &str = "x-motodesk-local-token";
 
+pub(crate) const JSON: &str = "application/json";
+
 /// The largest answer read into memory. The server caps what it accepts at 16 MB; its answers
 /// (a page of a list, a document) are far smaller.
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
@@ -29,12 +31,19 @@ impl Local {
         Self { router, token }
     }
 
-    /// Send one request; the answer's bytes on success, the server's error otherwise.
+    /// Send one request with a JSON body, or none; the answer's bytes on success, the
+    /// server's error otherwise.
     pub async fn send(&self, method: Method, path: &str, body: Option<Vec<u8>>) -> ApiResult<Vec<u8>> {
+        self.send_as(method, path, body.map(|bytes| (JSON.to_string(), bytes))).await
+    }
+
+    /// Send one request whose body, when there is one, comes with its own content type (an
+    /// image, for a logo).
+    pub async fn send_as(&self, method: Method, path: &str, body: Option<(String, Vec<u8>)>) -> ApiResult<Vec<u8>> {
         let mut request = Request::builder().method(method).uri(path).header(LOCAL_TOKEN_HEADER, &self.token);
         let body = match body {
-            Some(bytes) => {
-                request = request.header(header::CONTENT_TYPE, "application/json");
+            Some((content_type, bytes)) => {
+                request = request.header(header::CONTENT_TYPE, content_type);
                 Body::from(bytes)
             }
             None => Body::empty(),

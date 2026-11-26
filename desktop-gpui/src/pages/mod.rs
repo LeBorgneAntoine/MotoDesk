@@ -12,6 +12,7 @@ pub mod employees;
 pub mod lines;
 pub mod parc;
 pub mod sales;
+pub mod settings;
 pub mod stock;
 pub mod vehicle;
 

@@ -10,8 +10,10 @@
 
 pub mod accounting;
 pub mod auth;
+pub mod backup;
 pub mod clients;
 pub mod cloud;
+pub mod company;
 pub mod dashboard;
 pub mod employees;
 pub mod error;

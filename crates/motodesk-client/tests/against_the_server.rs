@@ -14,7 +14,8 @@ use motodesk_client::sales::{self, DraftStatus, ListQuery as ListSales, PaymentI
 use motodesk_client::stock::{self, MovementInput, SupplierInput};
 use motodesk_client::workshop::{NewOrder, OrderEdit, Step, WorkshopLineInput};
 use motodesk_client::{
-    accounting, dashboard, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local, TokenStore,
+    accounting, auth, backup, company, dashboard, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local,
+    TokenStore,
 };
 use motodesk_server::local_server::{loopback_api, test_support};
 
@@ -740,4 +741,88 @@ async fn the_recovery_key_and_the_pcs_of_a_local_network_are_read() {
     let devices = network::list_devices(&api).await.unwrap();
     assert!(devices.iter().filter(|d| d.this_pc).count() <= 1);
     assert!(devices.iter().all(|d| !d.device_id.is_empty()));
+}
+
+#[tokio::test]
+async fn a_local_network_writes_its_own_identity_and_logo() {
+    let (api, _) = local_network().await;
+
+    let named = company::update(&api, "  Garage Dupont ", "Garage Dupont SARL").await.unwrap();
+    assert_eq!((named.name(), named.legal_name()), ("Garage Dupont", "Garage Dupont SARL"));
+    assert!(!named.has_logo);
+    assert_eq!(company::logo(&api).await.unwrap(), None);
+
+    // An emptied legal name is removed, not kept.
+    let cleared = company::update(&api, "Garage Dupont", "").await.unwrap();
+    assert_eq!(cleared.legal_name, None);
+    assert_eq!(company::get(&api).await.unwrap().name(), "Garage Dupont");
+
+    let unnamed = company::update(&api, " ", "").await.unwrap_err();
+    assert_eq!(unnamed.status, 400);
+
+    let picture = b"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><rect width=\"8\" height=\"8\"/></svg>".to_vec();
+    let with_logo = company::upload_logo(&api, "image/svg+xml", picture.clone()).await.unwrap();
+    assert!(with_logo.has_logo && with_logo.logo_updated_at.is_some());
+    assert_eq!(company::logo(&api).await.unwrap(), Some(picture));
+
+    let not_an_image = company::upload_logo(&api, "application/pdf", vec![1, 2, 3]).await.unwrap_err();
+    assert_eq!(not_an_image.status, 400);
+    let too_big = company::upload_logo(&api, "image/png", vec![0; company::MAX_LOGO_BYTES + 1]).await.unwrap_err();
+    assert_eq!(too_big.status, 400);
+}
+
+#[tokio::test]
+async fn a_backup_is_written_and_listed() {
+    let (api, _) = local_network().await;
+
+    let before = backup::status(&api).await.unwrap();
+    assert!(before.files.is_empty() && !before.restore_pending);
+    assert!(!before.backups_dir.is_empty());
+
+    let written = backup::export(&api, "trop court").await.unwrap();
+    // Ten characters exactly is the shortest accepted.
+    assert_eq!(written.kind_label(), "Manuelle");
+    let refused = backup::export(&api, "court").await.unwrap_err();
+    assert_eq!(refused.status, 400);
+
+    let after = backup::status(&api).await.unwrap();
+    assert_eq!(after.files.len(), 1);
+    assert_eq!(after.files[0].filename, written.filename);
+    assert!(after.files[0].size_bytes > 0 && after.last_backup_at.is_some());
+
+    // A wrong password queues nothing.
+    let wrong = backup::restore(&api, &written.filename, "pas le bon mot").await.unwrap_err();
+    assert!((400..500).contains(&wrong.status), "{}", wrong.status);
+    assert!(!backup::status(&api).await.unwrap().restore_pending);
+}
+
+#[tokio::test]
+async fn the_sync_diagnostics_and_the_addresses_typed_by_hand_are_read_and_written() {
+    let (api, _) = local_network().await;
+
+    let diagnostics = sync::diagnostics(&api).await.unwrap();
+    assert!(!diagnostics.device_id.is_empty());
+    assert!(diagnostics.standalone, "a local network has no cloud");
+    assert!(diagnostics.lan_peers.is_empty());
+
+    assert!(sync::static_peers(&api).await.unwrap().is_empty());
+    let typed = sync::parse_static_peers("192.168.1.42:17300\r\n\n 192.168.1.43:17300 , poste-3:17300");
+    assert_eq!(typed, ["192.168.1.42:17300", "192.168.1.43:17300", "poste-3:17300"]);
+    assert_eq!(sync::set_static_peers(&api, &typed).await.unwrap(), typed);
+    assert_eq!(sync::static_peers(&api).await.unwrap(), typed);
+}
+
+#[tokio::test]
+async fn syncing_from_a_local_network_keeps_its_session() {
+    let (api, _) = local_network().await;
+    let session = api.tokens().expect("the administrator is signed in");
+    assert!(session.user.is_local());
+
+    // What the sync screen does before syncing. Handing a local session back to the service
+    // would replace its record and end it: the client does not.
+    auth::sync_session_to_local(&api, &session).await;
+    sync::sync_now(&api).await.expect("a local network syncs without a cloud");
+
+    let me = auth::local_me(&api).await.expect("the session still stands");
+    assert_eq!(me.id, session.user.id);
 }

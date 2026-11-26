@@ -17,6 +17,7 @@ use crate::backend::ApiExt as _;
 use crate::format::humanize_error;
 use crate::pages::atelier::AtelierPage;
 use crate::pages::billing::BillingPage;
+use crate::pages::settings::SettingsPage;
 use crate::pages::clients::ClientsPage;
 use crate::pages::dashboard::{DashboardPage, Module};
 use crate::pages::employees;
@@ -64,6 +65,7 @@ pub struct Shell {
     stock: Option<Entity<StockPage>>,
     sales: Option<Entity<SalesPage>>,
     billing: Option<Entity<BillingPage>>,
+    settings: Option<Entity<SettingsPage>>,
     /// The team of an online company, or the accounts of a local network.
     employees: Option<AnyView>,
     sync: Option<SyncStatus>,
@@ -96,14 +98,9 @@ impl Shell {
         cx.api(
             |client| async move { settings::list(&client).await },
             |_, settings, cx| {
-                let Ok(settings) = settings else { return };
-                let system_is_dark = matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
-                let look = appearance::from_settings(&settings, system_is_dark);
-                UiTheme::update(cx, |theme| {
-                    theme.mode = look.mode;
-                    theme.accent = look.accent;
-                    theme.density = look.density;
-                });
+                if let Ok(settings) = settings {
+                    appearance::apply(&settings, cx);
+                }
             },
         );
         Self {
@@ -114,6 +111,7 @@ impl Shell {
             stock: None,
             sales: None,
             billing: None,
+            settings: None,
             employees: None,
             sync: None,
             mesh: MeshStatus::default(),
@@ -350,6 +348,9 @@ impl Render for Shell {
         if current.as_ref() != router::BILLING {
             self.billing = None;
         }
+        if current.as_ref() != router::SETTINGS {
+            self.settings = None;
+        }
         if current.as_ref() != router::EMPLOYEES {
             self.employees = None;
         }
@@ -392,6 +393,10 @@ impl Render for Shell {
             }
             router::BILLING => {
                 let page = self.billing.get_or_insert_with(|| cx.new(|cx| BillingPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::SETTINGS => {
+                let page = self.settings.get_or_insert_with(|| cx.new(|cx| SettingsPage::new(window, cx))).clone();
                 page.into_any_element()
             }
             router::EMPLOYEES => {

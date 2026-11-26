@@ -16,10 +16,13 @@ mod tooltip;
 
 pub use button::{Button, ButtonSize, ButtonVariant};
 pub use combobox::{ComboModel, ComboOption, Combobox};
-pub use content::{Alert, Divider, Heading, HeadingSize, Preformatted, Spinner, StateKind, StateView, Status, Tag, Tone};
+pub use content::{
+    Alert, Divider, Heading, HeadingSize, Picture, Preformatted, Spinner, StateKind, StateView, Status, Tag, Tone,
+    picture_from_bytes,
+};
 pub use controls::{
-    Checkbox, FormField, IconButton, IconButtonSize, SearchField, Select, SelectModel, SelectOption, Switch, TabItem,
-    Tabs,
+    Checkbox, ColorField, FormField, IconButton, IconButtonSize, SearchField, Select, SelectModel, SelectOption, Switch,
+    TabItem, Tabs,
 };
 pub use data::{
     Card, CardPadding, CardVariant, InfoItem, InfoList, KpiTile, ListRow, Pagination, SectionCard, TileButton, Trend,

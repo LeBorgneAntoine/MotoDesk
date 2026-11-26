@@ -13,18 +13,19 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle, ElementId, Entity, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px, transparent_black,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px, rgb, transparent_black,
 };
 
 use crate::components::icon::{Icon, IconName, IconSize};
 use crate::components::text_field::{Input, TextModel};
 use crate::components::tooltip::tooltip;
 use crate::style::{StyleExt as _, col, row, with_focus_mark};
-use crate::theme::Themed;
+use crate::theme::{Themed, parse_hex};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 type ToggleHandler = Rc<dyn Fn(bool, &mut Window, &mut App)>;
 type PickHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+type ColorHandler = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
 // ---- IconButton -----------------------------------------------------------------------------
 
@@ -265,17 +266,24 @@ pub struct Switch {
     id: ElementId,
     checked: bool,
     label: Option<SharedString>,
+    hint: Option<SharedString>,
     disabled: bool,
     on_change: Option<ToggleHandler>,
 }
 
 impl Switch {
     pub fn new(id: impl Into<ElementId>, checked: bool) -> Self {
-        Self { id: id.into(), checked, label: None, disabled: false, on_change: None }
+        Self { id: id.into(), checked, label: None, hint: None, disabled: false, on_change: None }
     }
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// A few lines under the switch saying what turning it on does.
+    pub fn hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.hint = Some(hint.into());
         self
     }
 
@@ -293,14 +301,97 @@ impl Switch {
 impl RenderOnce for Switch {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         use gpui_kit::component::Disableable as _;
-        let accent = cx.ui().colors.accent;
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
         let on_change = self.on_change;
-        KitSwitch::new(self.id)
+        let switch = KitSwitch::new(self.id)
             .checked(self.checked)
-            .color(accent)
+            .color(c.accent)
             .disabled(self.disabled)
             .when_some(self.label, |this, label| this.label(label))
-            .when_some(on_change, |this, handler| this.on_click(move |checked, window, cx| handler(*checked, window, cx)))
+            .when_some(on_change, |this, handler| this.on_click(move |checked, window, cx| handler(*checked, window, cx)));
+        col().min_w_0().gap(m.space_1).child(row().child(switch)).when_some(self.hint, |this, hint| {
+            this.child(div().fs(m.fs_xs).text_color(c.text_muted).child(hint))
+        })
+    }
+}
+
+// ---- ColorField -----------------------------------------------------------------------------
+
+/// A colour written `#rrggbb`, with swatches to pick from. It draws the [`TextModel`] that
+/// holds the text: the model's own events tell of typing, `on_pick` of a swatch chosen.
+#[derive(IntoElement)]
+pub struct ColorField {
+    id: ElementId,
+    model: TextModel,
+    presets: Vec<u32>,
+    disabled: bool,
+    on_pick: Option<ColorHandler>,
+}
+
+impl ColorField {
+    pub fn new(id: impl Into<ElementId>, model: &TextModel) -> Self {
+        Self { id: id.into(), model: model.clone(), presets: Vec::new(), disabled: false, on_pick: None }
+    }
+
+    /// The colours offered as swatches, each `0xRRGGBB`.
+    pub fn presets(mut self, presets: &[u32]) -> Self {
+        self.presets = presets.to_vec();
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// Called with the colour of the swatch chosen, as `#rrggbb`, once the field shows it.
+    pub fn on_pick(mut self, handler: impl Fn(&str, &mut Window, &mut App) + 'static) -> Self {
+        self.on_pick = Some(Rc::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for ColorField {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
+        let current = parse_hex(&self.model.text(cx));
+        let disabled = self.disabled;
+        let side = m.control_h_md;
+        // What the text reads as: empty while it is not a colour.
+        let preview = div()
+            .size(side)
+            .flex_none()
+            .border_1()
+            .border_color(c.border_input)
+            .when_some(current, |this, colour| this.bg(rgb(colour)));
+        let swatches = self.presets.into_iter().enumerate().map(|(ix, colour)| {
+            let (model, on_pick) = (self.model.clone(), self.on_pick.clone());
+            let chosen = current == Some(colour);
+            div()
+                .id(ElementId::NamedInteger("swatch".into(), ix as u64))
+                .size(side)
+                .flex_none()
+                .bg(rgb(colour))
+                .map(|this| if chosen { this.border_2().border_color(c.text_strong) } else { this.border_1().border_color(c.border) })
+                .when(!disabled, |this| {
+                    this.cursor(CursorStyle::PointingHand).on_click(move |_, window, cx| {
+                        let hex = format!("#{colour:06x}");
+                        model.set_text(hex.clone(), window, cx);
+                        if let Some(handler) = &on_pick {
+                            handler(&hex, window, cx);
+                        }
+                    })
+                })
+        });
+        row()
+            .id(self.id)
+            .gap(m.space_2)
+            .when(disabled, |this| this.opacity(0.6))
+            .child(preview)
+            .child(div().w(px(110.)).flex_none().child(Input::new(&self.model).mono().invalid(current.is_none()).disabled(disabled)))
+            .children(swatches)
     }
 }
 

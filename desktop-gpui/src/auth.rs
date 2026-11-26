@@ -241,7 +241,7 @@ impl AuthStore {
 /// The steps of signing in, run on the service's threads.
 pub mod flows {
     use motodesk_client::auth::{self, RegisterPayload};
-    use motodesk_client::local_account::{self, SetupPayload};
+    use motodesk_client::local_account::{self, PromotePayload, SetupPayload};
     use motodesk_client::sync::BootstrapResult;
     use motodesk_client::{ApiResult, Client, PublicUser, TokenBundle};
 
@@ -322,6 +322,14 @@ pub mod flows {
         // The key is shown, not saved with the session.
         client.set_tokens(Some(reply.bundle.clone()));
         Ok(SignedIn { bundle: reply.bundle, recovery_key: reply.recovery_key, bootstrap: None })
+    }
+
+    /// Put a local network online: the cloud creates the company, and from here on the
+    /// session is the cloud's.
+    pub async fn go_online(client: Client, payload: PromotePayload) -> ApiResult<SignedIn> {
+        let bundle = local_account::promote_to_online(&client, &payload).await?;
+        client.set_tokens(Some(bundle.clone()));
+        Ok(SignedIn::plain(bundle))
     }
 
     pub async fn sign_in_online(client: Client, identifier: String, password: String) -> ApiResult<SignedIn> {

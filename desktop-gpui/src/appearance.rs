@@ -5,7 +5,8 @@
 //! The corner setting (`system.radius`) is not read: corners are square.
 
 use motodesk_client::settings::AppSetting;
-use motodesk_ui::{DEFAULT_ACCENT, Density, Mode, parse_hex};
+use motodesk_ui::gpui::{App, WindowAppearance};
+use motodesk_ui::{DEFAULT_ACCENT, Density, Mode, UiTheme, parse_hex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Appearance {
@@ -28,6 +29,17 @@ pub fn from_settings(settings: &[AppSetting], system_is_dark: bool) -> Appearanc
             Density::Regular
         },
     }
+}
+
+/// Give the whole app the look these settings ask for.
+pub fn apply(settings: &[AppSetting], cx: &mut App) {
+    let system_is_dark = matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
+    let look = from_settings(settings, system_is_dark);
+    UiTheme::update(cx, |theme| {
+        theme.mode = look.mode;
+        theme.accent = look.accent;
+        theme.density = look.density;
+    });
 }
 
 #[cfg(test)]

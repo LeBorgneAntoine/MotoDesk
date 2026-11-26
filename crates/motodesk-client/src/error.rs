@@ -56,6 +56,10 @@ impl ApiError {
         self.status == 401
     }
 
+    pub fn is_not_found(&self) -> bool {
+        self.status == 404
+    }
+
     pub fn is_network(&self) -> bool {
         self.status == 0
     }

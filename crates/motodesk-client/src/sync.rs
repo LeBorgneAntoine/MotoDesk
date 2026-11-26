@@ -30,6 +30,7 @@ pub struct BootstrapResult {
     pub categories: i64,
     pub templates: i64,
     pub sales: i64,
+    pub workshop_orders: i64,
     /// Rows the cloud sent that this device could not store (logged on the device).
     pub skipped: i64,
 }
@@ -72,6 +73,120 @@ pub struct SyncNowResult {
 /// Fast push/pull with the cloud (local reads stay instant).
 pub async fn sync_now(client: &Client) -> ApiResult<SyncNowResult> {
     client.call(Method::POST, "/api/sync/now").public().send().await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ForceResyncResult {
+    #[serde(default)]
+    pub bootstrap: BootstrapResult,
+    #[serde(default)]
+    pub cloud_sync_ok: bool,
+}
+
+impl ForceResyncResult {
+    /// One line telling what the import brought in.
+    pub fn message(&self) -> String {
+        let b = &self.bootstrap;
+        let mut line = format!(
+            "Import cloud : {} client(s) · {} produit(s) · {} véhicule(s) · {} document(s) · {} OR",
+            b.clients, b.products, b.vehicles, b.sales, b.workshop_orders
+        );
+        if b.skipped > 0 {
+            line.push_str(&format!(" · {} ligne(s) ignorée(s)", b.skipped));
+        }
+        line
+    }
+}
+
+/// Full re-import from the cloud: slow, for a local database that is empty or damaged.
+pub async fn force_import_from_cloud(client: &Client) -> ApiResult<ForceResyncResult> {
+    client.call(Method::POST, "/api/sync/force-resync").public().send().await
+}
+
+/// Send the changes the cloud refused again now, rather than when their back-off ends.
+/// Answers how many are being sent.
+pub async fn retry_refused(client: &Client) -> ApiResult<i64> {
+    #[derive(Deserialize)]
+    struct Retrying {
+        #[serde(default)]
+        retrying: i64,
+    }
+    let answer: Retrying = client.call(Method::POST, "/api/sync/retry-refused").send().await?;
+    Ok(answer.retrying)
+}
+
+/// Another PC of the shop, seen on the local network.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct LanPeer {
+    pub device_id: String,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: i64,
+}
+
+/// Where the sync of this PC stands, in detail (port of `SyncDiagnostics` in `meshAdmin.ts`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Diagnostics {
+    pub device_id: String,
+    pub lan_peers: Vec<LanPeer>,
+    pub pending_cloud_ops: i64,
+    pub last_cloud_push_at: Option<String>,
+    pub last_cloud_push_error: Option<String>,
+    pub cloud_backoff_until: Option<String>,
+    pub last_lan_push_at: Option<String>,
+    pub cloud_reachable: bool,
+    pub cloud_url: String,
+    /// A release build pointing at its own computer: it can sync with nothing.
+    pub cloud_url_misconfigured: bool,
+    /// Changes the cloud refused, waiting to be tried again; they do not block the others.
+    pub refused_ops: i64,
+    pub refused_latest: Option<String>,
+    /// This installation has no cloud: it is run standalone and can be put online.
+    pub standalone: bool,
+    /// Whether the PCs of the shop share their key (signed in and synced once).
+    pub mesh_secret_set: bool,
+}
+
+impl Diagnostics {
+    /// The identifier of this PC, cut to what fits a tile.
+    pub fn short_device_id(&self) -> String {
+        short_id(&self.device_id)
+    }
+}
+
+/// The first characters of an identifier, with a mark that there is more.
+pub fn short_id(id: &str) -> String {
+    let start: String = id.chars().take(8).collect();
+    if id.chars().count() > 8 { format!("{start}…") } else { start }
+}
+
+pub async fn diagnostics(client: &Client) -> ApiResult<Diagnostics> {
+    client.call(Method::GET, "/api/sync/diagnostics").public().send().await
+}
+
+#[derive(Deserialize)]
+struct StaticPeers {
+    #[serde(default)]
+    peers: Vec<String>,
+}
+
+/// The PCs to reach by address, for a network that hides them from one another.
+pub async fn static_peers(client: &Client) -> ApiResult<Vec<String>> {
+    let answer: StaticPeers = client.call(Method::GET, "/mesh/static-peers").public().send().await?;
+    Ok(answer.peers)
+}
+
+pub async fn set_static_peers(client: &Client, peers: &[String]) -> ApiResult<Vec<String>> {
+    let body = serde_json::json!({ "peers": peers });
+    let answer: StaticPeers = client.call(Method::PUT, "/mesh/static-peers").public().json(&body).send().await?;
+    Ok(answer.peers)
+}
+
+/// What was typed in the list of addresses, one per line or separated by commas.
+pub fn parse_static_peers(typed: &str) -> Vec<String> {
+    typed.split(['\n', '\r', ',']).map(str::trim).filter(|peer| !peer.is_empty()).map(str::to_string).collect()
 }
 
 #[cfg(test)]

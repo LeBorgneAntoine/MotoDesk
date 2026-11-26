@@ -21,7 +21,14 @@ pub struct RegisterPayload {
 
 /// Hand the session to the local server, which keeps it for offline `/me` and for its own
 /// cloud sync. Best effort: the local server may still be starting.
+///
+/// A session of a local network is never handed over: it is the service's own record, and
+/// sending it back replaces that record with one the service no longer recognises, which
+/// signs the user out.
 pub async fn sync_session_to_local(client: &Client, bundle: &TokenBundle) {
+    if bundle.user.is_local() {
+        return;
+    }
     let _ = client.call(Method::POST, "/api/auth/sync-session").public().json(bundle).done().await;
 }
 
