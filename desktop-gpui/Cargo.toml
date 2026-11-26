@@ -27,7 +27,7 @@ serde_json = { workspace = true }
 tray-icon = { version = "0.25", default-features = false }
 auto-launch = "0.6"
 raw-window-handle = "0.6"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net"] }
@@ -36,3 +36,8 @@ rand = "0.8"
 # examples/team_cloud.rs stands in for the cloud's team service.
 axum = "0.7"
 hex = "0.4"
+# examples/release_server.rs stands in for the release server: a manifest, and an installer
+# served a piece at a time, signed with a key made on the spot.
+minisign = "0.7"
+base64 = "0.22"
+futures-util = "0.3"

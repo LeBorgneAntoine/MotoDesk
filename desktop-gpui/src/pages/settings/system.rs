@@ -14,6 +14,7 @@ use serde_json::Value;
 use super::registry::{AUTO_BACKUP, BACKUP_FREQUENCY, def_by_key, same};
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
+use crate::pages::updates::UpdatesCard;
 
 /// What the confirmation of a restore says: which file, from when, and what is lost.
 fn restore_warning(file: &BackupFile) -> String {
@@ -46,6 +47,8 @@ pub struct SystemView {
     busy: bool,
     /// Set once a restore is queued: from then on the only sensible step is to restart.
     restore_note: Option<String>,
+    /// The running version and the look for a newer one: a card with a life of its own.
+    updates: Entity<UpdatesCard>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -95,6 +98,7 @@ impl SystemView {
             restore_target: None,
             busy: false,
             restore_note: None,
+            updates: cx.new(UpdatesCard::new),
             _subscriptions: subscriptions,
         };
         view.load(window, cx);
@@ -560,6 +564,7 @@ impl Render for SystemView {
             .child(self.export_card(&status, cx))
             .child(self.files(&status, cx))
             .children(self.restore_target.clone().map(|file| self.restore_card(&file, cx)))
+            .child(self.updates.clone())
             .children(Self::diagnostics(cx))
     }
 }

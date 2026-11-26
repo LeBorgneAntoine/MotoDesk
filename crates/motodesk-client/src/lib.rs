@@ -39,6 +39,7 @@ pub mod templates;
 pub mod token_store;
 pub mod transport;
 pub mod types;
+pub mod updates;
 pub mod workshop;
 
 pub use cloud::Cloud;
