@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use sqlparser::ast::{Query as SqlQuery, SetExpr, Statement};
 use sqlparser::dialect::SQLiteDialect;
 use sqlparser::parser::Parser;
-use sqlx::{Column, Row};
+use sqlx::{Column, Row, TypeInfo, ValueRef};
 use uuid::Uuid;
 
 use crate::local_server::auth_guard::AdminUser;
@@ -519,20 +519,29 @@ fn ensure_table_allowed_for_write(table: &str, write: bool) -> LocalResult<()> {
     Ok(())
 }
 
+/// One cell as JSON, decoded by what SQLite actually stored in it.
+///
+/// NULL is looked at first: sqlx decodes a NULL as any type without complaint
+/// (`try_get::<i64>` gives 0), so "try each type until one works" turned every
+/// empty cell into the number 0. For a value that is there, its storage class
+/// decides (not the column's declared type, and not which decode happens to
+/// succeed), so text made of digits stays text with its leading zeros.
 fn cell_to_value(row: &sqlx::sqlite::SqliteRow, i: usize) -> Value {
-    if let Ok(v) = row.try_get::<i64, _>(i) {
-        return json!(v);
+    let Ok(raw) = row.try_get_raw(i) else {
+        return Value::Null;
+    };
+    if raw.is_null() {
+        return Value::Null;
     }
-    if let Ok(v) = row.try_get::<f64, _>(i) {
-        return json!(v);
+    // For a non-NULL value this is the storage class: INTEGER, REAL, TEXT or BLOB.
+    let stored = raw.type_info();
+    match stored.name() {
+        "INTEGER" => row.try_get::<i64, _>(i).map(|v| json!(v)).unwrap_or(Value::Null),
+        "REAL" => row.try_get::<f64, _>(i).map(|v| json!(v)).unwrap_or(Value::Null),
+        "TEXT" => row.try_get::<String, _>(i).map(Value::String).unwrap_or(Value::Null),
+        // A BLOB (a logo, a key) has no useful JSON form; it was null before too.
+        _ => Value::Null,
     }
-    if let Ok(v) = row.try_get::<bool, _>(i) {
-        return json!(v);
-    }
-    if let Ok(v) = row.try_get::<String, _>(i) {
-        return Value::String(v);
-    }
-    Value::Null
 }
 
 async fn rows_to_json(
@@ -597,31 +606,40 @@ async fn preview_table(
         .clamp(1, MAX_PREVIEW_ROWS);
     let offset = q.offset.unwrap_or(0).max(0);
     let has_soft = table_has_column(&state, &name, "deleted_at").await?;
-    let total = count_rows(&state, &name, has_soft).await?;
 
-    let mut sql = format!("SELECT * FROM \"{name}\"");
+    // One WHERE clause for the page and for its count, so `total` is the number
+    // of rows the search found and the pager cannot offer a page that is empty.
+    let mut filter = String::new();
     if has_soft {
-        sql.push_str(" WHERE deleted_at IS NULL");
+        filter.push_str(" WHERE deleted_at IS NULL");
     }
-    let mut bind_q = false;
-    if let Some(_needle) = q.q.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let mut like: Option<String> = None;
+    if let Some(needle) = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         let cols = text_columns(&state, &name).await?;
         if !cols.is_empty() {
             let preds: Vec<String> = cols.iter().map(|c| format!("\"{c}\" LIKE $1")).collect();
             let joiner = if has_soft { " AND (" } else { " WHERE (" };
-            sql.push_str(joiner);
-            sql.push_str(&preds.join(" OR "));
-            sql.push(')');
-            bind_q = true;
+            filter.push_str(joiner);
+            filter.push_str(&preds.join(" OR "));
+            filter.push(')');
+            like = Some(format!("%{}%", needle.replace('%', "\\%")));
         }
     }
-    sql.push_str(&format!(" LIMIT {limit} OFFSET {offset}"));
 
-    let rows = if bind_q {
-        let like = format!("%{}%", q.q.as_ref().unwrap().trim().replace('%', "\\%"));
-        sqlx::query(&sql).bind(like).fetch_all(&state.db).await?
-    } else {
-        sqlx::query(&sql).fetch_all(&state.db).await?
+    let count_sql = format!("SELECT COUNT(*) FROM \"{name}\"{filter}");
+    let page_sql = format!("SELECT * FROM \"{name}\"{filter} LIMIT {limit} OFFSET {offset}");
+    let (total, rows) = match &like {
+        Some(like) => {
+            let (total,): (i64,) =
+                sqlx::query_as(&count_sql).bind(like).fetch_one(&state.db).await?;
+            let rows = sqlx::query(&page_sql).bind(like).fetch_all(&state.db).await?;
+            (total, rows)
+        }
+        None => {
+            let (total,): (i64,) = sqlx::query_as(&count_sql).fetch_one(&state.db).await?;
+            let rows = sqlx::query(&page_sql).fetch_all(&state.db).await?;
+            (total, rows)
+        }
     };
 
     let (columns, json_rows) = rows_to_json(rows).await?;
@@ -1185,5 +1203,125 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(before.0, after.0);
+    }
+
+    /// A client written the way the app writes one, with only the columns a
+    /// test cares about; everything else is left to the schema (NULL or default).
+    async fn insert_client(state: &SharedState, id: &str, last_name: &str, extra: &[(&str, &str)]) {
+        let mut cols = String::from("id, last_name, created_at, updated_at");
+        let mut marks = String::from("$1, $2, $3, $3");
+        for (n, (col, _)) in extra.iter().enumerate() {
+            cols.push_str(&format!(", {col}"));
+            marks.push_str(&format!(", ${}", n + 4));
+        }
+        let sql = format!("INSERT INTO clients ({cols}) VALUES ({marks})");
+        let mut query = sqlx::query(&sql)
+            .bind(id)
+            .bind(last_name)
+            .bind("2026-01-15T10:00:00+00:00");
+        for (_, value) in extra {
+            query = query.bind(*value);
+        }
+        query.execute(&state.db).await.unwrap();
+    }
+
+    async fn preview(state: &SharedState, table: &str, q: Option<&str>, limit: Option<i64>) -> TablePreview {
+        let admin = require_admin(state).await.unwrap();
+        let Json(page) = preview_table(
+            State(state.clone()),
+            admin,
+            Path(table.to_string()),
+            Query(PreviewQuery { q: q.map(str::to_string), limit, offset: None }),
+        )
+        .await
+        .unwrap();
+        page
+    }
+
+    #[tokio::test]
+    async fn an_empty_cell_comes_back_as_null_not_as_zero() {
+        let state = admin_state().await;
+        // phone (TEXT), credit_limit_cents (INTEGER) and deleted_at (a date) are
+        // left NULL; credit_blocked is a real 0 and must stay one.
+        insert_client(&state, "c-null", "Sansrien", &[]).await;
+
+        let page = preview(&state, "clients", None, None).await;
+        let row = &page.rows[0];
+        for col in ["phone", "credit_limit_cents", "deleted_at", "first_name", "notes"] {
+            assert_eq!(row[col], Value::Null, "{col} is NULL in the database");
+        }
+        assert_eq!(row["credit_blocked"], json!(0), "a stored 0 is still a 0");
+        assert_eq!(row["row_version"], json!(1));
+        assert_eq!(row["last_name"], json!("Sansrien"));
+
+        // The same decoding serves the SQL console and the samples of a write preview.
+        let rows = sqlx::query("SELECT deleted_at, credit_limit_cents, NULL AS computed FROM clients")
+            .fetch_all(&state.db)
+            .await
+            .unwrap();
+        let (_, json_rows) = rows_to_json(rows).await.unwrap();
+        assert_eq!(
+            json_rows[0],
+            json!({ "deleted_at": null, "credit_limit_cents": null, "computed": null })
+        );
+    }
+
+    #[tokio::test]
+    async fn text_made_of_digits_stays_text() {
+        let state = admin_state().await;
+        insert_client(
+            &state,
+            "c-digits",
+            "Chiffres",
+            &[("address", "35000"), ("phone", "0612345678"), ("legacy_ref", "01234")],
+        )
+        .await;
+
+        let page = preview(&state, "clients", None, None).await;
+        let row = &page.rows[0];
+        assert_eq!(row["address"], json!("35000"));
+        assert_eq!(row["phone"], json!("0612345678"));
+        assert_eq!(row["legacy_ref"], json!("01234"));
+
+        // What a query computes follows the value, not the column it came from.
+        let rows = sqlx::query(
+            "SELECT '007' AS txt, 7 AS whole, 1.5 AS frac, CAST(phone AS INTEGER) AS as_int FROM clients",
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap();
+        let (_, json_rows) = rows_to_json(rows).await.unwrap();
+        assert_eq!(
+            json_rows[0],
+            json!({ "txt": "007", "whole": 7, "frac": 1.5, "as_int": 612345678 })
+        );
+    }
+
+    #[tokio::test]
+    async fn total_is_the_number_of_rows_the_search_found() {
+        let state = admin_state().await;
+        insert_client(&state, "c-1", "Dupont", &[]).await;
+        insert_client(&state, "c-2", "Martin", &[("notes", "ami de Dupont")]).await;
+        insert_client(&state, "c-3", "Bernard", &[]).await;
+        insert_client(&state, "c-4", "Dupont", &[("deleted_at", "2026-02-01T00:00:00+00:00")]).await;
+
+        // No search: the table's count (active rows only, as before).
+        let all = preview(&state, "clients", None, None).await;
+        assert_eq!(all.total, 3);
+        assert_eq!(all.rows.len(), 3);
+        let blank = preview(&state, "clients", Some("   "), None).await;
+        assert_eq!(blank.total, 3, "a blank search is no search");
+
+        // A search: the rows that match, whatever the page size.
+        let found = preview(&state, "clients", Some("dupont"), None).await;
+        assert_eq!(found.rows.len(), 2);
+        assert_eq!(found.total, 2);
+        let first_page = preview(&state, "clients", Some("dupont"), Some(1)).await;
+        assert_eq!(first_page.rows.len(), 1);
+        assert_eq!(first_page.total, 2, "total counts the matches, not the page");
+
+        let none = preview(&state, "clients", Some("zzz-introuvable"), None).await;
+        assert_eq!(none.rows.len(), 0);
+        assert_eq!(none.total, 0);
     }
 }
