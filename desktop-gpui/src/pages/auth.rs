@@ -3,17 +3,25 @@
 //!
 //! One card shows one of four forms. The tabs choose between signing in and signing up; the
 //! switch under the card chooses between an online account and a local one.
+//!
+//! Two ways back in hang from the local sign-in (port of `RecoverAccess` and
+//! `RestoreFirstRun`): the recovery key when a password is lost, and a backup file on a PC
+//! with nothing set up.
+
+use std::path::PathBuf;
 
 use motodesk_client::ApiResult;
 use motodesk_client::auth::RegisterPayload;
+use motodesk_client::backup;
 use motodesk_client::local_account::{self, AccessMode, LocalState, SetupPayload};
+use motodesk_client::recovery::RecoverPayload;
 use motodesk_client::sync::BootstrapResult;
 use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
 
 use crate::auth::{AuthStore, flows};
-use crate::backend::ApiExt as _;
+use crate::backend::{ApiExt as _, PickExt as _};
 use crate::format::humanize_error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,7 +56,35 @@ pub struct AuthPage {
     new_local_password: TextModel,
     new_local_confirm: TextModel,
 
+    // « Mot de passe perdu »: the recovery key gives one account a new password.
+    recover_key: TextModel,
+    recover_username: TextModel,
+    recover_password: TextModel,
+    recover_confirm: TextModel,
+    recovering: bool,
+    recover_error: Option<SharedString>,
+    // « Restaurer une sauvegarde », on a PC with nothing set up.
+    restore_file: Option<PathBuf>,
+    restore_password: TextModel,
+    restoring: bool,
+    restore_error: Option<SharedString>,
+    /// The backup is in place for the next start: the only step left is to restart.
+    restore_queued: bool,
+
     _subscriptions: Vec<Subscription>,
+}
+
+/// Why the form of « Mot de passe perdu » cannot be sent, or `None` when it can.
+fn recover_problem(key: &str, username: &str, password: &str, confirm: &str) -> Option<String> {
+    if key.trim().is_empty() || username.trim().is_empty() {
+        return Some("Saisissez la clé et l'identifiant du compte.".into());
+    }
+    local_account::validate_new_local_account(username, password, confirm)
+}
+
+/// Whether a chosen file can be a backup of Motodesk, by its name.
+fn looks_like_a_backup(path: &std::path::Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| ["mgbak", "zip"].contains(&extension.to_lowercase().as_str()))
 }
 
 impl AuthPage {
@@ -75,6 +111,17 @@ impl AuthPage {
             new_username: line(window, cx),
             new_local_password: secret(window, cx),
             new_local_confirm: secret(window, cx),
+            recover_key: TextModel::builder().placeholder("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX").build(window, cx),
+            recover_username: line(window, cx),
+            recover_password: secret(window, cx),
+            recover_confirm: secret(window, cx),
+            recovering: false,
+            recover_error: None,
+            restore_file: None,
+            restore_password: secret(window, cx),
+            restoring: false,
+            restore_error: None,
+            restore_queued: false,
             _subscriptions: Vec::new(),
         };
 
@@ -104,6 +151,19 @@ impl AuthPage {
                 })
             })
             .collect();
+        // The two dialogs have their own Enter.
+        for field in [&page.recover_key, &page.recover_username, &page.recover_password, &page.recover_confirm] {
+            subscriptions.push(field.on_event(window, cx, |this, event, window, cx| {
+                if matches!(event, TextEvent::Submitted { .. }) {
+                    this.submit_recover(window, cx);
+                }
+            }));
+        }
+        subscriptions.push(page.restore_password.on_event(window, cx, |this, event, window, cx| match event {
+            TextEvent::Submitted { .. } => this.submit_restore(window, cx),
+            TextEvent::Changed => cx.notify(),
+            _ => {}
+        }));
         subscriptions.push(cx.observe(&AuthStore::global(cx), |_, _, cx| cx.notify()));
         page._subscriptions = subscriptions;
         page
@@ -215,6 +275,174 @@ impl AuthPage {
         });
     }
 
+    // ---- a lost password ----------------------------------------------------------------------
+
+    fn open_recover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.recover_error = None;
+        let (for_body, for_footer) = (cx.entity(), cx.entity());
+        Modal::new("Mot de passe perdu").width(px(520.)).keep_on_overlay_click().open(
+            window,
+            cx,
+            move |_, cx| {
+                let m = cx.ui().m;
+                let page = for_body.read(cx);
+                element(
+                    col()
+                        .gap(m.space_3)
+                        .child(Alert::info().child(
+                            "Employé ? Demandez un nouveau mot de passe à un administrateur. La clé de récupération sert quand aucun \
+                             administrateur ne peut plus se connecter : le compte indiqué recevra le nouveau mot de passe et le rôle \
+                             d'administrateur.",
+                        ))
+                        .children(page.recover_error.clone().map(|error| Alert::danger().child(error)))
+                        .child(FormField::new("Clé de récupération").required().child(Input::new(&page.recover_key).mono()))
+                        .child(FormField::new("Identifiant du compte").required().child(Input::new(&page.recover_username)))
+                        .child(
+                            FormField::new("Nouveau mot de passe")
+                                .required()
+                                .hint("Minimum 8 caractères.")
+                                .child(Input::new(&page.recover_password).reveal_toggle()),
+                        )
+                        .child(FormField::new("Confirmer le mot de passe").required().child(Input::new(&page.recover_confirm).reveal_toggle())),
+                )
+            },
+            move |_, cx| {
+                let saving = for_footer.read(cx).recovering;
+                let page = for_footer.clone();
+                vec![
+                    element(Button::new("recover-cancel").ghost().label("Annuler").disabled(saving).on_click(|_, window, cx| close_modal(window, cx))),
+                    element(Button::new("recover-submit").primary().label("Reprendre la main").loading(saving).on_click(move |_, window, cx| {
+                        page.update(cx, |this, cx| this.submit_recover(window, cx))
+                    })),
+                ]
+            },
+        );
+    }
+
+    fn submit_recover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.recovering {
+            return;
+        }
+        let (key, username) = (self.recover_key.text(cx), self.recover_username.text(cx).trim().to_string());
+        let (password, confirm) = (self.recover_password.text(cx), self.recover_confirm.text(cx));
+        self.recover_error = recover_problem(&key, &username, &password, &confirm).map(Into::into);
+        if self.recover_error.is_some() {
+            cx.notify();
+            return;
+        }
+        self.recovering = true;
+        cx.notify();
+        let payload = RecoverPayload { recovery_key: key, username, password, confirm };
+        cx.api_in(
+            window,
+            move |client| flows::recover_local(client, payload),
+            |this, result, window, cx| {
+                this.recovering = false;
+                match result {
+                    Ok(session) => {
+                        for field in [&this.recover_key, &this.recover_username, &this.recover_password, &this.recover_confirm] {
+                            field.clear(window, cx);
+                        }
+                        close_modal(window, cx);
+                        // The key that replaces the one just used is shown next, to be written down.
+                        AuthStore::global(cx).update(cx, |auth, cx| auth.adopt(session, cx));
+                    }
+                    Err(error) => this.recover_error = Some(humanize_error(&error, "Erreur inattendue, veuillez réessayer.").into()),
+                }
+                cx.notify();
+            },
+        );
+    }
+
+    // ---- a backup, on a PC with nothing set up -------------------------------------------------
+
+    fn open_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_error = None;
+        let (for_body, for_footer) = (cx.entity(), cx.entity());
+        Modal::new("Restaurer une sauvegarde").width(px(520.)).keep_on_overlay_click().open(
+            window,
+            cx,
+            move |_, cx| {
+                let theme = cx.ui().clone();
+                let (c, m) = (theme.colors, theme.m);
+                let page = for_body.read(cx);
+                let body = col().gap(m.space_3).children(page.restore_error.clone().map(|error| Alert::danger().child(error)));
+                if page.restore_queued {
+                    return element(body.child(Alert::success().child(
+                        "La sauvegarde est prête. Motodesk doit redémarrer ; connectez-vous ensuite avec un compte qui existait au moment de la sauvegarde.",
+                    )));
+                }
+                let name = page.restore_file.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned());
+                let choose = for_body.clone();
+                element(
+                    body.child(div().fs(m.fs_sm).text_color(c.text).child("Choisissez le fichier .mgbak de l'atelier."))
+                        .child(
+                            row()
+                                .gap(m.space_3)
+                                .items_center()
+                                .child(Button::new("restore-choose").icon(IconName::FolderOpen).label("Choisir le fichier…").disabled(page.restoring).on_click(
+                                    move |_, window, cx| choose.update(cx, |this, cx| this.choose_backup(window, cx)),
+                                ))
+                                .children(name.map(|name| div().min_w_0().fs(m.fs_sm).font_family(FONT_MONO).text_color(c.text_muted).child(name))),
+                        )
+                        .child(FormField::new("Mot de passe de la sauvegarde").required().child(Input::new(&page.restore_password).reveal_toggle())),
+                )
+            },
+            move |_, cx| {
+                let page = for_footer.read(cx);
+                let (busy, queued) = (page.restoring, page.restore_queued);
+                let ready = page.restore_file.is_some() && !page.restore_password.text(cx).is_empty();
+                if queued {
+                    return vec![element(Button::new("restore-restart").primary().label("Redémarrer").on_click(|_, _, cx| crate::app::restart(cx)))];
+                }
+                let send = for_footer.clone();
+                vec![
+                    element(Button::new("restore-cancel").ghost().label("Annuler").disabled(busy).on_click(|_, window, cx| close_modal(window, cx))),
+                    element(Button::new("restore-submit").primary().label("Restaurer").loading(busy).disabled(!ready).on_click(move |_, window, cx| {
+                        send.update(cx, |this, cx| this.submit_restore(window, cx))
+                    })),
+                ]
+            },
+        );
+    }
+
+    fn choose_backup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.restore_error = None;
+        cx.pick_files(window, "Choisir une sauvegarde Motodesk", |this, chosen, _, cx| {
+            match chosen.map(|paths| paths.into_iter().next()) {
+                Ok(Some(path)) if looks_like_a_backup(&path) => this.restore_file = Some(path),
+                Ok(Some(_)) => this.restore_error = Some("Ce fichier n'est pas une sauvegarde Motodesk (.mgbak).".into()),
+                // The dialog was closed: the file chosen before stays.
+                Ok(None) => {}
+                Err(error) => this.restore_error = Some(format!("Impossible d'ouvrir le choix de fichier : {error}").into()),
+            }
+            cx.notify();
+        });
+    }
+
+    fn submit_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let password = self.restore_password.text(cx);
+        let Some(path) = self.restore_file.clone().filter(|_| !self.restoring && !self.restore_queued && !password.is_empty()) else { return };
+        self.restoring = true;
+        self.restore_error = None;
+        cx.notify();
+        cx.api_in(
+            window,
+            move |client| async move { backup::restore_on_first_run(&client, &path.to_string_lossy(), &password).await },
+            |this, result, window, cx| {
+                this.restoring = false;
+                match result {
+                    Ok(_) => {
+                        this.restore_password.clear(window, cx);
+                        this.restore_queued = true;
+                    }
+                    Err(error) => this.restore_error = Some(humanize_error(&error, "La restauration a échoué.").into()),
+                }
+                cx.notify();
+            },
+        );
+    }
+
     // ---- the four forms ---------------------------------------------------------------------
 
     fn head(title: &'static str, subtitle: &'static str, cx: &App) -> Div {
@@ -297,6 +525,12 @@ impl AuthPage {
             LocalState::Tied => {
                 form.child(Alert::info().child("Ce poste est déjà lié à une entreprise en ligne : repassez sur « En ligne »."))
             }
+            // A backup waits for the next start: nothing else is worth doing here.
+            _ if self.restore_queued => form.child(
+                Alert::success().title("Sauvegarde prête").child("Motodesk doit redémarrer pour la mettre en place.").child(
+                    row().mt(m.space_1).child(Button::new("restore-restart-page").primary().small().label("Redémarrer").on_click(|_, _, cx| crate::app::restart(cx))),
+                ),
+            ),
             _ => form
                 .children(self.error.clone().map(|e| Alert::danger().child(e)))
                 .child(FormField::new("Identifiant").required().child(Input::new(&self.username)))
@@ -308,6 +542,16 @@ impl AuthPage {
                     ))
                 })
                 .child(self.submit_button(if joining { "Rejoindre le réseau" } else { "Se connecter" }, cx))
+                .when(!joining, |this| {
+                    this.child(row().child(
+                        Button::new("to-recover").link().small().label("Mot de passe perdu ?").on_click(cx.listener(|this, _, window, cx| this.open_recover(window, cx))),
+                    ))
+                })
+                .when(joining, |this| {
+                    this.child(row().child(
+                        Button::new("to-restore").link().small().label("Restaurer une sauvegarde").on_click(cx.listener(|this, _, window, cx| this.open_restore(window, cx))),
+                    ))
+                })
                 .when(joining, |this| {
                     this.child(
                         row().gap(m.space_2).fs(m.fs_sm).child("Pas encore de réseau dans cet atelier ?").child(
@@ -491,5 +735,28 @@ impl Render for AuthPage {
                     .child(access),
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{looks_like_a_backup, recover_problem};
+
+    #[test]
+    fn a_lost_password_needs_the_key_the_account_and_a_password_typed_twice() {
+        assert_eq!(recover_problem(" ", "camille", "mot de passe", "mot de passe").as_deref(), Some("Saisissez la clé et l'identifiant du compte."));
+        assert_eq!(recover_problem("ABCDE-FGHJK", " ", "mot de passe", "mot de passe").as_deref(), Some("Saisissez la clé et l'identifiant du compte."));
+        assert!(recover_problem("ABCDE-FGHJK", "camille", "court", "court").is_some(), "a password too short");
+        assert!(recover_problem("ABCDE-FGHJK", "camille", "mot de passe", "autre chose").is_some(), "two different passwords");
+        assert_eq!(recover_problem("ABCDE-FGHJK", "camille", "mot de passe", "mot de passe"), None);
+    }
+
+    #[test]
+    fn a_backup_is_known_by_its_name() {
+        assert!(looks_like_a_backup(Path::new(r"D:\Sauvegardes\motodesk-2026-11-20.mgbak")));
+        assert!(looks_like_a_backup(Path::new("atelier.MGBAK")) && looks_like_a_backup(Path::new("atelier.zip")));
+        assert!(!looks_like_a_backup(Path::new("atelier.pdf")) && !looks_like_a_backup(Path::new("mgbak")));
     }
 }

@@ -189,6 +189,49 @@ pub fn parse_static_peers(typed: &str) -> Vec<String> {
     typed.split(['\n', '\r', ',']).map(str::trim).filter(|peer| !peer.is_empty()).map(str::to_string).collect()
 }
 
+// ---- a base older than what the cloud holds ---------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct RestoreGap {
+    #[serde(default)]
+    missing: i64,
+}
+
+/// Changes the cloud holds from this PC that this database lacks: what a restored backup
+/// looks like from the inside. 0 when there is nothing to report.
+pub async fn restore_gap(client: &Client) -> ApiResult<i64> {
+    client.get::<RestoreGap>("/api/sync/restore-gap").await.map(|gap| gap.missing)
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct RecoveryResult {
+    pub recovered: bool,
+    pub applied: i64,
+    pub closures_restored: i64,
+}
+
+impl RecoveryResult {
+    /// What to tell the user once it is done.
+    pub fn message(&self) -> String {
+        if !self.recovered {
+            return "Rien à récupérer.".into();
+        }
+        let closures = if self.closures_restored > 0 { format!(", {} clôture(s) rétablie(s)", self.closures_restored) } else { String::new() };
+        format!("{} modification(s) récupérée(s) du cloud{closures}. Vérifiez le registre fiscal (Facturation › Registre).", self.applied)
+    }
+}
+
+/// Fetch this PC's own changes back from the cloud and rebuild the fiscal register from them.
+pub async fn recover_from_cloud(client: &Client) -> ApiResult<RecoveryResult> {
+    client.post("/api/sync/recover", &serde_json::json!({})).await
+}
+
+/// Go on without recovering: the notice is not shown again for this gap.
+pub async fn dismiss_restore_gap(client: &Client) -> ApiResult<()> {
+    client.call(Method::POST, "/api/sync/restore-gap/dismiss").done().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -242,6 +242,7 @@ impl AuthStore {
 pub mod flows {
     use motodesk_client::auth::{self, RegisterPayload};
     use motodesk_client::local_account::{self, PromotePayload, SetupPayload};
+    use motodesk_client::recovery::{self, RecoverPayload};
     use motodesk_client::sync::BootstrapResult;
     use motodesk_client::{ApiResult, Client, PublicUser, TokenBundle};
 
@@ -320,6 +321,14 @@ pub mod flows {
     pub async fn set_up_local(client: Client, payload: SetupPayload) -> ApiResult<SignedIn> {
         let reply = local_account::setup(&client, &payload).await?;
         // The key is shown, not saved with the session.
+        client.set_tokens(Some(reply.bundle.clone()));
+        Ok(SignedIn { bundle: reply.bundle, recovery_key: reply.recovery_key, bootstrap: None })
+    }
+
+    /// « Mot de passe perdu »: the recovery key gives one account a new password and the
+    /// administrator's role. The key that replaces the one just used is shown, not saved.
+    pub async fn recover_local(client: Client, payload: RecoverPayload) -> ApiResult<SignedIn> {
+        let reply = recovery::recover_with_key(&client, &payload).await?;
         client.set_tokens(Some(reply.bundle.clone()));
         Ok(SignedIn { bundle: reply.bundle, recovery_key: reply.recovery_key, bootstrap: None })
     }
