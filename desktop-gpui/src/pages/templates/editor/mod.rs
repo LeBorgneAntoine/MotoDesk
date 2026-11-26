@@ -26,6 +26,7 @@ use self::geometry::{Frame, Handle, History, ZOOM_FIT};
 use super::sheet::Shop;
 use crate::backend::{ApiExt as _, SaveExt as _};
 use crate::format::humanize_error;
+use crate::printing;
 
 /// Pixels per millimetre at a zoom of 100 %.
 const BASE_SCALE: f32 = 4.0;
@@ -565,10 +566,8 @@ impl TemplateEditor {
 
     /// Hand the PDF to the program this PC opens PDF files with: that is where it is printed from.
     fn open_pdf(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let folder = std::env::temp_dir().join("motodesk");
-        let path = folder.join(format!("{}.pdf", self.title().replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-")));
-        match std::fs::create_dir_all(&folder).and_then(|()| std::fs::write(&path, self.pdf())) {
-            Ok(()) => cx.open_with_system(&path),
+        match printing::write(self.title(), &self.pdf()) {
+            Ok(path) => printing::open(&path, cx),
             Err(error) => toast::error(format!("Le PDF n'a pas pu être préparé : {error}"), window, cx),
         }
     }

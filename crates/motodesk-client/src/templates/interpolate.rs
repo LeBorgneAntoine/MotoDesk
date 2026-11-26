@@ -44,7 +44,7 @@ pub fn resolve<'a>(path: &str, data: &'a Value) -> Option<&'a Value> {
 }
 
 /// A whole number with a space between thousands: `24680` reads « 24 680 ».
-fn grouped(digits: &str) -> String {
+pub(super) fn grouped(digits: &str) -> String {
     let mut out = String::new();
     for (index, digit) in digits.chars().enumerate() {
         if index > 0 && (digits.len() - index).is_multiple_of(3) {

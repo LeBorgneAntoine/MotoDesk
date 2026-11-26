@@ -5,7 +5,8 @@
 //! journal: from then on the screen offers no form, only a credit note to correct it and the
 //! payments it receives.
 //!
-//! Printing is not here yet: it arrives with the document templates.
+//! A sealed document and a quote are printed from here, as a PDF handed to the PC's reader
+//! (see `motodesk_client::templates::print` for what the fiscal journal keeps of it).
 
 mod forms;
 
@@ -16,6 +17,7 @@ use motodesk_client::clients::{self, ClientListItem, format_client_name};
 use motodesk_client::fiscal::{self, ProfileCheck};
 use motodesk_client::products::{self, ProductListItem};
 use motodesk_client::sales::{self, ListQuery, Payment, Sale, SaleListItem, payment_method_label, status_label};
+use motodesk_client::templates::print::{self, PrintError};
 use motodesk_client::{ApiError, settings, workshop};
 use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
@@ -25,6 +27,7 @@ use self::forms::{PaymentForm, SaleForm};
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
 use crate::pages::lines::{LineEditor, LinesHost, percent};
+use crate::printing;
 use crate::router::Router;
 
 /// How long the list waits after the last keystroke before searching.
@@ -45,6 +48,38 @@ enum Mode {
     View,
     Create,
     Edit,
+}
+
+/// Why a document was not printed, in words.
+fn print_failure(error: PrintError) -> String {
+    match error {
+        PrintError::Draft => "Seul un document validé ou un devis peut être imprimé.".into(),
+        PrintError::NoTemplate(kind) => format!("Aucun modèle de {} n'est défini. Créez-en un dans Modèles.", kind.label().to_lowercase()),
+        PrintError::Service(error) => humanize_error(&error, "Impossible d'imprimer le document."),
+    }
+}
+
+/// What to say once a document is in the reader. `copy` is which copy the journal counted:
+/// `None` for a quote, which the journal does not follow.
+fn printed_message(reference: &str, copy: Option<(bool, i64)>) -> String {
+    match copy {
+        None => format!("Devis {reference} ouvert pour impression."),
+        Some((false, _)) => format!("{reference} ouvert pour impression. L'impression est tracée au journal."),
+        Some((true, number)) => format!("Duplicata n° {number} de {reference} ouvert pour impression. La réimpression est tracée au journal."),
+    }
+}
+
+/// What to say when the PDF could not be written. When the journal has already counted the
+/// print, that is said too: the next one is a copy.
+fn unwritten_message(traced: bool, error: &str) -> String {
+    if traced {
+        format!(
+            "L'impression est tracée au journal, mais le PDF n'a pas pu être écrit : {error}. \
+             La prochaine impression portera la mention DUPLICATA."
+        )
+    } else {
+        format!("Le PDF n'a pas pu être écrit : {error}")
+    }
 }
 
 /// The colour of a status chip.
@@ -720,6 +755,61 @@ impl SalesPage {
         );
     }
 
+    // ---- printing ---------------------------------------------------------------------------
+
+    /// Print the open document: its PDF goes to the program this PC reads PDF files with.
+    ///
+    /// The print of a sealed document is written to the fiscal journal before the page is
+    /// drawn: that entry says whether this is the original or a copy, and a copy carries
+    /// DUPLICATA. Everything that can fail without leaving a trace comes first (the template,
+    /// the customer, the folder the file goes to), so that a failure does not use the
+    /// original up. A quote takes its number here and leaves no trace.
+    fn print(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((id, quote)) = self.sale.as_ref().map(|sale| (sale.id.clone(), sale.is_quote())) else { return };
+        if self.busy {
+            return;
+        }
+        self.busy = true;
+        cx.notify();
+        let asked = id.clone();
+        cx.api_in(
+            window,
+            move |client| async move {
+                let job = print::prepare(&client, &id).await.map_err(print_failure)?;
+                printing::ready().map_err(|error| format!("Le PDF ne peut pas être écrit sur ce poste : {error}"))?;
+                let printed = job.finish(&client).await.map_err(print_failure)?;
+                let path = printing::write(&job.file_stem(printed.trace.as_ref()), &printed.pdf)
+                    .map_err(|error| unwritten_message(printed.trace.is_some(), &error.to_string()))?;
+                Ok::<_, String>((job.sale, printed.trace, path))
+            },
+            move |this, result, window, cx| {
+                this.busy = false;
+                let still_open = this.mode == Mode::View && this.sale.as_ref().is_some_and(|open| open.id == asked);
+                match result {
+                    Ok((sale, trace, path)) => {
+                        printing::open(&path, cx);
+                        let copy = trace.map(|trace| (trace.duplicata, trace.copy_number));
+                        toast::success(printed_message(&sale.title(), copy), window, cx);
+                        if quote && still_open {
+                            this.show_sale(sale, cx);
+                        }
+                    }
+                    Err(message) => {
+                        toast::error(message, window, cx);
+                        // The quote may have taken its number before the failure.
+                        if quote && still_open {
+                            this.reload_sale(cx);
+                        }
+                    }
+                }
+                if quote {
+                    this.load_list(cx);
+                }
+                cx.notify();
+            },
+        );
+    }
+
     // ---- payments ---------------------------------------------------------------------------
 
     fn open_payment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -982,6 +1072,17 @@ impl SalesPage {
         };
         let mut panel = panel.badge(status_label(&sale.status).to_string(), tone);
 
+        // What is handed to a customer: a sealed document, or a quote.
+        if sealed || quote {
+            panel = panel.action(
+                IconButton::new("sale-print", IconName::Printer)
+                    .title(if sealed { "Imprimer — toute copie porte la mention DUPLICATA" } else { "Imprimer le devis" })
+                    .size(IconButtonSize::Md)
+                    .disabled(self.busy)
+                    .on_click(cx.listener(|this, _, window, cx| this.print(window, cx))),
+            );
+        }
+
         // What is not sealed is still a working document.
         if !sealed && !closed_quote {
             panel = panel
@@ -1221,9 +1322,12 @@ impl Render for SalesPage {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: it would bring in GPUI's own `test` attribute in place of Rust's.
+    use motodesk_client::ApiError;
     use motodesk_client::sales::{Payment, SaleLine};
+    use motodesk_client::templates::TemplateKind;
+    use motodesk_client::templates::print::PrintError;
 
-    use super::{Status, line_detail, payment_detail, status_tone};
+    use super::{Status, line_detail, payment_detail, print_failure, printed_message, status_tone, unwritten_message};
 
     #[test]
     fn a_line_says_how_it_is_priced() {
@@ -1254,6 +1358,27 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(payment_detail(&reversal), "06/11/2026 · Chèque · annulation");
+    }
+
+    #[test]
+    fn a_print_says_what_it_was_and_a_failure_says_what_to_do() {
+        assert_eq!(printed_message("DE-2026-C1-00003", None), "Devis DE-2026-C1-00003 ouvert pour impression.");
+        assert_eq!(
+            printed_message("FA-2026-C1-00007", Some((false, 1))),
+            "FA-2026-C1-00007 ouvert pour impression. L'impression est tracée au journal."
+        );
+        assert_eq!(
+            printed_message("FA-2026-C1-00007", Some((true, 2))),
+            "Duplicata n° 2 de FA-2026-C1-00007 ouvert pour impression. La réimpression est tracée au journal."
+        );
+        assert_eq!(print_failure(PrintError::NoTemplate(TemplateKind::Devis)), "Aucun modèle de devis n'est défini. Créez-en un dans Modèles.");
+        let missing = print_failure(PrintError::NoTemplate(TemplateKind::Facture));
+        assert_eq!(missing, "Aucun modèle de facture n'est défini. Créez-en un dans Modèles.");
+        assert!(unwritten_message(true, "disque plein").contains("tracée au journal") && unwritten_message(true, "x").contains("DUPLICATA"));
+        assert_eq!(unwritten_message(false, "disque plein"), "Le PDF n'a pas pu être écrit : disque plein");
+        let refused = ApiError::new(400, "bad_request", "seul un document validé peut être imprimé");
+        assert_eq!(print_failure(PrintError::Service(refused)), "seul un document validé peut être imprimé");
+        assert_eq!(print_failure(PrintError::Service(ApiError::network(""))), "Impossible d'imprimer le document.");
     }
 
     #[test]

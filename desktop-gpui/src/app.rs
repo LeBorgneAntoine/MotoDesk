@@ -8,6 +8,8 @@
 //! It also owns the one dialog that can appear over any of them: the recovery key to write
 //! down, right after a local network is created.
 
+use std::path::PathBuf;
+
 use motodesk_client::recovery;
 use motodesk_server::startup::StartupFailure;
 use motodesk_ui::gpui::*;
@@ -19,6 +21,7 @@ use crate::format::{humanize_error, last_group_matches};
 use crate::pages::auth::AuthPage;
 use crate::pages::pos::Till;
 use crate::pos::{self, PosState};
+use crate::printing;
 use crate::shell::Shell;
 
 pub struct Root {
@@ -31,6 +34,8 @@ pub struct Root {
     key_check: TextModel,
     key_saving: bool,
     key_shown: bool,
+    /// The key as written for the PDF reader, to be removed once it is confirmed.
+    key_files: Vec<PathBuf>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -56,6 +61,7 @@ impl Root {
             key_check,
             key_saving: false,
             key_shown: false,
+            key_files: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -113,6 +119,7 @@ impl Root {
                 let key = AuthStore::global(cx).read(cx).recovery_key.clone().unwrap_or_default();
                 let check = for_body.read(cx).key_check.clone();
                 let to_copy = key.clone();
+                let page = for_body.clone();
                 element(
                     col()
                         .gap(m.space_4)
@@ -133,12 +140,17 @@ impl Root {
                                 .text_center()
                                 .child(key),
                         )
-                        .child(row().child(Button::new("key-copy").icon(IconName::Copy).label("Copier").on_click(
-                            move |_, window, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(to_copy.clone()));
-                                toast::success("Clé copiée. Collez-la dans un gestionnaire de mots de passe.", window, cx);
-                            },
-                        )))
+                        .child(
+                            row()
+                                .gap(m.space_2)
+                                .child(Button::new("key-copy").icon(IconName::Copy).label("Copier").on_click(move |_, window, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(to_copy.clone()));
+                                    toast::success("Clé copiée. Collez-la dans un gestionnaire de mots de passe.", window, cx);
+                                }))
+                                .child(Button::new("key-print").icon(IconName::Printer).label("Imprimer").on_click(move |_, window, cx| {
+                                    page.update(cx, |this, cx| this.print_recovery_key(window, cx))
+                                })),
+                        )
                         .child(Alert::warning().child("Rangez-la hors de ce poste. Qui la détient peut prendre le contrôle des comptes."))
                         .child(FormField::new("Retapez les 5 derniers caractères").required().child(Input::new(&check).mono())),
                 )
@@ -157,6 +169,24 @@ impl Root {
         );
     }
 
+    /// Hand the key, alone on a page, to the program this PC reads PDF files with. The file
+    /// holds the key in clear: it is removed once the key is confirmed, and whatever a
+    /// reader still holds then goes when the app next starts.
+    fn print_recovery_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(key) = AuthStore::global(cx).read(cx).recovery_key.clone() else { return };
+        let page = recovery::key_page(&key, chrono::Local::now().date_naive());
+        match printing::write("Clé de récupération Motodesk", &page) {
+            Ok(path) => {
+                printing::open(&path, cx);
+                if !self.key_files.contains(&path) {
+                    self.key_files.push(path);
+                }
+                toast::success("Clé ouverte pour impression. Son fichier est effacé de ce poste une fois la clé confirmée.", window, cx);
+            }
+            Err(_) => toast::error("Impression impossible : recopiez la clé à la main.", window, cx),
+        }
+    }
+
     fn confirm_recovery_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(key) = AuthStore::global(cx).read(cx).recovery_key.clone() else { return };
         if self.key_saving || !last_group_matches(&key, &self.key_check.text(cx)) {
@@ -171,6 +201,9 @@ impl Root {
                 this.key_saving = false;
                 match result {
                     Ok(()) => {
+                        for file in this.key_files.drain(..) {
+                            printing::forget(&file);
+                        }
                         this.key_check.clear(window, cx);
                         close_modal(window, cx);
                         AuthStore::global(cx).update(cx, |auth, cx| auth.recovery_key_noted(cx));

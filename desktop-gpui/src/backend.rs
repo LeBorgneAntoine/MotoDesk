@@ -61,6 +61,12 @@ mod dev {
     }
 }
 
+/// Development only: the folder that stands in for "save as", when there is one. A document
+/// on its way to the PDF reader is then written there too, and left unopened.
+pub fn dev_save_dir() -> Option<PathBuf> {
+    dev::save_path("")
+}
+
 /// Ask where to save a file. `None` when the dialog was closed, or went away with the window.
 fn ask_save_path<V: 'static>(cx: &mut Context<V>, suggested_name: &str) -> impl Future<Output = std::io::Result<Option<PathBuf>>> + use<V> {
     let stand_in = dev::save_path(suggested_name);
