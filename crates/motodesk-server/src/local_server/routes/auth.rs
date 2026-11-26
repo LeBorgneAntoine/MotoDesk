@@ -90,6 +90,17 @@ async fn cache_session(state: &SharedState, bundle: &serde_json::Value) -> Local
         user.get("company_id").and_then(|v| v.as_str()),
     )
     .await?;
+    // The session of a local network is this service's own record: what marks it as opened by
+    // a password (`local_accounts::open_session`) is not in the bundle a window holds, so
+    // storing a bundle over it ends it at the next check. Nothing handed over replaces it:
+    // neither the local session itself coming back, nor a cloud one while this PC is still in
+    // its network. Such a bundle is answered and left aside rather than refused, since the
+    // windows that send it have nothing to do about a refusal. Going online leaves the network
+    // first (`promote_inner`), so its cloud session is stored like any other.
+    let local_bundle = user.get("auth_mode").and_then(|m| m.as_str()) == Some("local");
+    if local_bundle || crate::local_server::local_accounts::is_standalone(&state.db).await {
+        return Ok(());
+    }
     // Tokens belong in the OS keychain. When it cannot keep them (no usable
     // credential store) they are kept in the local database instead: losing
     // them silently would switch cloud sync and bootstrap off without a word.
@@ -134,6 +145,7 @@ async fn cache_session(state: &SharedState, bundle: &serde_json::Value) -> Local
 }
 
 /// Store session from cloud login (frontend calls cloud directly, then syncs here).
+/// A local session, or any session on a local network, is answered without being stored.
 async fn sync_session(
     State(state): State<SharedState>,
     Json(bundle): Json<serde_json::Value>,
@@ -411,7 +423,8 @@ pub(crate) async fn promote_inner(
     let bundle: serde_json::Value = res.json().await.map_err(|e| LocalError::Internal(e.into()))?;
 
     // From here on the cloud knows this company: the installation is online, whatever
-    // else goes wrong, and signing in with the new account always works.
+    // else goes wrong, and signing in with the new account always works. Leaving the network
+    // comes before storing the session: `cache_session` stores none on a local network.
     sqlx::query("UPDATE sync_state SET standalone = 0 WHERE id = 1")
         .execute(&state.db)
         .await?;
@@ -629,6 +642,72 @@ mod tests {
         let stored = crate::local_server::db::load_mesh_secret(&state.db).await.unwrap();
         assert_eq!(stored, secret, "and the next start finds it");
         assert!(local_accounts::status(&state.db).await.unwrap().standalone);
+    }
+
+    #[tokio::test]
+    async fn handing_a_local_session_back_does_not_end_it() {
+        let state = standalone_shop("http://127.0.0.1:9").await;
+        let bundle = local_accounts::login(&state, "camille", "mot de passe").await.unwrap();
+        assert_eq!(bundle["user"]["auth_mode"], "local");
+
+        // What "Synchroniser" does on a local network: the window posts the session it holds.
+        let Json(answer) = sync_session(State(state.clone()), Json(bundle.clone())).await.unwrap();
+        assert_eq!(answer, bundle, "answered as before, for the windows that still send it");
+
+        let user = local_accounts::session_user(&state.db).await.unwrap().expect("still signed in");
+        assert_eq!(user["username"], "camille");
+        assert!(me(State(state.clone())).await.is_ok());
+        assert!(crate::local_server::auth_guard::is_admin(&state).await);
+    }
+
+    #[tokio::test]
+    async fn a_cloud_session_does_not_replace_the_session_of_a_local_network() {
+        let state = standalone_shop("http://127.0.0.1:9").await;
+        let local = local_accounts::login(&state, "camille", "mot de passe").await.unwrap();
+        let cloud = |company: &serde_json::Value| {
+            json!({
+                "access_token": "cloud-token",
+                "access_expires_in": 900,
+                "refresh_token": "cloud-refresh",
+                "refresh_expires_in": 604800,
+                "user": {
+                    "id": local["user"]["id"],
+                    "company_id": company,
+                    "email": "camille@example.fr",
+                    "full_name": "Camille Martin",
+                    "role": "admin",
+                    "is_active": true,
+                },
+            })
+        };
+
+        let _ = sync_session(State(state.clone()), Json(cloud(&local["user"]["company_id"]))).await.unwrap();
+        let user = local_accounts::session_user(&state.db).await.unwrap().expect("still signed in");
+        assert_eq!(user["auth_mode"], "local");
+        let token = crate::local_server::secrets::session_access_token(&state.db).await.unwrap();
+        assert_eq!(token, None, "a local network holds no cloud token");
+
+        // Another company's account is refused, as on any PC: the window closes that session.
+        let other = json!(uuid::Uuid::new_v4().to_string());
+        let refused = sync_session(State(state.clone()), Json(cloud(&other))).await;
+        assert!(matches!(refused, Err(LocalError::WrongCompany(_))), "{refused:?}");
+        assert!(local_accounts::session_user(&state.db).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_local_session_left_in_a_window_does_not_replace_the_cloud_one() {
+        let (cloud, _) = mock_cloud(201).await;
+        let state = standalone_shop(&cloud).await;
+        let local = local_accounts::login(&state, "camille", "mot de passe").await.unwrap();
+        promote_inner(&state, promotion()).await.unwrap();
+
+        let _ = sync_session(State(state.clone()), Json(local)).await.unwrap();
+
+        let token = crate::local_server::secrets::session_access_token(&state.db).await.unwrap();
+        assert_eq!(token.as_deref(), Some("cloud-token"), "cloud sync keeps its token");
+        let user = local_accounts::session_user(&state.db).await.unwrap().unwrap();
+        assert_eq!(user["email"], "camille@example.fr");
+        assert!(user.get("auth_mode").is_none());
     }
 
     #[tokio::test]
