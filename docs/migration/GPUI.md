@@ -41,9 +41,9 @@ sur une branche à part.
 | Caisse (ouverture de session, recherche et lecture de codes, panier, encaissement en espèces, carte, chèque ou à plusieurs, tickets en attente, tiroir, clôture) | migré, sans imprimante, tiroir ni terminal réels |
 | Assistant (conversations, échange, canevas, clé et modèle du poste) | migré, sans échange avec un vrai modèle |
 | Modèles (bibliothèque, éditeur de mise en page, aperçu, export PDF) | migré |
-| Arrière-plan (icône près de l'horloge, fenêtre cachée à la fermeture, démarrage avec Windows, une seule copie à la fois) | migré, sous Windows ; l'icône, son menu et l'entrée de démarrage n'ont pas été essayés |
-| Mises à jour (recherche automatique, bandeau, nouveautés, téléchargement vérifié, carte des réglages) | migré ; le lancement de l'installateur n'a pas été essayé |
-| Installateur Windows de l'application native (cargo-packager, par utilisateur) | construit et relu, **jamais lancé** ; le workflow qui le construit n'a pas encore tourné |
+| Arrière-plan (icône près de l'horloge, fenêtre cachée à la fermeture, démarrage avec Windows, une seule copie à la fois) | migré, sous Windows ; l'entrée de démarrage est écrite par le programme installé et retirée par la désinstallation (essayé) ; l'icône et son menu n'ont pas été essayés, ni un vrai démarrage de session |
+| Mises à jour (recherche automatique, bandeau, nouveautés, téléchargement vérifié, carte des réglages) | migré ; l'installateur lancé avec les options d'une mise à jour remplace le programme ouvert et le relance (essayé à la main) ; une mise à jour de bout en bout depuis l'application demande deux versions publiées |
+| Installateur Windows de l'application native (cargo-packager, par utilisateur) | essayé sur le poste de développement : installation, remplacement comme une mise à jour, désinstallation ; construit par la CI à chaque changement ; pas encore essayé sur un poste d'atelier |
 | Impression des documents (facture, avoir, ticket ou devis depuis Ventes avec sa trace et son DUPLICATA, clé de récupération) | migré : un PDF confié au lecteur du poste, pas d'envoi direct à une imprimante |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
@@ -161,9 +161,11 @@ Sur les mises à jour (`motodesk_client::updates`, `desktop-gpui/src/updates.rs`
   progression, la vérification, « Plus tard » (retenu dans le fichier du poste), la carte des
   réglages, une recherche à la main (version trouvée, puis serveur arrêté). Les refus
   (installateur modifié, autre clé, version plus ancienne, HTTP) sont couverts par des tests
-  avec une clé de test. **Non essayés** : le lancement d'un vrai installateur et la relance de
-  l'application (aucun installateur natif n'existe encore), et une recherche auprès du vrai
-  serveur (aucune version n'y est publiée).
+  avec une clé de test. Le programme installé interroge le vrai serveur et s'entend répondre
+  qu'aucune version n'est publiée, sans rien montrer. **Non essayée** : une mise à jour de
+  bout en bout depuis l'application (téléchargement d'une vraie version, puis lancement de
+  son installateur) ; il y faut deux versions publiées. L'installateur lancé à la main avec
+  les mêmes options a été essayé (voir « Sur l'installateur »).
 
 Sur l'installateur :
 
@@ -178,8 +180,10 @@ Sur l'installateur :
   `com.motodesk.app`). Il installe `motodesk.exe` ; les données de l'atelier sont dans un autre
   dossier (`%APPDATA%\com.motodesk.app`) et ne sont touchées ni par une mise à jour ni par une
   désinstallation.
-- Le programme porte maintenant son icône (`desktop-gpui/build.rs`, `assets/app.rc`) : celle
-  de sa fenêtre, de la barre des tâches et des raccourcis.
+- Le programme porte son icône (`desktop-gpui/build.rs`, `assets/app.rc`) : celle de sa
+  fenêtre, de la barre des tâches et des raccourcis. Il porte aussi son nom et sa version
+  (ceux du paquet) : sans eux, le gestionnaire des tâches et la question du pare-feu au
+  premier lancement montraient « motodesk.exe », et les propriétés du fichier aucune version.
 - Construire l'installateur sur un poste :
   `cargo install cargo-packager --locked --version 0.11.8`, puis
   `cargo packager --release -p motodesk-gpui`. Il sort dans `target/release`
@@ -191,20 +195,44 @@ Sur l'installateur :
   (même format de clé qu'aujourd'hui : les secrets du dépôt n'ont pas à changer) en y
   inscrivant la version, `manifest` écrit `latest.json`. Ses tests donnent ce qu'il signe et
   ce qu'il écrit à la vérification de l'application elle-même.
-- `.github/workflows/native-installer.yml` construit l'installateur **à la demande**
-  (bouton « Run workflow »), le signe si la clé est là, et le garde avec l'exécution. Il ne
-  publie rien. Le workflow *Release* construit toujours l'application Tauri : il basculera
-  sur l'application native au moment du retrait de Svelte et de Tauri, avec `tools/release`
-  pour les notes, la signature et le manifeste.
-- Une désinstallation laisse l'entrée de démarrage de Windows, si le mode arrière-plan l'avait
-  écrite : elle pointe alors sur un programme absent, ce que Windows ignore.
-- **Vérifié** : l'installateur se construit sur ce poste ; son script généré a été relu (nom
-  du produit, installation par utilisateur, programme principal, icône) ; la signature et le
-  manifeste sont couverts par des tests. **Non essayés** : lancer l'installateur (il
-  s'installerait sur le poste de développement), une mise à jour réelle d'une version
-  installée vers une autre, la désinstallation, et le workflow lui-même (il n'a jamais
-  tourné : la branche n'est pas poussée). Le premier essai réel doit se faire sur un poste de
-  test.
+- La CI (`ci.yml`) construit l'installateur à chaque changement et le garde avec
+  l'exécution ; le workflow *Release* le construit, le signe et écrit le manifeste avec
+  `tools/release`. Le premier a tourné ; le second ne tourne que sur une étiquette de
+  version et n'a pas encore tourné.
+- **La désinstallation retire l'entrée de démarrage de Windows.** Le programme l'écrit
+  lui-même (mode arrière-plan), l'installateur ne la connaît donc pas : une section
+  ajoutée à son script (`preinstall-section` dans `Cargo.toml`, seul endroit que l'outil
+  offre) la retire par son nom. Un test tient ce nom égal à celui que le programme écrit.
+- **Essayé sur le poste de développement** (installateur construit depuis la branche, sans
+  adresse du cloud, programme lancé sur un dossier de démonstration) :
+  - l'assistant, en français : accueil, dossier (`%LOCALAPPDATA%\Motodesk`), dossier du
+    menu Démarrer, installation, fin ; il écrit `motodesk.exe` (68 Mo), `uninstall.exe`,
+    le raccourci du menu Démarrer et celui du Bureau, et l'entrée de « Applications
+    installées » (nom, version, éditeur) ;
+  - le programme installé démarre, ouvre ses écrans, annonce qu'il a été construit sans
+    adresse du cloud ; « Quitter Motodesk maintenant » l'arrête ; fermer sa fenêtre la
+    cache, un second lancement la remontre ; un port déjà pris donne l'écran « Un autre
+    programme bloque Motodesk », et « Relancer Motodesk » le relance ;
+  - il écrit l'entrée de démarrage (`"…\motodesk.exe" --background`), sauf sous un profil
+    isolé ;
+  - l'installateur relancé avec `/P /R /NS` par-dessus le programme ouvert : il le ferme,
+    remplace les fichiers et le relance en 3 secondes, sans remettre le raccourci du
+    Bureau qui avait été retiré, l'entrée de démarrage intacte ;
+  - la désinstallation, programme encore ouvert en arrière-plan : elle demande à le fermer,
+    retire le programme, les raccourcis, l'entrée de « Applications installées » et
+    l'entrée de démarrage. Elle laisse les journaux (voir ci-dessous) et les données.
+- **Ce que l'essai ne dit pas.** Il a été fait depuis l'application Claude, qui range à
+  part ce qu'un programme lancé par elle écrit dans `AppData` : l'installation s'est faite
+  dans ce rangement, pas dans le vrai profil de l'utilisateur. Les étapes sont les mêmes,
+  mais un démarrage de session Windows, la question du pare-feu et l'avertissement de
+  SmartScreen (l'installateur et le programme ne sont pas signés Authenticode) ne se
+  voient que sur un vrai poste. **Non essayés** non plus : l'icône près de l'horloge et son
+  menu, et le workflow *Release*.
+- **Les journaux sont dans le dossier d'installation** (`%LOCALAPPDATA%\Motodesk\logs`) :
+  la désinstallation ne retire que ce qu'elle a posé, le dossier reste donc avec eux.
+- **L'installateur propose le dossier d'une installation précédente** (il le lit dans
+  `HKCU\Software\Motodesk\Motodesk`, que la désinstallation laisse) : sur un poste où
+  Motodesk a été installé ailleurs puis retiré, c'est cet ancien dossier qui est proposé.
 
 Sur l'impression :
 
@@ -569,12 +597,14 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 
 Ce qui reste après le retrait de Svelte et de Tauri :
 
-- **Essayer l'installateur sur un poste de test** (installation, mise à jour d'une version
-  installée vers une autre, désinstallation) : il n'a jamais été lancé.
-- **Faire tourner les workflows** : `ci.yml` et `release.yml` ont été réécrits pour
-  l'application native (plus de Node, installateur par cargo-packager, notes, signature et
-  manifeste par `tools/release`) et n'ont pas encore tourné. Le workflow à la demande
-  `native-installer.yml` a été retiré : la CI garde un installateur à chaque changement.
+- **Essayer l'installateur sur un poste d'atelier ou de test** : il a été essayé sur le
+  poste de développement (voir « Sur l'installateur »), dans des conditions qui ne montrent
+  ni le démarrage avec la session Windows, ni le pare-feu, ni SmartScreen.
+- **Publier une première version** : `release.yml` (version, signature et manifeste par
+  `tools/release`) ne tourne que sur une étiquette de version et n'a pas encore tourné ;
+  une mise à jour de bout en bout demande ensuite une seconde version. `ci.yml` a tourné.
+- **Signer le programme et son installateur** (Authenticode) : sans cela Windows prévient
+  avant de lancer l'installateur téléchargé.
 - Le service écoute encore sur le port local 17300 et accepte encore les origines de la
   fenêtre web : plus rien ne s'en sert sur le poste (l'interface appelle le service dans son
   propre processus). À retirer côté service, à part.

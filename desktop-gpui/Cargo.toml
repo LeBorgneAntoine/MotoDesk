@@ -39,6 +39,17 @@ installer-icon = "assets/icon.ico"
 languages = ["French", "English"]
 display-language-selector = false
 compression = "lzma"
+# Uninstalling also removes the start-with-Windows entry: the program writes it itself
+# (src/background.rs), so the installer's own clean-up does not know about it, and it would
+# stay behind pointing at a program that is gone. The packager offers this one place for
+# sections of our own; a section named `un.` belongs to the uninstaller. No quotes in it:
+# the packager escapes them.
+preinstall-section = '''
+Section un.StartWithWindows
+  DeleteRegValue HKCU Software\Microsoft\Windows\CurrentVersion\Run Motodesk
+  DeleteRegValue HKCU Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run Motodesk
+SectionEnd
+'''
 
 [dependencies]
 motodesk-ui = { path = "../crates/motodesk-ui" }
