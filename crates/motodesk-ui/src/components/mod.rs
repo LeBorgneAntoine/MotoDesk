@@ -10,6 +10,7 @@ mod layout;
 mod menu;
 mod overlay;
 mod panel;
+mod pos;
 mod table;
 mod text_field;
 mod tooltip;
@@ -33,6 +34,7 @@ pub use layout::{FilterRail, PageToolbar, Sidebar, SidebarItem, StatusBar, Statu
 pub use menu::{MenuEntry, with_context_menu};
 pub use overlay::{Confirm, Modal, close_modal, element, toast};
 pub use panel::{MAX_DEPTH, Panel, PanelHost, PanelLayer, PanelSection, PanelStack, PanelWidth, request_close};
+pub use pos::{PosCartLine, PosItem, PosKey};
 pub use table::{Align, Column, DataTable};
 pub use text_field::{Input, TextEvent, TextModel, TextModelBuilder, Textarea};
 pub use tooltip::tooltip;

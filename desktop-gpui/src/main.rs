@@ -15,6 +15,7 @@ mod auth;
 mod backend;
 mod format;
 mod pages;
+mod pos;
 mod router;
 mod shell;
 
@@ -76,6 +77,8 @@ fn main() {
     let local_token = local_auth::generate_token();
     let token = local_token.clone();
     let dir = data_dir();
+    // Whether this PC is a till is read from the same folder, before the window opens.
+    let pos_dir = dir.clone();
     runtime.spawn(async move {
         let result = match dir {
             Some(dir) => local_server::start(dir, token).await,
@@ -88,6 +91,7 @@ fn main() {
         motodesk_ui::init(cx);
         Router::init(cx);
         AuthStore::init(cx);
+        pos::PosState::init(&pos_dir.clone().unwrap_or_default(), cx);
 
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx))),
