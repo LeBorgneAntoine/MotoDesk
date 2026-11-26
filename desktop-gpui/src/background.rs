@@ -84,9 +84,22 @@ pub enum Instance {
     Second,
 }
 
+/// What a restart passes to the copy that replaces this one: it is not a second start, and
+/// waits for the closing copy to be gone instead of stepping aside for it.
+pub const RESTARTED_ARG: &str = "--restarted";
+
+/// How long a restarted copy waits for the one it replaces.
+const RESTART_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Find out whether a copy already runs, before anything touches the ports or the database.
 pub fn claim(folder: &str) -> Instance {
-    platform::claim(&instance_name(folder))
+    let name = instance_name(folder);
+    if std::env::args().any(|arg| arg == RESTARTED_ARG) { platform::claim_after(&name, RESTART_WAIT) } else { platform::claim(&name) }
+}
+
+/// The arguments a restarted copy is started with: those of this run, and the mark of a restart.
+pub fn restart_arguments(current: impl Iterator<Item = String>) -> Vec<String> {
+    current.filter(|arg| arg != RESTARTED_ARG).chain(std::iter::once(RESTARTED_ARG.to_string())).collect()
 }
 
 /// The icon near the clock, kept for as long as the app runs.
@@ -199,9 +212,48 @@ pub mod platform {
         wide(&format!("{instance}.show"))
     }
 
-    /// The first copy's ear for later starts. The handles live as long as the process.
+    /// The first copy's place and its ear for later starts. Once it listens, both last as long
+    /// as the process; dropped before that, the place is free again.
     pub struct Listener {
+        mutex: HANDLE,
         signal: HANDLE,
+    }
+
+    // SAFETY: the two handles name kernel objects; they can be used and closed from any thread.
+    unsafe impl Send for Listener {}
+
+    impl Drop for Listener {
+        fn drop(&mut self) {
+            // SAFETY: the handles are this value's own, closed once.
+            unsafe {
+                for handle in [self.signal, self.mutex] {
+                    if !handle.is_null() {
+                        CloseHandle(handle);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Take the place of a copy that is closing: wait, up to `patience`, for it to be gone.
+    /// If it never goes, this is a second start after all.
+    pub fn claim_after(instance: &str, patience: std::time::Duration) -> Instance {
+        let started = std::time::Instant::now();
+        loop {
+            // SAFETY: as in `claim`.
+            let taken = unsafe {
+                let mutex = CreateMutexW(std::ptr::null(), 0, wide(instance).as_ptr());
+                let taken = !mutex.is_null() && GetLastError() == ERROR_ALREADY_EXISTS;
+                if !mutex.is_null() {
+                    CloseHandle(mutex);
+                }
+                taken
+            };
+            if !taken || started.elapsed() >= patience {
+                return claim(instance);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
 
     pub fn claim(instance: &str) -> Instance {
@@ -218,9 +270,9 @@ pub mod platform {
                 CloseHandle(mutex);
                 return Instance::Second;
             }
-            // The mutex is kept, unclosed, until the process ends: that is what a later copy finds.
+            // The mutex is what a later copy finds for as long as this one holds it.
             let signal = CreateEventW(std::ptr::null(), 0, 0, signal_name(instance).as_ptr());
-            Instance::First(Listener { signal })
+            Instance::First(Listener { mutex, signal })
         }
     }
 
@@ -231,6 +283,8 @@ pub mod platform {
                 return;
             }
             let signal = self.signal as usize;
+            // From here on the place is held until the process ends.
+            std::mem::forget(self);
             let waiting = std::thread::Builder::new().name("motodesk-second-start".into()).spawn(move || {
                 // SAFETY: the event handle is never closed while the process runs.
                 while unsafe { WaitForSingleObject(signal as HANDLE, INFINITE) } == WAIT_OBJECT_0 {
@@ -330,6 +384,10 @@ pub mod platform {
         Instance::First(Listener)
     }
 
+    pub fn claim_after(_: &str, _: std::time::Duration) -> Instance {
+        Instance::First(Listener)
+    }
+
     impl Listener {
         pub fn forward(self, _: UnboundedSender<Command>) {}
     }
@@ -382,5 +440,39 @@ mod tests {
         assert_eq!(asked.blocking_recv(), Some(Command::Show));
         // Another name is another installation: it is the first of its own.
         assert!(matches!(claim(&format!("{name}-other")), Instance::First(_)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_restarted_copy_waits_for_the_one_it_replaces() {
+        use std::time::{Duration, Instant};
+
+        use super::Instance;
+        use super::platform::{claim, claim_after};
+
+        let name = instance_name(&format!("motodesk-restart-{}", std::process::id()));
+        let Instance::First(closing) = claim(&name) else { panic!("nothing else holds this name") };
+        // The copy being replaced goes away a little later, as an app does when it quits.
+        let leaving = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            drop(closing);
+        });
+        let started = Instant::now();
+        assert!(matches!(claim_after(&name, Duration::from_secs(10)), Instance::First(_)), "the restarted copy takes the place");
+        assert!(started.elapsed() >= Duration::from_millis(300), "it waited for the other to go");
+        leaving.join().unwrap();
+
+        // A copy that never goes: the restarted one gives up and steps aside.
+        let stuck = instance_name(&format!("motodesk-stuck-{}", std::process::id()));
+        let Instance::First(_staying) = claim(&stuck) else { panic!("nothing else holds this name") };
+        assert!(matches!(claim_after(&stuck, Duration::from_millis(300)), Instance::Second));
+    }
+
+    #[test]
+    fn a_restart_keeps_the_arguments_and_says_it_is_one() {
+        let arguments = |given: &[&str]| super::restart_arguments(given.iter().map(|arg| arg.to_string()));
+        assert_eq!(arguments(&[]), ["--restarted"]);
+        assert_eq!(arguments(&["--background"]), ["--background", "--restarted"]);
+        assert_eq!(arguments(&["--restarted", "--background"]), ["--background", "--restarted"], "said once");
     }
 }
