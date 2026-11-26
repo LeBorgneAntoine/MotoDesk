@@ -462,14 +462,13 @@ Sur les onglets « Simple » et « Avancé » de l'écran Données :
   la table à retaper) au lieu de deux fenêtres.
 - La sortie de la console SQL montre l'entrée la plus récente en premier ; Ctrl+Entrée lance
   l'aperçu.
-- **Le service compte toute la table même quand une recherche est active** : sous Svelte, le
-  pied de page affiche alors « 1–12 sur 137 » et propose une page suivante qui n'existe pas.
-  Ici il affiche « Lignes trouvées 1–12 · 137 dans la table » et ne propose la suite que si la
-  page est pleine.
-- **Défaut du service, visible aussi sous Svelte** : une cellule vide (NULL) revient du service
-  sous la forme `0`. Le gestionnaire affiche donc « 0 » pour un téléphone, une note ou une date
-  de suppression absents, à l'écran comme dans l'export. Cela ne se corrige que dans le service
-  (`cell_to_value` dans `local_server/routes/data`).
+- **Le service comptait toute la table même quand une recherche était active** : sous Svelte,
+  le pied de page affichait alors « 1–12 sur 137 » et proposait une page suivante qui
+  n'existait pas. Corrigé dans le service : le total suit la recherche, et le pied de page
+  dit « 1–12 sur 12 ».
+- **Une cellule vide (NULL) revenait du service sous la forme `0`** (un téléphone, une note,
+  une date de suppression absents), à l'écran comme dans l'export. Corrigé dans le service
+  (`cell_to_value` dans `local_server/routes/data`) : elle revient vide, et s'affiche « — ».
 - Vérifié dans l'application sur un dossier de démonstration à part : lecture et recherche,
   défilement de côté, vidage d'une table, aperçu et exécution d'une écriture SQL, refus d'un
   `DROP`. Non essayé : l'export d'une page (fenêtre « Enregistrer sous » du système).

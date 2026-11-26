@@ -39,14 +39,14 @@ impl TableInfo {
 
 /// One page of a table.
 ///
-/// `total` counts the rows of the table, whatever was searched for: with a search, only the
-/// rows of the page say how many were found.
+/// `total` counts the rows the pages go through: the whole table, or with a search the rows
+/// it found.
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 #[serde(default)]
 pub struct TablePreview {
     pub columns: Vec<String>,
     pub rows: Vec<Row>,
-    /// How many rows the table holds.
+    /// How many rows the table holds, or how many the search found.
     pub total: i64,
     pub limit: i64,
     pub offset: i64,
@@ -182,19 +182,17 @@ pub fn rows_to_csv(columns: &[String], rows: &[Row]) -> String {
     to_csv(columns, &lines, ',')
 }
 
-/// Where a page stands: "101–200 sur 437". With a search, the table's count is not the
-/// number of rows found, so the page only says what it holds.
+/// Where a page stands: "101–200 sur 437". With a search, 437 is the number of rows found.
 pub fn page_label(offset: i64, shown: usize, total: i64, searching: bool) -> String {
     if shown == 0 {
-        return if searching && total > 0 { "Aucune ligne trouvée".into() } else { "Aucune ligne".into() };
+        return if searching { "Aucune ligne trouvée".into() } else { "Aucune ligne".into() };
     }
-    let (first, last) = (offset + 1, offset + shown as i64);
-    if searching { format!("Lignes trouvées {first}–{last} · {total} dans la table") } else { format!("{first}–{last} sur {total}") }
+    format!("{}–{} sur {total}", offset + 1, offset + shown as i64)
 }
 
-/// Whether there may be a page after this one. With a search, a full page is the only sign.
-pub fn has_next_page(offset: i64, shown: usize, total: i64, searching: bool, page_size: i64) -> bool {
-    if searching { shown as i64 >= page_size } else { offset + page_size < total }
+/// Whether there is a page after this one.
+pub fn has_next_page(offset: i64, total: i64, page_size: i64) -> bool {
+    offset + page_size < total
 }
 
 #[cfg(test)]
@@ -231,11 +229,11 @@ mod tests {
         assert_eq!(page_label(0, 100, 437, false), "1–100 sur 437");
         assert_eq!(page_label(400, 37, 437, false), "401–437 sur 437");
         assert_eq!(page_label(0, 0, 0, false), "Aucune ligne");
-        assert!(has_next_page(0, 100, 437, false, 100) && !has_next_page(400, 37, 437, false, 100));
-        // With a search, the table's count is not the number of rows found.
-        assert_eq!(page_label(0, 3, 437, true), "Lignes trouvées 1–3 · 437 dans la table");
-        assert_eq!(page_label(0, 0, 437, true), "Aucune ligne trouvée");
-        assert!(!has_next_page(0, 3, 437, true, 100) && has_next_page(0, 100, 437, true, 100));
+        assert!(has_next_page(0, 437, 100) && !has_next_page(400, 437, 100));
+        // With a search, the total is the number of rows found: the wording is the same.
+        assert_eq!(page_label(0, 3, 3, true), "1–3 sur 3");
+        assert_eq!(page_label(0, 0, 0, true), "Aucune ligne trouvée");
+        assert!(!has_next_page(0, 3, 100) && has_next_page(0, 250, 100));
     }
 
     #[test]
