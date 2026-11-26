@@ -1,5 +1,5 @@
 # Advisories we have looked at and accepted. Each one says why it does not apply and
-# what would end the exception; review this list whenever sqlx or tauri is upgraded.
+# what would end the exception; review this list whenever sqlx is upgraded.
 [advisories]
 ignore = [
   # SQLite before 3.54 can return stale memory when a database is opened together with a

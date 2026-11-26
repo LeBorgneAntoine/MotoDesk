@@ -1,16 +1,22 @@
 # Migration de l'interface vers GPUI
 
-L'interface de Motodesk passe de Svelte (dans une fenêtre web Tauri) à une interface native
-écrite en Rust avec [GPUI](https://gpui.rs). Le service de données ne change pas : API locale,
-base SQLite, journal fiscal et synchronisation restent les mêmes. La migration se fait **écran par
-écran**, sur une branche à part, et l'interface actuelle reste livrée tant que tous les écrans ne
-sont pas passés.
+L'interface de Motodesk est passée de Svelte (dans une fenêtre web Tauri) à une interface native
+écrite en Rust avec [GPUI](https://gpui.rs). Le service de données n'a pas changé : base SQLite,
+journal fiscal et synchronisation sont les mêmes. La migration s'est faite **écran par écran**,
+sur une branche à part.
+
+> **La migration est terminée : Svelte et Tauri ont été retirés du dépôt** (dossier `desktop/`,
+> outillage Node, workflows). Ce document en reste le journal. Ce qu'il dit « sous Svelte » ou
+> « comme dans Svelte » décrit l'ancienne interface, et les fichiers `.svelte` et `.ts` qu'il
+> cite (de même que les commentaires « port of … » du code) se lisent dans l'historique git : le
+> dernier commit qui les contient est `052d9f1`. Les sections « Lancer », « Les règles du kit »
+> et « Comment un écran parle au service » décrivent l'état présent.
 
 ## Ce qui est en place
 
 | Élément | Où | État |
 |---|---|---|
-| Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
+| Service de données indépendant de l'interface | `crates/motodesk-server` | fait |
 | Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), impression d'une vente (données du document, trace au journal, PDF), réglage de l'arrière-plan, mises à jour (recherche, téléchargement, vérification de la signature), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille ; le programme s'appelle `motodesk.exe` |
@@ -509,9 +515,8 @@ enregistrée telle quelle si personne ne la complète : le service la déduit al
 
 ## Lancer
 
-Les deux interfaces partagent le dossier de données et les ports 17300 et 17301 : **une seule
-tourne à la fois**. L'application native, relancée alors qu'elle tourne déjà, ne fait que
-montrer sa fenêtre.
+L'application ne tourne qu'en une copie par installation : relancée alors qu'elle tourne déjà,
+elle ne fait que montrer sa fenêtre.
 
 ```powershell
 cargo run -p motodesk-ui --example gallery          # tous les composants du kit
@@ -562,8 +567,23 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : essayer l'installateur sur un poste de test, puis le retrait de Svelte et de
-Tauri (avec la bascule du workflow *Release* sur l'application native).
+Ce qui reste après le retrait de Svelte et de Tauri :
+
+- **Essayer l'installateur sur un poste de test** (installation, mise à jour d'une version
+  installée vers une autre, désinstallation) : il n'a jamais été lancé.
+- **Faire tourner les workflows** : `ci.yml` et `release.yml` ont été réécrits pour
+  l'application native (plus de Node, installateur par cargo-packager, notes, signature et
+  manifeste par `tools/release`) et n'ont pas encore tourné. Le workflow à la demande
+  `native-installer.yml` a été retiré : la CI garde un installateur à chaque changement.
+- Le service écoute encore sur le port local 17300 et accepte encore les origines de la
+  fenêtre web : plus rien ne s'en sert sur le poste (l'interface appelle le service dans son
+  propre processus). À retirer côté service, à part.
+- `motodesk-keytool` est maintenant un second programme de `desktop-gpui`
+  (`cargo run -p motodesk-gpui --bin motodesk-keytool`) ; il n'est pas dans l'installateur,
+  comme avant.
+- Les demandes de fusion ouvertes sur `master` (corrections du service trouvées en chemin)
+  touchent aussi des fichiers Svelte : cette part-là n'aura plus d'objet une fois cette
+  branche fusionnée.
 
 ## Comment un écran parle au service
 
@@ -578,4 +598,4 @@ cx.api(
 ```
 
 L'appel va droit au gestionnaire Axum, par les mêmes intergiciels que sur le port local, sans
-socket. Le port 17300 reste ouvert pour l'interface Tauri.
+socket.

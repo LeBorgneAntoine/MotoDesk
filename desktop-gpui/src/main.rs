@@ -1,9 +1,8 @@
-//! Motodesk, native interface.
+//! Motodesk.
 //!
-//! One process holds two things: the data service (`motodesk-server`: local API, SQLite, sync,
-//! on Tokio threads) and this interface (GPUI, on the main thread), which calls the service
-//! directly. It is the same service the Tauri shell hosts; the two shells share the data
-//! folder and the ports, so only one of them runs at a time.
+//! One process holds two things: the data service (`motodesk-server`: SQLite, the fiscal
+//! journal, sync, on Tokio threads) and this interface (GPUI, on the main thread), which calls
+//! the service directly. Only one copy runs per installation: a second start shows the first.
 //!
 //! The window opens at once and shows a spinner until the service is up.
 
@@ -39,7 +38,7 @@ use backend::Backend;
 use router::Router;
 
 /// Where the app keeps its data: `MOTODESK_DATA_DIR` when set (development, demonstrations),
-/// otherwise the same folder as the Tauri shell (`%APPDATA%\com.motodesk.app`). An isolated
+/// otherwise `%APPDATA%\com.motodesk.app` (the folder the application has always used). An isolated
 /// profile (`MOTODESK_PROFILE`) gets a folder of its own, so it can never open the shop's data.
 fn data_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("MOTODESK_DATA_DIR").filter(|d| !d.is_empty()) {
@@ -71,7 +70,7 @@ fn install_name() -> String {
 
 fn main() {
     logs::init();
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), "Motodesk (native interface) starting");
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "Motodesk starting");
 
     // First, so that a second start never gets as far as the ports: it shows the running app.
     let background::Instance::First(second_starts) = background::claim(&install_name()) else {

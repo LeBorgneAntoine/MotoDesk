@@ -5,6 +5,12 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+### Modifié
+- **Nouvelle interface, native.** L'application n'est plus une page web dans une fenêtre : son interface est écrite en Rust (GPUI), plus rapide à ouvrir et à l'usage. Les écrans, les données, le journal fiscal et la synchronisation sont les mêmes ; les réglages de chaque poste (caisse, assistant) sont repris.
+- Imprimer un document ou la clé de récupération ouvre désormais un PDF dans le lecteur du poste, d'où l'impression se lance. La trace au journal et la mention DUPLICATA sont inchangées.
+- Les menus de chaque écran sont dans la barre de titre, avec leurs raccourcis.
+- Deux réglages d'apparence disparaissent : les coins arrondis (tout est carré) et le flou.
+
 ### Ajouté
 - Réseau local : liste des postes et « Retirer ce poste » pour un poste perdu ou volé. La clé du réseau change, l'administrateur choisit un nouveau mot de passe, et chaque autre poste est reconnecté par un administrateur (ses données sont conservées). Un poste qui a perdu sa clé se reconnecte de la même façon.
 - Sur un poste neuf, « Restaurer une sauvegarde » dès l'écran d'accès, sans créer d'abord un réseau.

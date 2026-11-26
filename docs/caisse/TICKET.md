@@ -22,4 +22,4 @@ Elle imprime néanmoins si :
 - au moins une ligne est un bien sous garantie légale de conformité ;
 - le TTC des prestations de service atteint 25,00 €.
 
-Le logiciel calcule cela dans `desktop/src/lib/pos/agec.ts` (`mustPrintTicket`).
+Le logiciel calcule cela dans `desktop-gpui/src/pages/pos/cart.rs` (`must_print_ticket`).

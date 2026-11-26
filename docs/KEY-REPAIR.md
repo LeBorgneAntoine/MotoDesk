@@ -14,7 +14,7 @@ replicates to the other devices and the cloud like any other.
 
 ## The tool
 
-`motodesk-keytool` is built with the app (`cargo build -p motodesk-desktop --bin motodesk-keytool`).
+`motodesk-keytool` is built with the app (`cargo build -p motodesk-gpui --bin motodesk-keytool`).
 It works on a database file, with the app **closed**.
 
 ```text

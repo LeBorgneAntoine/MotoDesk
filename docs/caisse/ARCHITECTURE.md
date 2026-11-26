@@ -15,7 +15,7 @@ Les factures du module *Ventes* empruntent le même `seal_in_tx`. La caisse n'in
 
 ## Rôle machine
 
-`pos.store.json` (plugin Tauri Store), jamais `app_settings`. Ces dernières sont répliquées en mesh (`EntityType::AppSetting`) : un booléen « caisse » y ferait basculer tout l'atelier.
+`pos.store.json` (un fichier du poste, dans son dossier de données), jamais `app_settings`. Ces dernières sont répliquées en mesh (`EntityType::AppSetting`) : un booléen « caisse » y ferait basculer tout l'atelier.
 
 ## TPE
 
