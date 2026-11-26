@@ -18,7 +18,7 @@ use motodesk_client::sales::{self, DraftStatus, ListQuery as ListSales, PaymentI
 use motodesk_client::stock::{self, MovementInput, SupplierInput};
 use motodesk_client::workshop::{NewOrder, OrderEdit, Step, WorkshopLineInput};
 use motodesk_client::{
-    accounting, auth, backup, company, dashboard, data, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local,
+    accounting, auth, background, backup, company, dashboard, data, fiscal, local_account, network, recovery, settings, sync, workshop, Client, Cloud, Local,
     TokenStore,
 };
 use motodesk_server::local_server::{loopback_api, test_support};
@@ -647,6 +647,23 @@ async fn the_network_status_is_read_and_a_pc_outside_a_local_network_cannot_reco
     let refused = network::reconnect(&api, "camille", "mot de passe").await.unwrap_err();
     assert_eq!((refused.status, refused.code.as_str()), (409, "conflict"));
     assert!(refused.message.contains("réseau local"), "the server says why: {}", refused.message);
+}
+
+#[tokio::test]
+async fn a_network_pc_stays_on_in_the_background_until_its_owner_says_otherwise() {
+    // Not a network PC: closing the window closes the app, unless the owner asks otherwise.
+    let alone = client().await;
+    let fresh = background::get(&alone).await.unwrap();
+    assert_eq!((fresh.enabled, fresh.stored, fresh.default_enabled), (false, None, false));
+
+    // A PC of a local network is on by default; the administrator's choice is kept.
+    let (api, _) = local_network().await;
+    let network = background::get(&api).await.unwrap();
+    assert_eq!((network.enabled, network.stored, network.default_enabled), (true, None, true));
+    let off = background::set(&api, false).await.unwrap();
+    assert_eq!((off.enabled, off.stored, off.default_enabled), (false, Some(false), true));
+    assert_eq!(background::get(&api).await.unwrap(), off);
+    assert!(background::set(&api, true).await.unwrap().enabled);
 }
 
 /// A fresh PC on which the first administrator has just created the local network.

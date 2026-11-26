@@ -21,6 +21,14 @@ anyhow = { workspace = true }
 # Settings are stored as JSON values: the settings screen reads and writes them as such.
 serde_json = { workspace = true }
 
+# Staying near the clock when the window is closed (see src/background.rs). The versions are
+# those the Tauri shell already brings in.
+[target.'cfg(windows)'.dependencies]
+tray-icon = { version = "0.25", default-features = false }
+auto-launch = "0.6"
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net"] }
 # examples/seed.rs fills a throwaway data folder to look at the screens with data in them.

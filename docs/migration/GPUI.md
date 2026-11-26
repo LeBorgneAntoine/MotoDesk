@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), impression d'une vente (données du document, trace au journal, PDF), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), impression d'une vente (données du document, trace au journal, PDF), réglage de l'arrière-plan, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -34,6 +34,7 @@ sont pas passés.
 | Caisse (ouverture de session, recherche et lecture de codes, panier, encaissement en espèces, carte, chèque ou à plusieurs, tickets en attente, tiroir, clôture) | migré, sans imprimante, tiroir ni terminal réels |
 | Assistant (conversations, échange, canevas, clé et modèle du poste) | migré, sans échange avec un vrai modèle |
 | Modèles (bibliothèque, éditeur de mise en page, aperçu, export PDF) | migré |
+| Arrière-plan (icône près de l'horloge, fenêtre cachée à la fermeture, démarrage avec Windows, une seule copie à la fois) | migré, sous Windows ; l'icône, son menu et l'entrée de démarrage n'ont pas été essayés |
 | Impression des documents (facture, avoir, ticket ou devis depuis Ventes avec sa trace et son DUPLICATA, clé de récupération) | migré : un PDF confié au lecteur du poste, pas d'envoi direct à une imprimante |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
@@ -53,6 +54,37 @@ bord : les raccourcis (Ctrl+N, F5...) et les fenêtres d'aide (documentation, ra
 propos). Sur
 l'Inventaire, les entrées de ces menus (nouveau produit, réception, nouvelle catégorie) ont
 toutes leur bouton à l'écran ; F5 actualise.
+
+Sur l'arrière-plan (`desktop-gpui/src/background.rs`, port de `src-tauri/src/background.rs`) :
+
+- Le service décide si le mode est actif (activé par défaut sur un poste d'un réseau local) ;
+  l'application l'exécute. Mode actif, **fermer la fenêtre la cache** : l'icône près de
+  l'horloge la rouvre d'un clic, son menu propose « Ouvrir Motodesk » et « Quitter (quitte le
+  réseau) ». Mode inactif, fermer la fenêtre arrête l'application, comme avant.
+- **Une seule copie à la fois** : un second lancement ne démarre rien, il fait réapparaître la
+  fenêtre de la copie qui tourne (deux copies se disputeraient les ports et la base). Chaque
+  profil isolé (`MOTODESK_PROFILE`) est une installation à part.
+- **Démarrage avec Windows** : l'entrée s'appelle « Motodesk », comme celle qu'écrivait Tauri.
+  L'application native reprend donc cette entrée au lieu d'en ajouter une seconde, et la fait
+  pointer sur son propre programme, lancé avec `--background` (fenêtre cachée). Le chemin est
+  mis entre guillemets, ce que Tauri ne faisait pas.
+- **Une version de développement ou un profil isolé n'écrit jamais cette entrée** (même règle
+  que sous Tauri) ; la carte des réglages le dit. Conséquence : l'écriture de l'entrée n'a pas
+  pu être essayée ici, seule sa composition est fixée par un test.
+- La carte « Arrière-plan » est dans Paramètres › Synchronisation, avec « Quitter Motodesk
+  maintenant ».
+- **Windows seulement** pour l'instant : ailleurs il n'y a pas d'icône, la fenêtre n'est donc
+  jamais cachée et la carte n'est pas montrée. Si l'icône ne peut pas être posée, la fenêtre
+  n'est pas cachée non plus (Tauri la cachait quand même, sans moyen de la retrouver).
+- L'icône et son menu viennent de `tray-icon`, l'entrée de démarrage de `auto-launch` : les
+  deux bibliothèques que Tauri utilise déjà, aux mêmes versions.
+- Vérifié dans l'application sur un réseau local de démonstration : la fermeture cache la
+  fenêtre sans arrêter le programme, un second lancement se termine aussitôt et la fait
+  réapparaître, un lancement avec `--background` reste caché jusqu'à un second lancement, la
+  carte des réglages (interrupteur, messages), la fermeture qui arrête vraiment quand le mode
+  est coupé, « Quitter Motodesk maintenant ». Non essayés, faute de pouvoir cliquer près de
+  l'horloge depuis un essai automatique : le clic sur l'icône et son menu. Non essayée non
+  plus : l'entrée de démarrage de Windows (voir plus haut).
 
 Sur l'impression :
 
@@ -328,8 +360,8 @@ Sur les Paramètres :
 - Un nombre hors de ses bornes ou une couleur mal écrite est signalé sous son champ et bloque
   « Enregistrer » ; Svelte l'enregistrait tel quel. L'apparence (thème, accent, mode compact)
   change à l'enregistrement, pas pendant la saisie.
-- La carte des mises à jour et celle de l'arrière-plan (rester actif fenêtre fermée, démarrer
-  avec Windows) arrivent avec la zone de notification et les mises à jour.
+- La carte de l'arrière-plan est là (voir « Sur l'arrière-plan ») ; celle des mises à jour
+  arrive avec les mises à jour.
 - Sur un réseau local, vider la raison sociale la retire vraiment (Svelte envoyait `null`, que
   le service lit comme « ne rien changer »).
 - **Défaut du service trouvé en chemin, présent aussi sous Svelte** : « Synchroniser », dans
@@ -364,7 +396,8 @@ enregistrée telle quelle si personne ne la complète : le service la déduit al
 ## Lancer
 
 Les deux interfaces partagent le dossier de données et les ports 17300 et 17301 : **une seule
-tourne à la fois**.
+tourne à la fois**. L'application native, relancée alors qu'elle tourne déjà, ne fait que
+montrer sa fenêtre.
 
 ```powershell
 cargo run -p motodesk-ui --example gallery          # tous les composants du kit
@@ -415,8 +448,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : l'icône de la zone de notification, le démarrage avec Windows, les mises à jour et
-l'installateur, puis le retrait de Svelte et de Tauri.
+Ordre prévu : les mises à jour et l'installateur, puis le retrait de Svelte et de Tauri.
 
 ## Comment un écran parle au service
 

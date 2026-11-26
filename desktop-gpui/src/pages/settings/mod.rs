@@ -5,6 +5,7 @@
 //! and the assistant.
 
 mod assistant;
+mod background;
 mod company;
 mod registry;
 mod sync;
