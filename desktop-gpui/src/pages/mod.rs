@@ -12,6 +12,7 @@ pub mod data;
 pub mod employees;
 pub mod lines;
 pub mod parc;
+pub mod pos;
 pub mod sales;
 pub mod settings;
 pub mod shared;

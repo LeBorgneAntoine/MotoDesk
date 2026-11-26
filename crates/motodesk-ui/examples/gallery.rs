@@ -255,6 +255,45 @@ impl Gallery {
                 ),
             )
             .child(
+                Self::block("PosKey, PosItem, PosCartLine", cx).child(
+                    row()
+                        .gap(m.space_6)
+                        .items_start()
+                        .child(
+                            row()
+                                .w(px(320.))
+                                .gap(m.space_2)
+                                .child(PosKey::new("pos-cash", "Espèces").icon(IconName::Banknote).primary().on_click(|_, _, _| {}))
+                                .child(PosKey::new("pos-card", "Carte").icon(IconName::CreditCard).on_click(|_, _, _| {}))
+                                .child(PosKey::new("pos-cheque", "Chèque").icon(IconName::FileText).disabled(true)),
+                        )
+                        .child(
+                            col()
+                                .w(px(320.))
+                                .child(
+                                    PosItem::new("pos-item", "Huile moteur 10W40", "14,99 €")
+                                        .icon(IconName::Package)
+                                        .meta("Motul · MOT-5100-1L")
+                                        .badge("Stock 3", Status::Warning)
+                                        .on_click(|_, _, _| {}),
+                                )
+                                .child(PosItem::new("pos-item-out", "Bougie CR8E", "6,50 €").icon(IconName::Package).badge("Rupture", Status::Danger).disabled(true))
+                                .child(PosItem::new("pos-item-compact", "Kit chaîne 520", "89,00 €").icon(IconName::Package).compact().on_click(|_, _, _| {})),
+                        )
+                        .child(
+                            col().w(px(380.)).child(
+                                PosCartLine::new("pos-line", "Plaquettes de frein avant", "2", "89,82 €")
+                                    .icon(IconName::Package)
+                                    .meta("2 × 49,90 € TTC · −10 %")
+                                    .on_minus(|_, _, _| {})
+                                    .on_plus(|_, _, _| {})
+                                    .on_discount(|_, _, _| {})
+                                    .on_remove(|_, _, _| {}),
+                            ),
+                        ),
+                ),
+            )
+            .child(
                 Self::block("Tabs", cx).child(
                     Tabs::new(
                         "tabs",

@@ -17,12 +17,16 @@ use crate::auth::{AuthStatus, AuthStore};
 use crate::backend::{self, ApiExt as _};
 use crate::format::{humanize_error, last_group_matches};
 use crate::pages::auth::AuthPage;
+use crate::pages::pos::Till;
+use crate::pos::{self, PosState};
 use crate::shell::Shell;
 
 pub struct Root {
     failure: Option<StartupFailure>,
     auth_page: Entity<AuthPage>,
     shell: Option<Entity<Shell>>,
+    /// The till, on a PC set up as one.
+    till: Option<Entity<Till>>,
     /// The last characters of the recovery key, typed back to prove it was written down.
     key_check: TextModel,
     key_saving: bool,
@@ -39,11 +43,16 @@ impl Root {
                 cx.notify();
             }),
             key_check.on_event(window, cx, |_, _, _, cx| cx.notify()),
+            cx.observe_in(&PosState::global(cx), window, |this, _, window, cx| {
+                this.screen_changed(window, cx);
+                cx.notify();
+            }),
         ];
         Self {
             failure: None,
             auth_page: cx.new(|cx| AuthPage::new(window, cx)),
             shell: None,
+            till: None,
             key_check,
             key_saving: false,
             key_shown: false,
@@ -65,7 +74,9 @@ impl Root {
         // A new session starts on fresh screens: nothing of the previous account is kept.
         if !signed_in {
             self.shell = None;
+            self.till = None;
         }
+        self.screen_changed(window, cx);
         if has_key && !self.key_shown {
             self.key_shown = true;
             self.show_recovery_key(window, cx);
@@ -73,6 +84,22 @@ impl Root {
         if !has_key {
             self.key_shown = false;
         }
+    }
+
+    /// Whether the till is what this PC shows now: signed in, on a PC set up as a till, and
+    /// not stepped out to the office.
+    fn at_the_till(cx: &App) -> bool {
+        AuthStore::global(cx).read(cx).is_authenticated() && PosState::global(cx).read(cx).active()
+    }
+
+    /// The till fills the screen; everything else is a window. A till that is left starts
+    /// again empty.
+    fn screen_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let at_the_till = Self::at_the_till(cx);
+        if !at_the_till {
+            self.till = None;
+        }
+        pos::set_fullscreen(at_the_till, window);
     }
 
     fn show_recovery_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -190,6 +217,11 @@ impl Render for Root {
         let status = AuthStore::global(cx).read(cx).status;
         if backend::client(cx).is_none() || status == AuthStatus::Initializing {
             return Self::bare(StateView::loading(), cx).into_any_element();
+        }
+
+        if status == AuthStatus::Authenticated && Self::at_the_till(cx) {
+            let till = self.till.get_or_insert_with(|| cx.new(|cx| Till::new(window, cx))).clone();
+            return till.into_any_element();
         }
 
         if status == AuthStatus::Authenticated {

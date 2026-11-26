@@ -8,6 +8,7 @@ mod company;
 mod registry;
 mod sync;
 mod system;
+mod till;
 
 use std::collections::BTreeMap;
 
@@ -162,6 +163,7 @@ impl SettingsPage {
                 "company" => Some(cx.new(|cx| company::CompanyView::new(window, cx)).into()),
                 "system" if Self::is_admin(cx) => Some(cx.new(|cx| system::SystemView::new(window, cx)).into()),
                 "sync" if Self::is_admin(cx) => Some(cx.new(|cx| sync::SyncView::new(window, cx)).into()),
+                "caisse" if Self::is_admin(cx) => Some(cx.new(|cx| till::TillSettings::new(window, cx)).into()),
                 _ => None,
             };
         } else {
@@ -506,7 +508,7 @@ impl SettingsPage {
                 ("sync", None) if !is_admin => {
                     body.child(Alert::info().child("La synchronisation est gérée par les administrateurs."))
                 }
-                ("caisse", None) => body.child(Self::later("Caisse")),
+                ("caisse", None) => body.child(Alert::info().child("Le rôle de caisse est réservé aux administrateurs.")),
                 _ => body.child(Self::later("Assistant")),
             };
         }

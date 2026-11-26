@@ -9,6 +9,7 @@ use motodesk_client::import::schema::{self as import_schema, Mode};
 use motodesk_client::import::{self, transforms, ImportRequest, ImportResult};
 use motodesk_client::local_account::SetupPayload;
 use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAccount};
+use motodesk_client::pos::{self, Checkout, PosDocument, PosPayment, TpeMode};
 use motodesk_client::products::{
     self, CategoryInput, ListQuery as ListProducts, ProductInput, Unit, VariantAttr, VariantInput,
 };
@@ -1017,4 +1018,115 @@ async fn a_file_goes_into_the_shared_folder_and_comes_back_the_same() {
     shared::delete_folder(&api, &folder.id).await.unwrap();
     assert!(shared::browse(&api, None).await.unwrap().folders.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn the_till_opens_sells_puts_aside_and_closes() {
+    let (api, _) = local_network().await;
+    let oil = products::create(
+        &api,
+        &ProductInput {
+            name: "Huile 5W40 1L".into(),
+            sku: Some("HUI-5W40".into()),
+            selling_price_ttc_cents: Some(999),
+            vat_rate_bp: 2000,
+            stock_quantity: Some(10.),
+            is_active: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    // A shelf price travels as it is on the label: at 20 %, 9,99 has no net amount in whole cents.
+    let line = |quantity_milli: i64| SaleLineInput {
+        product_id: Some(oil.id.clone()),
+        label: Some(oil.name.clone()),
+        quantity_milli,
+        unit_price_ht_cents: 833,
+        unit_price_ttc_cents: Some(999),
+        vat_rate_bp: 2000,
+        discount_bp: 0,
+    };
+
+    // A scanned code finds the product; an unknown one finds nothing, without an error.
+    assert_eq!(pos::product_by_sku(&api, "HUI-5W40").await.unwrap().map(|p| p.id), Some(oil.id.clone()));
+    assert_eq!(pos::product_by_sku(&api, "inconnu").await.unwrap(), None);
+
+    assert_eq!(pos::session(&api).await.unwrap(), None);
+    let opened = pos::open_session(&api, 5_000).await.unwrap();
+    assert_eq!(opened.opening_float_cents, 5_000);
+    assert_eq!(pos::session(&api).await.unwrap().map(|s| s.id), Some(opened.id));
+
+    // Two bottles, a 20 euro note: the ticket is sealed, the change worked out, the drawer asked for.
+    let sold = pos::checkout(
+        &api,
+        &Checkout {
+            client_id: None,
+            kind: PosDocument::Receipt,
+            lines: vec![line(2_000)],
+            payments: vec![PosPayment { amount_cents: 2_000, method: "cash", ..Default::default() }],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(sold.sale.total_ttc_cents, Some(1_998));
+    assert_eq!((sold.change_cents, sold.kick_drawer), (2, true));
+    assert!(sold.sale.locked_at.is_some(), "a ticket is sealed as it is sold");
+
+    // Without a printer nothing leaves the PC: the ticket comes back as text.
+    let ticket = pos::print_ticket(&api, &sold.sale.id, None).await.unwrap();
+    assert!(ticket.text.contains("Huile 5W40 1L") && ticket.text.contains("19,98"), "{}", ticket.text);
+
+    // A card goes through the terminal first, then pays with its authorisation.
+    let charge = pos::charge_card(&api, 999, TpeMode::Simulator).await.unwrap();
+    let auth = charge.accepted().expect("the simulator accepts").to_string();
+    let by_card = pos::checkout(
+        &api,
+        &Checkout {
+            client_id: None,
+            kind: PosDocument::Receipt,
+            lines: vec![line(1_000)],
+            payments: vec![PosPayment { amount_cents: 999, method: "card", auth_ref: Some(auth), ..Default::default() }],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!((by_card.change_cents, by_card.kick_drawer), (0, false));
+
+    // What sold is what the quick strip offers.
+    let frequent = pos::frequents(&api).await.unwrap();
+    assert_eq!(frequent.first().map(|item| item.id.as_str()), Some(oil.id.as_str()));
+
+    // A cart put aside waits as an unsealed ticket, and is taken up again by deleting it.
+    assert!(pos::held(&api).await.unwrap().is_empty());
+    let parked = pos::park(&api, &[line(3_000)]).await.unwrap();
+    let waiting = pos::held(&api).await.unwrap();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!((waiting[0].id.as_str(), waiting[0].total_ttc_cents), (parked.id.as_str(), 2_997));
+    let recalled = sales::get(&api, &parked.id).await.unwrap();
+    assert_eq!(recalled.lines[0].price_basis, "ttc");
+    sales::delete(&api, &parked.id).await.unwrap();
+    assert!(pos::held(&api).await.unwrap().is_empty());
+
+    // An invoice names its customer.
+    let nameless = pos::checkout(
+        &api,
+        &Checkout {
+            client_id: None,
+            kind: PosDocument::Invoice,
+            lines: vec![line(1_000)],
+            payments: vec![PosPayment { amount_cents: 999, method: "cash", ..Default::default() }],
+        },
+    )
+    .await;
+    assert!(nameless.is_err(), "an invoice without a customer is refused");
+
+    pos::open_drawer(&api).await.unwrap();
+
+    // Closing: the float plus the cash taken (19,98) is what the drawer should hold.
+    let closed = pos::close_session(&api, 7_000, false).await.unwrap();
+    assert_eq!(closed.expected_cash_cents, 6_998);
+    assert_eq!((closed.variance_cents, closed.verdict()), (2, "excédent"));
+    assert_eq!(closed.day_closure, None);
+    assert_eq!(pos::session(&api).await.unwrap(), None);
 }

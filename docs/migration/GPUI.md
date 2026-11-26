@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -25,13 +25,14 @@ sont pas passés.
 | Ventes (devis, factures, validation, avoirs, règlements) | migré, sans l'impression |
 | L'Atelier (tableau des ordres de réparation, fiche, facturation) | migré |
 | Comptabilité (journaux des ventes et de caisse, TVA, balance âgée, FEC, caisse et intégrité, clôtures, archives, journal fiscal) | migré |
-| Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré, sans les réglages de la Caisse et de l'Assistant |
+| Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré, sans les réglages de l'Assistant |
 | Données : tables (aperçu, recherche, export d'une page, vidage), console SQL, import CSV | migré |
 | Dossier partagé (dossiers, visibilité, envoi et téléchargement de fichiers, historique) | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Modèles, Assistant, Caisse | à faire |
+| Caisse (ouverture de session, recherche et lecture de codes, panier, encaissement en espèces, carte, chèque ou à plusieurs, tickets en attente, tiroir, clôture) | migré, sans imprimante, tiroir ni terminal réels |
+| Modèles, Assistant | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -73,6 +74,46 @@ depuis un essai automatique. En développement seulement (`desktop-gpui/src/back
 `MOTODESK_DEV_PICK_FILES=<fichiers>` répond à la place d'une fenêtre « Ouvrir » et
 `MOTODESK_DEV_SAVE_DIR=<dossier>` à la place d'une fenêtre « Enregistrer sous ». Ces deux
 variables n'existent pas dans une version publiée.
+
+Sur la Caisse :
+
+- Un poste devient une caisse dans Paramètres › Caisse (administrateurs) : le réglage reste
+  sur l'ordinateur, dans le même fichier `pos.store.json` que l'interface Svelte
+  (`motodesk_client::pos::PosConfigStore`), et la caisse s'ouvre aussitôt, puis à chaque
+  démarrage. « Bureau » ramène un administrateur à la coquille ; « Ouvrir la caisse
+  maintenant » y retourne.
+- L'encaissement tient en une seule fenêtre à étapes (mode de paiement, espèces, carte,
+  chèque, vente enregistrée) au lieu d'une fenêtre par étape. Pendant un paiement en plusieurs
+  fois, elle montre le reste à payer et ce qui a déjà été reçu.
+- La monnaie à rendre s'affiche à la dernière étape, avec « Imprimer » et « Sans ticket ».
+  **Sans imprimante réglée, « Imprimer » montre le texte du ticket à l'écran** ; Svelte
+  annonçait l'impression sans rien montrer.
+- **Si le service refuse la vente une fois le paiement saisi**, les règlements sont conservés
+  et la fenêtre propose « Enregistrer la vente » à nouveau ou « Annuler les règlements » ;
+  Svelte les gardait sans le dire.
+- Un code tapé ou lu en entier (référence exacte) ajoute son article après une courte pause,
+  sans Entrée ; Entrée prend le premier article de la liste. Une réponse arrivée après
+  qu'Entrée a déjà servi est ignorée, pour ne pas compter l'article deux fois. Les boutons du
+  panier rendent le clavier au champ de recherche, pour que la douchette continue d'y écrire.
+- En mode facture, l'en-tête du panier dit « Facture » et « Encaisser » attend un client.
+- La clôture refuse un montant compté vide (ce serait enregistrer tout le tiroir manquant) et
+  n'annonce en vert qu'un tiroir conforme ; un écart s'affiche en avertissement.
+- Le ticket est obligatoire à partir de 25 € de prestations (`must_print_ticket`). Le service
+  n'a pas d'indicateur de garantie : ce cas de Svelte (`mentions.ts`) n'est pas repris.
+- La caisse occupe tout l'écran. En développement seulement, `MOTODESK_DEV_WINDOWED=1` la
+  garde dans sa fenêtre.
+- Vérifié dans l'application sur un dossier de démonstration à part, en fenêtre : activation
+  du poste, ouverture de session, recherche, code lu, article en rupture refusé, quantités,
+  remise, retrait d'une ligne, encaissement en espèces (monnaie rendue), par carte
+  (simulateur), par chèque, en deux fois, ticket affiché, mise en attente et reprise,
+  ouverture du tiroir (journalisée), facture avec client, aller-retour au bureau, clôture de
+  session avec et sans écart, clôture de journée, puis vente refusée le même jour (règlements
+  conservés). Non essayés : une vraie imprimante, un vrai tiroir, un vrai terminal, le plein
+  écran lui-même, les articles favoris, et la vue d'un employé non administrateur.
+- **Constat sur le service, identique sous Svelte** : une fois la journée clôturée, une
+  session de caisse s'ouvre encore et la carte est encaissée sur le terminal avant que le
+  service ne refuse la vente. Avec un vrai terminal, le client serait débité d'une vente qui
+  ne peut pas être enregistrée ce jour-là. Le refus devrait venir à l'ouverture de la session.
 
 Sur le Dossier partagé :
 
@@ -147,7 +188,7 @@ Sur les Paramètres :
 - Un nombre hors de ses bornes ou une couleur mal écrite est signalé sous son champ et bloque
   « Enregistrer » ; Svelte l'enregistrait tel quel. L'apparence (thème, accent, mode compact)
   change à l'enregistrement, pas pendant la saisie.
-- Les catégories Caisse et Assistant affichent qu'elles arrivent avec leur écran. La carte des
+- La catégorie Assistant affiche qu'elle arrive avec son écran. La carte des
   mises à jour et celle de l'arrière-plan (rester actif fenêtre fermée, démarrer avec Windows)
   arrivent avec la zone de notification et les mises à jour.
 - Sur un réseau local, vider la raison sociale la retire vraiment (Svelte envoyait `null`, que
@@ -235,7 +276,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
+Ordre prévu : Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
 
