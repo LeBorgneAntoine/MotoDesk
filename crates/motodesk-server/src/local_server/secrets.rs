@@ -5,6 +5,7 @@
 //! `CredRead` cannot see. The file lives next to SQLite and is not meshed.
 
 use std::path::Path;
+use std::time::Duration;
 
 use keyring::Entry;
 use sqlx::SqlitePool;
@@ -114,18 +115,42 @@ impl Keychain {
     /// through the same handle would not notice, so a new one is opened. Callers
     /// use the `Err` to fall back to another store instead of believing the secret
     /// was kept.
+    ///
+    /// "Nothing there" is not believed at the first read. Windows Credential Manager
+    /// can report a write as done before a read can see it (see `READ_BACK_PAUSES_MS`),
+    /// and a caller told "not kept" puts the secret somewhere else while the entry
+    /// turns up in the keychain all the same. So the read is made again for a short
+    /// while. A store that keeps nothing is still refused, that much later; one that
+    /// hands back another value is refused at once.
     fn set_verified(&self, user: &str, value: &str) -> anyhow::Result<()> {
         self.entry(user)?.set_password(value)?;
-        match self.entry(user)?.get_password() {
-            Ok(read) if read == value => Ok(()),
-            Ok(_) => anyhow::bail!("le trousseau du système a renvoyé une autre valeur que celle écrite"),
-            Err(keyring::Error::NoEntry) => anyhow::bail!(
-                "le trousseau du système a accepté l'écriture mais ne la conserve pas"
-            ),
-            Err(e) => Err(e.into()),
+        let mut pauses = READ_BACK_PAUSES_MS.iter();
+        loop {
+            match self.entry(user)?.get_password() {
+                Ok(read) if read == value => return Ok(()),
+                Ok(_) => anyhow::bail!("le trousseau du système a renvoyé une autre valeur que celle écrite"),
+                Err(keyring::Error::NoEntry) => match pauses.next() {
+                    Some(ms) => std::thread::sleep(Duration::from_millis(*ms)),
+                    None => anyhow::bail!(
+                        "le trousseau du système a accepté l'écriture mais ne la conserve pas"
+                    ),
+                },
+                Err(e) => return Err(e.into()),
+            }
         }
     }
 }
+
+/// The pauses between the reads `set_verified` makes while the store says the secret it
+/// has just accepted is not there: seven reads over 300 ms, close together at first.
+///
+/// On Windows 11 (build 26300, 2026-11-26, machine busy) `CredWriteW` returned success
+/// and the `CredReadW` that followed answered "not found"; the entry was readable 25 ms
+/// later the one time it was measured, and twice two reads in a row missed it. The wait
+/// is kept short because signing in goes through here: it is only spent when the store
+/// answers "not there", which a working one rarely does and a store that keeps nothing
+/// always does.
+const READ_BACK_PAUSES_MS: [u64; 6] = [5, 10, 20, 40, 75, 150];
 
 fn entry(user: &str) -> anyhow::Result<Entry> {
     Ok(Keychain::current().entry(user)?)
@@ -384,9 +409,9 @@ pub fn clear_on_sign_out(local_network: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     use uuid::Uuid;
 
     // What is done with a credential store (carrying a secret over from the former name,
@@ -438,6 +463,81 @@ mod tests {
         keyring::mock::default_credential_builder()
             .build(None, service, user)
             .map(Entry::new_with_credential)
+    }
+
+    thread_local! {
+        /// For `late`: how many more reads answer "no such entry".
+        static READS_THAT_MISS: Cell<u32> = const { Cell::new(0) };
+        /// How many reads `late` and `altering` were asked for.
+        static READS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// A store that keeps what it is given and shows it late, as Credential Manager was
+    /// seen to: the next `READS_THAT_MISS` reads answer "no such entry".
+    struct LateEntry(KeptEntry);
+
+    impl keyring::credential::CredentialApi for LateEntry {
+        fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+            self.0.set_secret(secret)
+        }
+
+        fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+            READS.set(READS.get() + 1);
+            match READS_THAT_MISS.get() {
+                0 => self.0.get_secret(),
+                left => {
+                    READS_THAT_MISS.set(left - 1);
+                    Err(keyring::Error::NoEntry)
+                }
+            }
+        }
+
+        fn delete_credential(&self) -> keyring::Result<()> {
+            self.0.delete_credential()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn late(service: &str, user: &str) -> keyring::Result<Entry> {
+        Ok(Entry::new_with_credential(Box::new(LateEntry(KeptEntry(service.to_string(), user.to_string())))))
+    }
+
+    /// A store that hands back something else than it was given.
+    struct AlteringEntry(KeptEntry);
+
+    impl keyring::credential::CredentialApi for AlteringEntry {
+        fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+            self.0.set_secret(secret)
+        }
+
+        fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+            READS.set(READS.get() + 1);
+            let mut secret = self.0.get_secret()?;
+            secret.extend_from_slice(b" (altered)");
+            Ok(secret)
+        }
+
+        fn delete_credential(&self) -> keyring::Result<()> {
+            self.0.delete_credential()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn altering(service: &str, user: &str) -> keyring::Result<Entry> {
+        Ok(Entry::new_with_credential(Box::new(AlteringEntry(KeptEntry(service.to_string(), user.to_string())))))
+    }
+
+    /// The reads `set_verified` makes before it gives up, and the time it spends between them.
+    const READS_BEFORE_GIVING_UP: u32 = READ_BACK_PAUSES_MS.len() as u32 + 1;
+
+    fn longest_wait() -> Duration {
+        Duration::from_millis(READ_BACK_PAUSES_MS.iter().sum())
     }
 
     /// An installation that was renamed, on the given store.
@@ -503,6 +603,53 @@ mod tests {
         let outcome = dropped.set_verified(USER, "value");
         assert!(outcome.is_err(), "a store that keeps nothing was believed");
         assert!(matches!(dropped.entry(USER).unwrap().get_password(), Err(keyring::Error::NoEntry)));
+    }
+
+    /// What Windows does when it is busy: the write is reported as done, and a read can
+    /// see it a moment later. The secret was kept, and the caller is told so, down to
+    /// the last read `set_verified` makes.
+    #[test]
+    fn a_write_the_store_shows_late_is_kept() {
+        let keychain = renamed(late);
+        for (misses, value) in [(1, "shown at the second read"), (READS_BEFORE_GIVING_UP - 1, "shown at the last")] {
+            READS_THAT_MISS.set(misses);
+            READS.set(0);
+            let outcome = keychain.set_verified(USER, value);
+            assert!(outcome.is_ok(), "a write shown after {misses} read(s) was reported as lost: {outcome:?}");
+            assert_eq!(READS.get(), misses + 1, "it stops reading once the secret is there");
+            assert_eq!(keeping("current", USER).unwrap().get_password().unwrap(), value);
+        }
+    }
+
+    /// The wait has an end: signing in goes through `set_verified`. A store that keeps
+    /// nothing is told apart from a late write by that end, so it is still refused.
+    #[test]
+    fn a_store_that_keeps_nothing_is_refused_after_a_bounded_wait() {
+        // In reads, which a busy machine does not stretch: a write that would only show
+        // one read later is not waited for.
+        READS_THAT_MISS.set(READS_BEFORE_GIVING_UP);
+        READS.set(0);
+        let refused = renamed(late).set_verified(USER, "value").unwrap_err();
+        assert!(format!("{refused:#}").contains("ne la conserve pas"), "{refused:#}");
+        assert_eq!(READS.get(), READS_BEFORE_GIVING_UP);
+
+        // In time, on the store a build without a platform backend gets.
+        let started = Instant::now();
+        let refused = renamed(forgetting).set_verified(USER, "value").unwrap_err();
+        let took = started.elapsed();
+        assert!(format!("{refused:#}").contains("ne la conserve pas"), "{refused:#}");
+        assert!(took >= longest_wait(), "gave up after {took:?}, before a late write had its chance");
+        assert!(took < longest_wait() + Duration::from_secs(2), "took {took:?} to give up");
+        assert!(longest_wait() <= Duration::from_millis(500), "too long a wait for a sign-in");
+    }
+
+    /// A value that comes back changed is not a late write: nothing is waited for.
+    #[test]
+    fn a_store_that_hands_back_another_value_is_refused_at_once() {
+        READS.set(0);
+        let refused = renamed(altering).set_verified(USER, "value").unwrap_err();
+        assert!(format!("{refused:#}").contains("une autre valeur"), "{refused:#}");
+        assert_eq!(READS.get(), 1, "it was read again");
     }
 
     /// A secret saved by an installation made before the rename is found, and carried
