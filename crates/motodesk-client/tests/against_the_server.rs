@@ -482,6 +482,11 @@ async fn a_repair_order_goes_through_the_workshop_and_becomes_an_invoice() {
     .await
     .unwrap();
     assert_eq!((order.status, order.client_name.as_deref()), (Step::Pending, Some("Le Gall")));
+    // A customer's panel lists their own orders, and nobody else's.
+    let stranger = clients::create(&api, &ClientInput { last_name: "Tanguy".into(), ..Default::default() }).await.unwrap();
+    let theirs = workshop::list_for_client(&api, &owner.id).await.unwrap();
+    assert_eq!(theirs.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), [order.id.as_str()]);
+    assert!(workshop::list_for_client(&api, &stranger.id).await.unwrap().is_empty());
 
     // The form: a part at its shelf price, an hour and a half of labour, the mileage.
     let edit = OrderEdit {

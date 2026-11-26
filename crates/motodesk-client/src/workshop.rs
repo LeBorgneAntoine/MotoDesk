@@ -174,6 +174,11 @@ pub async fn list_board(client: &Client) -> ApiResult<Vec<WorkshopOrder>> {
     client.get("/api/workshop-orders?board=true").await
 }
 
+/// The repair orders of one customer, the latest first.
+pub async fn list_for_client(client: &Client, client_id: &str) -> ApiResult<Vec<WorkshopOrder>> {
+    client.get(format!("/api/workshop-orders?client_id={}", crate::settings::encode(client_id))).await
+}
+
 pub async fn get(client: &Client, id: &str) -> ApiResult<WorkshopOrder> {
     client.get(format!("/api/workshop-orders/{id}")).await
 }
