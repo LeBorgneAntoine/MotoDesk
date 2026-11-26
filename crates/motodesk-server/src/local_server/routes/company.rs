@@ -44,7 +44,15 @@ async fn require_standalone_admin(state: &SharedState) -> LocalResult<()> {
 #[derive(Debug, serde::Deserialize)]
 struct UpdateCompany {
     name: Option<String>,
-    legal_name: Option<String>,
+    /// Absent leaves the legal name as it is; `null` or an empty string clears it: `null` is
+    /// what the settings screen sends, here as to the cloud, when the field is emptied.
+    #[serde(default, deserialize_with = "sent")]
+    legal_name: Option<Option<String>>,
+}
+
+/// A field that was sent, whatever it holds: `null` is a value here, not an absence.
+fn sent<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Option<Option<String>>, D::Error> {
+    serde::Deserialize::deserialize(de).map(Some)
 }
 
 async fn update_company(
@@ -59,7 +67,7 @@ async fn update_company(
         }
         other => other.map(str::to_string),
     };
-    let legal = body.legal_name.as_deref().map(str::trim).map(str::to_string);
+    let legal = body.legal_name.map(|l| l.as_deref().unwrap_or_default().trim().to_string());
     if legal.as_deref().is_some_and(|l| l.chars().count() > 200) {
         return Err(LocalError::BadRequest("La dénomination est limitée à 200 caractères.".into()));
     }
@@ -203,7 +211,7 @@ mod tests {
         let state = standalone_shop().await;
         let body = update_company(
             State(state.clone()),
-            Json(UpdateCompany { name: Some("Atelier Exemple".into()), legal_name: Some("Atelier Exemple SARL".into()) }),
+            Json(UpdateCompany { name: Some("Atelier Exemple".into()), legal_name: Some(Some("Atelier Exemple SARL".into())) }),
         )
         .await
         .unwrap()
@@ -213,7 +221,7 @@ mod tests {
         assert!(body["id"].is_string(), "the company id of the install");
 
         // An empty legal name clears it; an empty trade name is refused.
-        let cleared = update_company(State(state.clone()), Json(UpdateCompany { name: None, legal_name: Some("".into()) }))
+        let cleared = update_company(State(state.clone()), Json(UpdateCompany { name: None, legal_name: Some(Some("".into())) }))
             .await
             .unwrap()
             .0;
@@ -221,6 +229,28 @@ mod tests {
         assert_eq!(cleared["name"], "Atelier Exemple", "an absent field is left alone");
         let blank = update_company(State(state), Json(UpdateCompany { name: Some("  ".into()), legal_name: None })).await;
         assert!(matches!(blank, Err(LocalError::BadRequest(_))));
+    }
+
+    /// The body as the settings screen sends it, read the way the route reads it.
+    fn posted(body: Value) -> Json<UpdateCompany> {
+        Json(serde_json::from_value(body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn a_null_legal_name_clears_it_and_an_absent_one_leaves_it() {
+        let state = standalone_shop().await;
+        let named = posted(json!({ "name": "Atelier Exemple", "legal_name": "Atelier Exemple SARL" }));
+        let _ = update_company(State(state.clone()), named).await.unwrap();
+
+        // Renaming alone says nothing about the legal name.
+        let renamed = update_company(State(state.clone()), posted(json!({ "name": "Atelier Martin" }))).await.unwrap().0;
+        assert_eq!(renamed["legal_name"], "Atelier Exemple SARL");
+
+        // The screen sends `null` when "Raison sociale" is emptied, as it does to the cloud.
+        let emptied = posted(json!({ "name": "Atelier Martin", "legal_name": null }));
+        let cleared = update_company(State(state.clone()), emptied).await.unwrap().0;
+        assert!(cleared["legal_name"].is_null(), "{cleared}");
+        assert_eq!(cleared["name"], "Atelier Martin");
     }
 
     #[tokio::test]
