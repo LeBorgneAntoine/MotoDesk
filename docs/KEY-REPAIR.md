@@ -37,8 +37,8 @@ The app's data folder on Windows is `%APPDATA%\com.motodesk.app\` (an install ma
 
 | State | Meaning | `repair` |
 |---|---|---|
-| saine | chain verifies, a key that can sign is at hand | nothing to do |
-| clé perdue | chain verifies, no key can sign for it | declares a new key from the next entry |
+| saine | chain verifies, the key the journal names is at hand (keychain or database) | nothing to do |
+| clé perdue | chain verifies, no key at hand is the one the journal names | declares a new key from the next entry |
 | signée par une autre clé | an older version silently replaced a lost key; that key is still at hand | declares that key from the first entry it signed |
 | signatures invérifiables | some entries' signatures match no key at hand (the key they used is gone too) | refused, unless `--accept-unverifiable` |
 | chaîne rompue | the hashes do not link: this is tampering, not a lost key | refused, always |
@@ -51,6 +51,31 @@ repair entry, that those entries (a fixed range, all earlier than the declaratio
 longer be verified. Their hashes still chain and are still checked; only the signature is
 not. The register's integrity check keeps reporting them. A declaration can never excuse an
 entry written after it. Do this knowingly: it is a statement the register makes about itself.
+
+## More than one key at hand
+
+The credential store and the database can each hold a key for the same register, and not
+always the same one:
+
+- Windows can answer "not kept" for a write it did keep. A new register then keeps its key
+  in the database as well (the same key, twice). A `repair --keystore keychain` is refused
+  with « le trousseau du système refuse la nouvelle clé », nothing is written to the
+  journal, and the key it made may stay in the credential store, declared nowhere.
+- A restore onto a computer whose credential store cannot be written puts the backup's key
+  in the restored database, while the store may still hold the key of the data that was
+  replaced.
+- A repair with `--keystore database` leaves whatever the credential store held.
+
+None of this decides which key signs. The register signs with the key its journal names,
+wherever that key is kept, and with no other; when the named key is not at hand, nothing
+signs and the state is « clé perdue », whatever else is there. `diagnose` lists every key
+at hand, where it is kept, and which one the register signs with. A backup carries the
+named key.
+
+A key the journal does not name is left where it is: the tool never deletes or replaces a
+key on a guess. A refused repair can simply be run again, with either `--keystore`. The
+new key is kept only once its declaration is written, in the same transaction for
+`database`, just before the commit for `keychain`.
 
 ## Cloud
 

@@ -16,6 +16,13 @@
 //! What cannot be repaired is refused rather than papered over: a chain whose hashes
 //! do not link (that is tampering, not a lost key), and signatures that no key
 //! available here can account for.
+//!
+//! A register is healthy when the till can sign for it, and the till signs with the
+//! key at hand that the journal names, wherever it is kept (`keys::named_by`, the same
+//! choice `fiscal::current` makes). A key kept here that the journal does not name --
+//! one a refused repair left in the keychain, or the key of the data a restore
+//! replaced -- is neither a fault nor a key: it is listed, signs nothing, and nothing
+//! removes it.
 
 use std::sync::Arc;
 
@@ -27,26 +34,12 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use super::keys::{self, KeyStore, SigningKeychain, SystemKeychain};
 use super::{append, key_periods_of, load_entries, replicate, EntryLinks, Register};
 use crate::local_server::error::{LocalError, LocalResult};
-use crate::local_server::secrets;
 
 /// Where a secret key was found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Source {
-    Keychain,
-    Database,
-}
-
-impl Source {
-    fn as_str(self) -> &'static str {
-        match self {
-            Source::Keychain => "keychain",
-            Source::Database => "database",
-        }
-    }
-}
+pub type Source = KeyStore;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -75,6 +68,9 @@ pub struct Diagnosis {
     pub last_seq: i64,
     /// The keys found at hand, by where they were found (public halves only).
     pub keys_at_hand: Vec<(Source, String)>,
+    /// Where the key the till signs with is kept: the key at hand that the journal
+    /// names. `None` when no key at hand is that one, whatever else is kept here.
+    pub signing_key_in: Option<Source>,
     pub verdict: Verdict,
 }
 
@@ -92,33 +88,6 @@ fn bad(msg: impl Into<String>) -> LocalError {
     LocalError::BadRequest(msg.into())
 }
 
-/// Secret keys available for a register: the credential store (unless opted out) and
-/// the fallback table.
-async fn secrets_at_hand(pool: &SqlitePool, code: &str) -> LocalResult<Vec<(Source, SecretKey)>> {
-    let mut found = Vec::new();
-    if !matches!(
-        std::env::var("MOTODESK_FISCAL_NO_KEYCHAIN").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes")
-    ) {
-        if let Ok(Some(hex)) = secrets::load_fiscal_key(code) {
-            if let Ok(key) = SecretKey::from_hex(&hex) {
-                found.push((Source::Keychain, key));
-            }
-        }
-    }
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT secret_key FROM fiscal_key_fallback WHERE register_code = $1")
-            .bind(code)
-            .fetch_optional(pool)
-            .await?;
-    if let Some((hex,)) = row {
-        if let Ok(key) = SecretKey::from_hex(&hex) {
-            found.push((Source::Database, key));
-        }
-    }
-    Ok(found)
-}
-
 struct Loaded {
     id: String,
     code: String,
@@ -128,7 +97,11 @@ struct Loaded {
     at_hand: Vec<(Source, SecretKey)>,
 }
 
-async fn load(pool: &SqlitePool, code: Option<&str>) -> LocalResult<Vec<Loaded>> {
+async fn load(
+    keychain: &dyn SigningKeychain,
+    pool: &SqlitePool,
+    code: Option<&str>,
+) -> LocalResult<Vec<Loaded>> {
     let registers: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
         "SELECT r.id, r.code, r.public_key, r.company_id
            FROM fiscal_registers r JOIN fiscal_counters c ON c.register_id = r.id
@@ -146,7 +119,7 @@ async fn load(pool: &SqlitePool, code: Option<&str>) -> LocalResult<Vec<Loaded>>
     let mut out = Vec::new();
     for (id, code, recorded_key, company_id) in registers {
         let entries = load_entries(pool, &id, 0, i64::MAX).await?;
-        let at_hand = secrets_at_hand(pool, &code).await?;
+        let at_hand = keys::at_hand(keychain, pool, &code).await?;
         out.push(Loaded {
             id,
             code,
@@ -157,6 +130,18 @@ async fn load(pool: &SqlitePool, code: Option<&str>) -> LocalResult<Vec<Loaded>>
         });
     }
     Ok(out)
+}
+
+/// The public key the journal names for what is signed now: its last declaration, or
+/// the key recorded for the register when the chain declares none.
+fn named_key(l: &Loaded) -> Option<String> {
+    key_periods_of(&l.entries, &l.recorded_key).last().map(|(_, k)| k.to_hex())
+}
+
+/// Where the key the till signs with is kept, if it is at hand.
+fn signing_key_in(l: &Loaded) -> Option<Source> {
+    let named = named_key(l)?;
+    keys::named_by(&named, &l.at_hand).map(|(store, _)| *store)
 }
 
 fn judge(l: &Loaded) -> Verdict {
@@ -181,12 +166,8 @@ fn judge(l: &Loaded) -> Verdict {
         .collect();
 
     let (Some(&first), Some(&last)) = (failing.first(), failing.last()) else {
-        let current = periods.last().map(|(_, k)| k.to_hex());
-        let signs = l
-            .at_hand
-            .iter()
-            .any(|(_, k)| Some(k.public().to_hex()) == current);
-        return if signs { Verdict::Healthy } else { Verdict::KeyLost };
+        // Healthy means the till can sign: the same choice of key as `fiscal::current`.
+        return if signing_key_in(l).is_some() { Verdict::Healthy } else { Verdict::KeyLost };
     };
 
     // Does a key at hand account for every entry from the first failure on?
@@ -209,12 +190,22 @@ fn judge(l: &Loaded) -> Verdict {
 
 /// What state each register is in. Read-only.
 pub async fn diagnose(pool: &SqlitePool, code: Option<&str>) -> LocalResult<Vec<Diagnosis>> {
-    Ok(load(pool, code)
+    diagnose_with(&SystemKeychain, pool, code).await
+}
+
+/// [`diagnose`], with the keychain given by the caller (tests give one of their own).
+pub(crate) async fn diagnose_with(
+    keychain: &dyn SigningKeychain,
+    pool: &SqlitePool,
+    code: Option<&str>,
+) -> LocalResult<Vec<Diagnosis>> {
+    Ok(load(keychain, pool, code)
         .await?
         .into_iter()
         .map(|l| {
             let verdict = judge(&l);
             Diagnosis {
+                signing_key_in: signing_key_in(&l),
                 entries: l.entries.len() as i64,
                 last_seq: l.entries.last().map(|e| e.seq).unwrap_or(0),
                 keys_at_hand: l
@@ -252,7 +243,18 @@ pub async fn repair(
     keep_new_key_in: KeepKeyIn,
     accept_unverifiable: bool,
 ) -> LocalResult<RepairReport> {
-    let l = load(pool, Some(code))
+    repair_with(&SystemKeychain, pool, code, keep_new_key_in, accept_unverifiable).await
+}
+
+/// [`repair`], with the keychain given by the caller (tests give one of their own).
+pub(crate) async fn repair_with(
+    keychain: &dyn SigningKeychain,
+    pool: &SqlitePool,
+    code: &str,
+    keep_new_key_in: KeepKeyIn,
+    accept_unverifiable: bool,
+) -> LocalResult<RepairReport> {
+    let l = load(keychain, pool, Some(code))
         .await?
         .into_iter()
         .next()
@@ -261,35 +263,18 @@ pub async fn repair(
 
     // The key that will sign the declaration, where it lives, and from which entry
     // the register's signatures are to be read with it.
-    // A fresh key, kept where the caller asked.
-    let fresh_key = |pool: &SqlitePool| {
-        let pool = pool.clone();
-        let code = code.to_string();
-        async move {
-            let key = SecretKey::generate();
-            let hex = key.to_hex();
-            let src = match keep_new_key_in {
-                KeepKeyIn::Keychain => {
-                    secrets::store_fiscal_key(&code, &hex)
-                        .map_err(|e| bad(format!("le trousseau du système refuse la nouvelle clé : {e:#}")))?;
-                    Source::Keychain
-                }
-                KeepKeyIn::Database => {
-                    sqlx::query(
-                        "INSERT INTO fiscal_key_fallback (register_code, secret_key, created_at) VALUES ($1, $2, $3)
-                         ON CONFLICT(register_code) DO UPDATE SET secret_key = excluded.secret_key, created_at = excluded.created_at",
-                    )
-                    .bind(&code)
-                    .bind(&hex)
-                    .bind(Utc::now().to_rfc3339())
-                    .execute(&pool)
-                    .await?;
-                    Source::Database
-                }
-            };
-            LocalResult::Ok((key, src))
-        }
+    // A fresh key is only made here. It is kept (where the caller asked) further down,
+    // once its declaration is written and about to be committed: a key stored first
+    // would go over the one already kept under the register's name, which may be the
+    // very key the journal still names, before the journal says another one signs.
+    let fresh_key = || {
+        let store = match keep_new_key_in {
+            KeepKeyIn::Keychain => Source::Keychain,
+            KeepKeyIn::Database => Source::Database,
+        };
+        (SecretKey::generate(), store)
     };
+    let mut to_keep: Option<String> = None;
     let mut unverifiable: Option<(i64, i64)> = None;
 
     let (secret, store, effective_from, reason): (SecretKey, Source, Option<i64>, &str) = match &before {
@@ -305,7 +290,8 @@ pub async fn repair(
             )))
         }
         Verdict::TailUnverifiable { from_seq, to_seq } => {
-            let (key, src) = fresh_key(pool).await?;
+            let (key, src) = fresh_key();
+            to_keep = Some(key.to_hex());
             unverifiable = Some((*from_seq, *to_seq));
             (key, src, None, "signatures_unverifiable")
         }
@@ -318,7 +304,8 @@ pub async fn repair(
             (SecretKey::from_hex(&key.to_hex()).map_err(|e| LocalError::Internal(e.into()))?, *src, Some(*from_seq), "signed_with_replacement_key")
         }
         Verdict::KeyLost => {
-            let (key, src) = fresh_key(pool).await?;
+            let (key, src) = fresh_key();
+            to_keep = Some(key.to_hex());
             (key, src, None, "key_lost")
         }
     };
@@ -334,10 +321,7 @@ pub async fn repair(
         code: l.code.clone(),
         company_id: l.company_id.clone(),
         key: Arc::new(secret),
-        key_store: match store {
-            Source::Keychain => super::keys::KeyStore::Keychain,
-            Source::Database => super::keys::KeyStore::Database,
-        },
+        key_store: store,
     };
 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -376,6 +360,35 @@ pub async fn repair(
         .bind(store.as_str())
         .execute(&mut *tx)
         .await?;
+    // The declaration is written, not yet committed: now the new key is kept. Any
+    // failure from here on leaves the transaction to be rolled back, the journal as it
+    // was.
+    if let Some(hex) = &to_keep {
+        match store {
+            // In the same transaction: the key and the entry that names it land together.
+            Source::Database => {
+                sqlx::query(
+                    "INSERT INTO fiscal_key_fallback (register_code, secret_key, created_at) VALUES ($1, $2, $3)
+                     ON CONFLICT(register_code) DO UPDATE SET secret_key = excluded.secret_key, created_at = excluded.created_at",
+                )
+                .bind(&l.code)
+                .bind(hex)
+                .bind(Utc::now().to_rfc3339())
+                .execute(&mut *tx)
+                .await?;
+            }
+            // A key the keychain will not vouch for is not declared. If the keychain kept
+            // it all the same (Windows can show a write after having answered that it was
+            // not kept), it stays there undeclared: no journal names it, so no till signs
+            // with it, and a later repair is free to declare another key.
+            Source::Keychain => keychain.store(&l.code, hex).map_err(|e| {
+                bad(format!(
+                    "le trousseau du système refuse la nouvelle clé : {e:#}. Rien n'a été écrit dans le journal ; \
+                     si le trousseau a malgré tout gardé cette clé, elle n'est déclarée nulle part et ne signe rien."
+                ))
+            })?,
+        }
+    }
     tx.commit().await?;
 
     // The journal is replicated: the declaration has to reach the other devices and
@@ -396,7 +409,7 @@ pub async fn repair(
 mod tests {
     use super::*;
     use crate::local_server::fiscal;
-    use crate::local_server::test_support::shop;
+    use crate::local_server::test_support::{shop, MemoryKeychain, OnStore};
     use motodesk_fiscal::FiscalEventType as Ev;
 
     async fn note(pool: &SqlitePool, register: &Register) {
@@ -580,5 +593,178 @@ mod tests {
         assert!(matches!(code_of(&d), Verdict::ChainBroken { seq: 2, .. }), "{:?}", code_of(&d));
         let refused = repair(&state.db, &register.code, KeepKeyIn::Database, false).await.unwrap_err();
         assert!(matches!(&refused, LocalError::BadRequest(m) if m.contains("altération")), "{refused:?}");
+    }
+
+    async fn key_changes(pool: &SqlitePool) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM fiscal_journal WHERE event_type = 'register_key_changed'")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    fn message(e: &LocalError) -> &str {
+        match e {
+            LocalError::BadRequest(m) => m,
+            _ => "",
+        }
+    }
+
+    /// The keychain holds a key the journal does not name, the database holds the one it
+    /// does. The till signs with the named key, the diagnosis says the register is healthy
+    /// and where its key is, the repair has nothing to do: the three say the same thing.
+    #[tokio::test]
+    async fn a_till_signs_with_the_key_its_journal_names_when_the_keychain_holds_another() {
+        let (state, register) = ready().await;
+        let stray = SecretKey::generate();
+        let keychain = MemoryKeychain::new();
+        keychain.put(&register.code, &stray.to_hex());
+
+        let till = fiscal::current_with(&state, &keychain).await.unwrap();
+        assert_eq!(till.public_key_hex(), register.public_key_hex(), "the key on record, not the first found");
+        note(&state.db, &till).await;
+        let checked = fiscal::verify_all(&state).await.unwrap();
+        assert!(checked.registers[0].ok, "{:?}", checked.registers[0].problem);
+
+        let d = diagnose_with(&keychain, &state.db, None).await.unwrap();
+        assert_eq!(code_of(&d), &Verdict::Healthy);
+        assert_eq!(d[0].signing_key_in, Some(Source::Database));
+        assert_eq!(
+            d[0].keys_at_hand,
+            vec![
+                (Source::Keychain, stray.public().to_hex()),
+                (Source::Database, register.public_key_hex()),
+            ],
+            "the other key is still shown"
+        );
+
+        let refused = repair_with(&keychain, &state.db, &register.code, KeepKeyIn::Keychain, false)
+            .await
+            .unwrap_err();
+        assert!(message(&refused).contains("rien à réparer"), "{refused:?}");
+        assert_eq!(key_changes(&state.db).await, 0);
+        assert_eq!(keychain.get(&register.code), Some(stray.to_hex()), "and nothing touched it");
+    }
+
+    /// The situation as it arises. A repair is asked to keep the new key in the keychain;
+    /// the keychain answers that it did not keep it, and keeps it. The repair is refused
+    /// with nothing declared. The operator then repairs into the database.
+    #[tokio::test]
+    async fn a_repair_the_keychain_refused_yet_kept_does_not_block_the_next_one() {
+        let (state, register) = ready().await;
+        sqlx::query("DELETE FROM fiscal_key_fallback").execute(&state.db).await.unwrap();
+        let keychain = MemoryKeychain::that(OnStore::KeepsButSaysNo);
+
+        let refused = repair_with(&keychain, &state.db, &register.code, KeepKeyIn::Keychain, false)
+            .await
+            .unwrap_err();
+        assert!(message(&refused).contains("refuse la nouvelle clé"), "{refused:?}");
+        assert_eq!(key_changes(&state.db).await, 0, "a refused repair declares nothing");
+        let left = keychain.get(&register.code).expect("the keychain kept the key it said it refused");
+        let left_public = SecretKey::from_hex(&left).unwrap().public().to_hex();
+
+        // A key is at hand and no journal names it: the register's key is still lost, and
+        // the till does not sign with what happens to be there.
+        let d = diagnose_with(&keychain, &state.db, None).await.unwrap();
+        assert_eq!(code_of(&d), &Verdict::KeyLost);
+        assert_eq!(d[0].signing_key_in, None);
+        assert_eq!(d[0].keys_at_hand, vec![(Source::Keychain, left_public.clone())]);
+        let blocked = fiscal::current_with(&state, &keychain).await.err().unwrap();
+        assert!(message(&blocked).contains("ne correspond pas"), "{blocked:?}");
+
+        let report = repair_with(&keychain, &state.db, &register.code, KeepKeyIn::Database, false)
+            .await
+            .unwrap();
+        assert_eq!(report.key_store, "database");
+        assert_ne!(report.new_public_key, left_public);
+
+        // The till signs again, with the key the journal now names, although the keychain
+        // is read first and still holds the other one.
+        let till = fiscal::current_with(&state, &keychain).await.unwrap();
+        assert_eq!(till.public_key_hex(), report.new_public_key);
+        note(&state.db, &till).await;
+        let checked = fiscal::verify_all(&state).await.unwrap();
+        assert!(checked.registers[0].ok, "{:?}", checked.registers[0].problem);
+
+        let d = diagnose_with(&keychain, &state.db, None).await.unwrap();
+        assert_eq!(code_of(&d), &Verdict::Healthy);
+        assert_eq!(d[0].signing_key_in, Some(Source::Database));
+        let nothing = repair_with(&keychain, &state.db, &register.code, KeepKeyIn::Database, false)
+            .await
+            .unwrap_err();
+        assert!(message(&nothing).contains("rien à réparer"), "{nothing:?}");
+        assert_eq!(key_changes(&state.db).await, 1, "one declaration, appended; nothing rewritten");
+        assert_eq!(keychain.get(&register.code), Some(left), "the undeclared key was neither removed nor replaced");
+    }
+
+    /// The other way round: the journal names the key kept in the keychain, and the
+    /// database holds another. When the named key goes, the other does not stand in.
+    #[tokio::test]
+    async fn a_key_left_in_the_database_never_stands_in_for_the_one_the_journal_names() {
+        let state = shop().await;
+        let keychain = MemoryKeychain::new();
+        let register = fiscal::current_with(&state, &keychain).await.unwrap();
+        assert_eq!(register.key_store, Source::Keychain);
+        note(&state.db, &register).await;
+        let stray = SecretKey::generate();
+        sqlx::query("INSERT INTO fiscal_key_fallback (register_code, secret_key, created_at) VALUES ($1, $2, $3)")
+            .bind(&register.code)
+            .bind(stray.to_hex())
+            .bind(Utc::now().to_rfc3339())
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let till = fiscal::current_with(&state, &keychain).await.unwrap();
+        assert_eq!(till.public_key_hex(), register.public_key_hex());
+        let d = diagnose_with(&keychain, &state.db, None).await.unwrap();
+        assert_eq!(code_of(&d), &Verdict::Healthy);
+        assert_eq!(d[0].signing_key_in, Some(Source::Keychain));
+
+        keychain.remove(&register.code);
+        let blocked = fiscal::current_with(&state, &keychain).await.err().unwrap();
+        assert!(message(&blocked).contains("ne correspond pas"), "{blocked:?}");
+        let d = diagnose_with(&keychain, &state.db, None).await.unwrap();
+        assert_eq!(code_of(&d), &Verdict::KeyLost);
+        assert_eq!(d[0].signing_key_in, None);
+    }
+
+    #[tokio::test]
+    async fn a_new_key_kept_in_the_keychain_signs_from_its_declaration_on() {
+        let (state, register) = ready().await;
+        sqlx::query("DELETE FROM fiscal_key_fallback").execute(&state.db).await.unwrap();
+        let keychain = MemoryKeychain::new();
+
+        let report = repair_with(&keychain, &state.db, &register.code, KeepKeyIn::Keychain, false)
+            .await
+            .unwrap();
+        assert_eq!(report.key_store, "keychain");
+        let kept = keychain.get(&register.code).expect("the key is in the keychain");
+        assert_eq!(SecretKey::from_hex(&kept).unwrap().public().to_hex(), report.new_public_key);
+        let in_database: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM fiscal_key_fallback")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(in_database, 0, "and nowhere else");
+
+        let till = fiscal::current_with(&state, &keychain).await.unwrap();
+        assert_eq!(till.public_key_hex(), report.new_public_key);
+        assert_eq!(till.key_store, Source::Keychain);
+        note(&state.db, &till).await;
+        let checked = fiscal::verify_all(&state).await.unwrap();
+        assert!(checked.registers[0].ok, "{:?}", checked.registers[0].problem);
+        let d = diagnose_with(&keychain, &state.db, None).await.unwrap();
+        assert_eq!(code_of(&d), &Verdict::Healthy);
+        assert_eq!(d[0].signing_key_in, Some(Source::Keychain));
+    }
+
+    /// With the keychain opted out of (as every test run is), a repair asked to use it is
+    /// refused: it must not reach the operating system's store behind the opt-out.
+    #[tokio::test]
+    async fn a_repair_does_not_reach_a_keychain_that_is_opted_out_of() {
+        let (state, register) = ready().await;
+        sqlx::query("DELETE FROM fiscal_key_fallback").execute(&state.db).await.unwrap();
+        let refused = repair(&state.db, &register.code, KeepKeyIn::Keychain, false).await.unwrap_err();
+        assert!(message(&refused).contains("refuse la nouvelle clé"), "{refused:?}");
+        assert_eq!(key_changes(&state.db).await, 0);
     }
 }
