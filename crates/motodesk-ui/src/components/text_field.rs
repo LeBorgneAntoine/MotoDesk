@@ -152,6 +152,15 @@ impl TextModel {
         self.set_text("", window, cx);
     }
 
+    /// Write `text` where the caret is, as if it had been typed.
+    pub fn insert(&self, text: impl Into<SharedString>, window: &mut Window, cx: &mut App) {
+        let text = text.into();
+        match &self.kind {
+            Kind::Line(state) => state.update(cx, |state, cx| state.insert(text, window, cx)),
+            Kind::Area(state) => state.update(cx, |state, cx| state.insert(text, window, cx)),
+        }
+    }
+
     /// The state of a field of several lines, for the kit's own drawing.
     pub(crate) fn area(&self) -> Option<Entity<TextareaState>> {
         match &self.kind {

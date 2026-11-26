@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, caisse (session, encaissement, tickets en attente, tiroir, ticket, réglages du poste), assistant (clé du poste, conversations, réponse lue au fil de l'écriture), modèles de documents (bibliothèque, variables, mise en page, PDF), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -33,7 +33,8 @@ sont pas passés.
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
 | Caisse (ouverture de session, recherche et lecture de codes, panier, encaissement en espèces, carte, chèque ou à plusieurs, tickets en attente, tiroir, clôture) | migré, sans imprimante, tiroir ni terminal réels |
 | Assistant (conversations, échange, canevas, clé et modèle du poste) | migré, sans échange avec un vrai modèle |
-| Modèles | à faire |
+| Modèles (bibliothèque, éditeur de mise en page, aperçu, export PDF) | migré |
+| Impression des documents (facture ou devis depuis Ventes avec sa trace et son DUPLICATA, clé de récupération) | à faire : le moteur est là, pas encore branché |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -53,10 +54,11 @@ propos). Sur
 l'Inventaire, les entrées de ces menus (nouveau produit, réception, nouvelle catégorie) ont
 toutes leur bouton à l'écran ; F5 actualise.
 
-**L'impression n'est pas portée** : elle arrive avec les modèles de documents. D'ici là,
-l'écran Ventes n'a ni bouton d'impression ni duplicata, et un devis ne prend son numéro qu'en
-étant transformé en facture ou en ordre de réparation (dans Svelte, il le prend aussi à
-l'impression). Une facture validée ici s'imprime depuis l'interface Svelte.
+**L'impression des documents n'est pas encore branchée.** Ce qui dessine une page et l'écrit en
+PDF existe (voir « Sur les Modèles ») et sert déjà à l'aperçu d'un modèle. Il reste à l'appeler
+depuis Ventes : d'ici là, cet écran n'a ni bouton d'impression ni duplicata, et un devis ne
+prend son numéro qu'en étant transformé en facture ou en ordre de réparation (dans Svelte, il le
+prend aussi à l'impression). Une facture validée ici s'imprime depuis l'interface Svelte.
 
 Sur l'écran Ventes, la fiche d'un document montre aussi son client, que la fiche Svelte ne
 montrait pas. Les totaux affichés pendant la saisie viennent de `motodesk_fiscal::vat`, le calcul
@@ -75,6 +77,58 @@ depuis un essai automatique. En développement seulement (`desktop-gpui/src/back
 `MOTODESK_DEV_PICK_FILES=<fichiers>` répond à la place d'une fenêtre « Ouvrir » et
 `MOTODESK_DEV_SAVE_DIR=<dossier>` à la place d'une fenêtre « Enregistrer sous ». Ces deux
 variables n'existent pas dans une version publiée.
+
+Sur les Modèles :
+
+- **Une page n'est plus une image.** Svelte dessinait la page sur un canevas, en tirait une
+  image, et imprimait cette image depuis la fenêtre du navigateur intégré. Ici, un modèle et
+  les données d'un document donnent une liste de formes en millimètres
+  (`motodesk_client::templates::render`), que l'écran dessine (`PageView`, dans le kit) et
+  que le PDF écrit (`templates::pdf`) : ce qui est montré est ce qui est imprimé. Dans le PDF
+  le texte reste du texte (il se sélectionne, se cherche), les traits restent nets ; une
+  facture d'une page pèse 3 Ko.
+- **« Imprimer » passe par un PDF.** Il n'y a plus de navigateur pour ouvrir la fenêtre
+  d'impression du système. L'aperçu propose « Enregistrer en PDF » et « Ouvrir pour
+  imprimer », qui confie le fichier au lecteur de PDF du poste ; l'impression se lance de
+  là. Envoyer la page directement à une imprimante reste possible plus tard, à partir des
+  mêmes formes.
+- Les documents sont composés en Helvetica, que tout lecteur de PDF possède : aucune police
+  n'est embarquée, et les largeurs de ses lettres (`templates::metrics`) suffisent à couper
+  et aligner les lignes. À l'écran c'est Arial, de mêmes largeurs. Svelte utilisait Segoe UI :
+  les lignes ne tombent pas toujours au même endroit qu'avant.
+- Le format d'un modèle est celui de Svelte (`templates::schema`) : un modèle fait là-bas
+  s'ouvre ici, et inversement. L'image de la page que Svelte enregistrait avec chaque modèle
+  n'est plus ni lue ni écrite : les cartes de la bibliothèque dessinent la page elle-même,
+  avec l'identité de l'atelier. Un modèle enregistré ici garde donc, vu depuis Svelte, sa
+  vignette d'avant.
+- **Écarts voulus avec Svelte** : le cadre en pointillé de la marge ne s'imprime plus (il
+  sortait sur chaque document) ; la mention DUPLICATA tient dans la page ; quitter l'éditeur
+  avec des modifications non enregistrées le demande ; un élément choisi dans les calques se
+  déplace à la souris même sous un élément plus grand ; les nombres se saisissent avec une
+  virgule.
+- **Simplifications par rapport à Svelte** : le texte d'un élément se saisit dans le panneau
+  de droite (un double-clic sur la page y mène), pas sur la page ; les calques et les
+  colonnes d'un tableau se réordonnent par boutons, pas en les glissant ; un outil s'ajoute
+  d'un clic, pas en le déposant sur la page ; une image à une adresse web n'est pas chargée
+  (le logo de l'atelier et les images écrites dans leur adresse le sont).
+- L'éditeur : glisser pour déplacer (avec alignement sur les marges, le milieu de la page et
+  les autres éléments), huit poignées pour redimensionner, flèches (Maj : 10 mm), Suppr,
+  Ctrl+Z / Ctrl+Maj+Z, Ctrl+C / V / D, Ctrl+[ et ], Ctrl+S, Ctrl+P, Ctrl+molette pour le
+  zoom. Ces raccourcis valent quand la page a le clavier ; dans un champ, les touches sont au
+  texte. La géométrie et l'historique sont à part, avec leurs tests (`editor/geometry.rs`).
+- `cargo run -p motodesk-client --example sample_pdf -- <dossier>` écrit les cinq modèles de
+  base en PDF, plus une facture de trois pages marquée DUPLICATA, sans ouvrir l'application.
+- Vérifié dans l'application sur un dossier de démonstration : installation des modèles de
+  base, cartes et panneau, duplication, archivage et filtre des archivés, suppression, filtre
+  par type, nouveau modèle, ouverture dans l'éditeur, sélection, déplacement et
+  redimensionnement à la souris, flèches, saisie du texte, insertion d'une variable au
+  curseur, ajout d'un texte et d'une image, logo de l'atelier, propriétés d'un tableau,
+  premier plan, suppression au clavier, annuler, paysage, zoom, enregistrement, aperçu, export
+  PDF (relu : logo compris), demande avant de quitter. Les PDF des modèles de base ont été
+  relus un à un. Non essayés : « Ouvrir pour imprimer » (ouvre un autre programme) et une
+  impression sur papier, les raccourcis avec Ctrl, Ctrl+molette, la copie d'une variable
+  dans le presse-papiers, l'édition des colonnes d'un tableau champ par champ, un modèle fait
+  sous Svelte ouvert ici (le format est fixé par un test), et la vue d'un employé.
 
 Sur l'Assistant :
 
@@ -317,7 +371,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Modèles et impression. Viennent ensuite l'icône de la zone
+Ordre prévu : impression des documents (Ventes, clé de récupération). Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
 

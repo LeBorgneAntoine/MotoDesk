@@ -27,6 +27,7 @@ use crate::pages::employees;
 use crate::pages::parc::ParcPage;
 use crate::pages::sales::SalesPage;
 use crate::pages::stock::StockPage;
+use crate::pages::templates::TemplatesPage;
 use crate::pages::not_migrated;
 use crate::router::{self, Router};
 
@@ -72,6 +73,7 @@ pub struct Shell {
     data: Option<Entity<DataPage>>,
     shared: Option<Entity<SharedPage>>,
     assistant: Option<Entity<AssistantPage>>,
+    templates: Option<Entity<TemplatesPage>>,
     /// The team of an online company, or the accounts of a local network.
     employees: Option<AnyView>,
     sync: Option<SyncStatus>,
@@ -121,6 +123,7 @@ impl Shell {
             data: None,
             shared: None,
             assistant: None,
+            templates: None,
             employees: None,
             sync: None,
             mesh: MeshStatus::default(),
@@ -369,6 +372,9 @@ impl Render for Shell {
         if current.as_ref() != router::ASSISTANT {
             self.assistant = None;
         }
+        if current.as_ref() != router::TEMPLATES {
+            self.templates = None;
+        }
         if current.as_ref() != router::EMPLOYEES {
             self.employees = None;
         }
@@ -415,6 +421,10 @@ impl Render for Shell {
             }
             router::SHARED => {
                 let page = self.shared.get_or_insert_with(|| cx.new(|cx| SharedPage::new(window, cx))).clone();
+                page.into_any_element()
+            }
+            router::TEMPLATES => {
+                let page = self.templates.get_or_insert_with(|| cx.new(|cx| TemplatesPage::new(window, cx))).clone();
                 page.into_any_element()
             }
             router::ASSISTANT => {
