@@ -16,6 +16,7 @@ mod auth;
 mod backend;
 mod background;
 mod format;
+mod menus;
 mod notices;
 mod pages;
 mod pos;

@@ -696,3 +696,22 @@ impl Render for ParcPage {
             .child(PanelHost::new(&self.panels).children(panels))
     }
 }
+
+// ---- menus ----------------------------------------------------------------------------------
+
+impl ParcPage {
+    /// The menus of the title bar while this screen is shown.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![MenuEntry::new("Nouveau véhicule stock…", crate::menus::on(&page, |this, window, cx| this.open_create(window, cx))).icon(IconName::Plus)],
+            ),
+            MenuGroup::new(
+                "Affichage",
+                vec![MenuEntry::new("Actualiser", crate::menus::on(&page, |this, _, cx| this.load(cx))).icon(IconName::RefreshCw).shortcut("F5")],
+            ),
+        ]
+    }
+}

@@ -101,6 +101,12 @@ pub struct Shell {
     recovery_missing: bool,
     /// The screen the notices were last read for: they are read again when it changes.
     noticed_for: SharedString,
+    /// The menus of the screen shown, as last drawn: what a pressed shortcut is looked up in.
+    menus: Vec<MenuGroup>,
+    /// The page whose menus are shown is watched: what its menus can do changes with it
+    /// (a customer opened, a document sealed), not only with the screen.
+    watched_page: SharedString,
+    _page_watch: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -125,6 +131,17 @@ impl Shell {
                 cx.notify();
             }),
             cx.observe(&PosState::global(cx), |_, _, cx| cx.notify()),
+            // A key pressed anywhere on the screen runs the menu entry that advertises it. In a
+            // text field, copy, paste and undo stay the field's.
+            cx.observe_keystrokes(|this, event, window, cx| {
+                let Some(pressed) = pressed_shortcut(&event.keystroke, typing_in_a_field(window)) else { return };
+                let menus = this.menus.clone();
+                // Run once this shell is no longer being told about the key: an entry may
+                // change the screen, which the shell follows.
+                window.defer(cx, move |window, cx| {
+                    MenuGroup::run_shortcut(&menus, &pressed, window, cx);
+                });
+            }),
         ];
         // Someone is signed in: from now on the app looks for a newer version by itself.
         UpdateState::global(cx).update(cx, |updates, cx| updates.start(cx));
@@ -175,6 +192,9 @@ impl Shell {
             backup_note: None,
             recovery_missing: false,
             noticed_for: SharedString::default(),
+            menus: Vec::new(),
+            watched_page: SharedString::default(),
+            _page_watch: None,
             _subscriptions: subscriptions,
         }
     }
@@ -712,6 +732,39 @@ impl Render for Shell {
         };
 
         let (dot, sync_label) = self.sync_state(cx);
+        // The menus of the screen shown, with what they can do right now.
+        let rewatch = self.watched_page != current;
+        if rewatch {
+            self.watched_page = current.clone();
+            self._page_watch = None;
+        }
+        // The menus of one page, read now; the page is watched from the moment it is shown.
+        macro_rules! menus_of {
+            ($page:ident) => {
+                match self.$page.clone() {
+                    Some(page) => {
+                        if rewatch {
+                            self._page_watch = Some(cx.observe(&page, |_, _, cx| cx.notify()));
+                        }
+                        page.update(cx, |page, cx| page.menus(cx))
+                    }
+                    None => Vec::new(),
+                }
+            };
+        }
+        let menus = match current.as_ref() {
+            router::DASHBOARD => menus_of!(dashboard),
+            router::CLIENTS => menus_of!(clients),
+            router::ATELIER => menus_of!(atelier),
+            router::PARC => menus_of!(parc),
+            router::SALES => menus_of!(sales),
+            router::STOCK => menus_of!(stock),
+            router::TEMPLATES => menus_of!(templates),
+            router::ASSISTANT => menus_of!(assistant),
+            _ => Vec::new(),
+        };
+        self.menus = menus.clone();
+
         // The notices follow the screen: read again when it changes.
         if self.noticed_for != current {
             self.noticed_for = current.clone();
@@ -730,6 +783,7 @@ impl Render for Shell {
                     .child(Icon::new(IconName::Bike).color(c.accent))
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Motodesk"))
                     .child(div().text_color(c.text_muted).child(title))
+                    .when(!menus.is_empty(), |bar| bar.child(div().ml(m.space_2).child(MenuStrip::new(menus))))
                     .when_some(user_name, |bar, name| {
                         bar.trailing(row().gap(m.space_2).text_color(c.text_muted).child(Icon::new(IconName::CircleUser)).child(name))
                     })

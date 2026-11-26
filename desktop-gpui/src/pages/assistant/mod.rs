@@ -696,3 +696,19 @@ mod dev {
         })
     }
 }
+
+// ---- menus ----------------------------------------------------------------------------------
+
+impl AssistantPage {
+    /// The menus of the title bar while this screen is shown.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        vec![MenuGroup::new(
+            "Assistant",
+            vec![
+                MenuEntry::new("Nouvelle conversation", crate::menus::on(&page, |this, window, cx| this.start_new(window, cx))).icon(IconName::Plus).shortcut("Ctrl+N"),
+                MenuEntry::new("Documents et canevas…", crate::menus::on(&page, |this, window, cx| this.list_artifacts(window, cx))).icon(IconName::Layers),
+            ],
+        )]
+    }
+}

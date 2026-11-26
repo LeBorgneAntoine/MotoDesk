@@ -63,6 +63,8 @@ pub struct TemplatesPage {
     panels: Entity<PanelStack>,
     _subscriptions: Vec<Subscription>,
     _editor_subscription: Option<Subscription>,
+    /// The editor's changes redraw this page, so that the menus above follow them.
+    _editor_watch: Option<Subscription>,
 }
 
 fn plural(count: usize) -> String {
@@ -129,6 +131,7 @@ impl TemplatesPage {
             panels,
             _subscriptions: subscriptions,
             _editor_subscription: None,
+            _editor_watch: None,
         };
         page.refresh(window, cx);
         page
@@ -354,9 +357,11 @@ impl TemplatesPage {
             EditorEvent::Back => {
                 this.editor = None;
                 this._editor_subscription = None;
+                this._editor_watch = None;
                 this.refresh(window, cx);
             }
         }));
+        self._editor_watch = Some(cx.observe(&editor, |_, _, cx| cx.notify()));
         self.editor = Some(editor);
         cx.notify();
     }
@@ -672,6 +677,46 @@ impl Render for TemplatesPage {
             )
             .child(PanelHost::new(&self.panels).children(panels))
             .into_any_element()
+    }
+}
+
+// ---- menus ----------------------------------------------------------------------------------
+
+impl TemplatesPage {
+    /// The menus of the title bar while this screen is shown: the library's, or the editor's
+    /// when a template is open.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        if let Some(editor) = self.editor.clone() {
+            return editor.update(cx, |editor, cx| editor.menus(cx));
+        }
+        let page = cx.entity();
+        let show_kind = |id: &'static str| crate::menus::on(&page, move |this: &mut Self, window, cx| this.kind.set_value(id, window, cx));
+        let mut view = vec![MenuEntry::new("Tous", show_kind(ALL_KINDS)).icon(IconName::Boxes)];
+        view.extend(TemplateKind::ALL.into_iter().map(|kind| MenuEntry::new(kind.label(), show_kind(kind.id())).icon(IconName::LayoutTemplate)));
+        view.push(MenuEntry::separator());
+        view.push(
+            MenuEntry::new(
+                if self.include_archived { "Masquer les archivés" } else { "Afficher les archivés" },
+                crate::menus::on(&page, |this, window, cx| {
+                    this.include_archived = !this.include_archived;
+                    this.refresh(window, cx);
+                }),
+            )
+            .icon(IconName::Archive),
+        );
+        view.push(MenuEntry::separator());
+        view.push(MenuEntry::new("Actualiser", crate::menus::on(&page, |this, window, cx| this.refresh(window, cx))).icon(IconName::RefreshCw).shortcut("F5"));
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![
+                    MenuEntry::new("Nouveau modèle…", crate::menus::on(&page, |this, window, cx| this.ask_new(window, cx))).icon(IconName::Plus).shortcut("Ctrl+N"),
+                    MenuEntry::new("Installer les modèles de base", crate::menus::on(&page, |this, window, cx| this.install_starters(window, cx)))
+                        .icon(IconName::LayoutTemplate),
+                ],
+            ),
+            MenuGroup::new("Affichage", view),
+        ]
     }
 }
 

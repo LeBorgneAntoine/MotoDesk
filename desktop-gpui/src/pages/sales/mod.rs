@@ -1319,6 +1319,51 @@ impl Render for SalesPage {
     }
 }
 
+// ---- menus ----------------------------------------------------------------------------------
+
+impl SalesPage {
+    /// The menus of the title bar while this screen is shown. What cannot be done to the open
+    /// document is greyed, as its buttons are absent from its panel.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        let open = self.sale.as_ref().filter(|_| self.mode == Mode::View);
+        let sealed = open.is_some_and(Sale::is_sealed);
+        let printable = open.is_some_and(|sale| sale.is_sealed() || sale.is_quote());
+        let can_validate = open.is_some_and(|sale| !sale.is_sealed() && !sale.is_quote());
+        let can_credit = open.is_some_and(|sale| sale.is_sealed() && !sale.is_credit_note());
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![
+                    MenuEntry::new("Nouveau document…", crate::menus::on(&page, |this, window, cx| this.open_create(window, cx))).icon(IconName::Plus),
+                    MenuEntry::new("Imprimer le document…", crate::menus::on(&page, |this, window, cx| this.print(window, cx)))
+                        .icon(IconName::Printer)
+                        .disabled(!printable),
+                ],
+            ),
+            MenuGroup::new(
+                "Document",
+                vec![
+                    MenuEntry::new("Valider la facture…", crate::menus::on(&page, |this, window, cx| this.ask_validate(window, cx)))
+                        .icon(IconName::Lock)
+                        .disabled(!can_validate),
+                    MenuEntry::new("Établir un avoir…", crate::menus::on(&page, |this, window, cx| this.ask_credit_note(window, cx)))
+                        .icon(IconName::Undo)
+                        .disabled(!can_credit),
+                    MenuEntry::separator(),
+                    MenuEntry::new("Encaisser un règlement…", crate::menus::on(&page, |this, window, cx| this.open_payment(window, cx)))
+                        .icon(IconName::Banknote)
+                        .disabled(!sealed),
+                ],
+            ),
+            MenuGroup::new(
+                "Affichage",
+                vec![MenuEntry::new("Actualiser la liste", crate::menus::on(&page, |this, _, cx| this.load_list(cx))).icon(IconName::RefreshCw).shortcut("F5")],
+            ),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: it would bring in GPUI's own `test` attribute in place of Rust's.
