@@ -14,6 +14,7 @@ mod assistant;
 mod appearance;
 mod auth;
 mod backend;
+mod background;
 mod format;
 mod pages;
 mod pos;
@@ -41,6 +42,7 @@ fn data_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("MOTODESK_DATA_DIR").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(dir));
     }
+    let folder = install_name();
     let var = |name: &str| std::env::var_os(name).map(PathBuf::from);
     #[cfg(windows)]
     let root = var("APPDATA");
@@ -49,19 +51,32 @@ fn data_dir() -> Option<PathBuf> {
     #[cfg(all(unix, not(target_os = "macos")))]
     let root = var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("share")));
 
-    let folder = match secrets::profile() {
+    root.map(|root| root.join(folder))
+}
+
+/// What this installation is called on this PC: the name of its data folder, and what tells
+/// one running copy from another. An isolated profile has a name of its own.
+fn install_name() -> String {
+    match secrets::profile() {
         Some(profile) => {
             let safe: String = profile.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')).collect();
             format!("{}.{safe}", previous_install::IDENTIFIER)
         }
         None => previous_install::IDENTIFIER.to_string(),
-    };
-    root.map(|root| root.join(folder))
+    }
 }
 
 fn main() {
     logs::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "Motodesk (native interface) starting");
+
+    // First, so that a second start never gets as far as the ports: it shows the running app.
+    let background::Instance::First(second_starts) = background::claim(&install_name()) else {
+        tracing::info!("Motodesk already runs: its window was asked to show");
+        return;
+    };
+    // The service decides whether the background mode is on; this app carries it out.
+    motodesk_server::background::set_host(background::apply);
 
     // Before anything reads the data folder: an install made under the former product name
     // hands its data over to the current folder.
@@ -99,16 +114,24 @@ fn main() {
         pos::PosState::init(&pos_dir.clone().unwrap_or_default(), cx);
         assistant::AssistantState::init(&pos_dir.clone().unwrap_or_default(), cx);
 
+        // Started by the Windows session: stay out of the way until the user asks.
+        let hidden = background::SUPPORTED && background::started_in_background();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx))),
             window_min_size: Some(size(px(960.), px(600.))),
+            show: !hidden,
+            focus: !hidden,
             ..TitleBar::window_options()
         };
-        let (_, root) = motodesk_ui::gpui::open_window(options, cx, |window, cx| cx.new(|cx| Root::new(window, cx)))
+        let (window, root) = motodesk_ui::gpui::open_window(options, cx, |window, cx| cx.new(|cx| Root::new(window, cx)))
             .expect("the main window opens");
-        cx.activate(true);
+        if !hidden {
+            cx.activate(true);
+        }
+        background::install(window, second_starts, cx);
 
-        // Closing the window ends the app (and so the service, and this PC's place in the network).
+        // A window that really closes ends the app (and so the service, and this PC's place in the
+        // network). With the background mode on it is hidden instead, and stays near the clock.
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();

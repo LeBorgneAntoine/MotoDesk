@@ -11,6 +11,7 @@ use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
 
+use super::background::BackgroundCard;
 use crate::auth::{AuthStore, flows};
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
@@ -64,6 +65,8 @@ pub struct SyncView {
     saving_peers: bool,
     syncing: bool,
     go_online: GoOnline,
+    /// Staying in the network with the window closed: a card with a life of its own.
+    background: Option<Entity<BackgroundCard>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -105,6 +108,7 @@ impl SyncView {
             saving_peers: false,
             syncing: false,
             go_online,
+            background: crate::background::SUPPORTED.then(|| cx.new(BackgroundCard::new)),
             _subscriptions: subscriptions,
         }
     }
@@ -478,7 +482,11 @@ impl Render for SyncView {
                     .child(Textarea::new(&self.static_peers).mono()),
             );
 
-        page.child(self.state_card(&diagnostics, cx)).child(mesh).child(Self::peers_card(&diagnostics)).child(static_peers)
+        page.child(self.state_card(&diagnostics, cx))
+            .child(mesh)
+            .child(Self::peers_card(&diagnostics))
+            .child(static_peers)
+            .when_some(self.background.clone(), |this, card| this.child(card))
     }
 }
 

@@ -11,6 +11,7 @@
 pub mod accounting;
 pub mod assistant;
 pub mod auth;
+pub mod background;
 pub mod backup;
 pub mod clients;
 pub mod cloud;

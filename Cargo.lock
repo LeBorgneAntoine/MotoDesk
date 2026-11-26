@@ -5560,6 +5560,7 @@ name = "motodesk-gpui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "auto-launch",
  "axum",
  "chrono",
  "hex",
@@ -5568,9 +5569,12 @@ dependencies = [
  "motodesk-server",
  "motodesk-ui",
  "rand 0.8.8",
+ "raw-window-handle",
  "serde_json",
  "tokio",
  "tracing",
+ "tray-icon",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
