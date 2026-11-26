@@ -10,6 +10,7 @@ members = [
     "crates/motodesk-server",
     "crates/motodesk-sync",
     "crates/motodesk-ui",
+    "tools/release",
 ]
 
 [workspace.package]

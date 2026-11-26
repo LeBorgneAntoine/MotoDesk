@@ -1,0 +1,17 @@
+[package]
+name = "motodesk-release"
+version = "0.1.0"
+edition = "2021"
+description = "What a release of Motodesk needs besides the installer: its signature, its notes and the update manifest"
+publish = false
+
+[dependencies]
+# Signs the installer the way the application verifies it (`motodesk_client::updates`).
+minisign = "0.7"
+base64 = "0.22"
+serde_json = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+# The tests hand what this tool signs and writes to the application's own check.
+motodesk-client = { path = "../../crates/motodesk-client" }
