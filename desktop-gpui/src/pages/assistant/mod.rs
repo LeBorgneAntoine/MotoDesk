@@ -21,7 +21,7 @@ use crate::format::humanize_error;
 use crate::router::{self, Router};
 
 /// The screens a link written by the assistant may open (`#/sales`).
-const LINKABLE: [&str; 12] = [
+const LINKABLE: [&str; 13] = [
     router::DASHBOARD,
     router::ASSISTANT,
     router::CLIENTS,
@@ -31,6 +31,7 @@ const LINKABLE: [&str; 12] = [
     router::SALES,
     router::BILLING,
     router::SHARED,
+    router::TEMPLATES,
     router::EMPLOYEES,
     router::DATA,
     router::SETTINGS,

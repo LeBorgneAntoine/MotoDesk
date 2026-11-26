@@ -18,6 +18,7 @@ pub mod sales;
 pub mod settings;
 pub mod shared;
 pub mod stock;
+pub mod templates;
 pub mod vehicle;
 
 use motodesk_ui::gpui::*;

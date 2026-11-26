@@ -34,6 +34,7 @@ pub mod settings;
 pub mod shared;
 pub mod stock;
 pub mod sync;
+pub mod templates;
 pub mod token_store;
 pub mod transport;
 pub mod types;

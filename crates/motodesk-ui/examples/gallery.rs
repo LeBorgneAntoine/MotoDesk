@@ -257,6 +257,20 @@ impl Gallery {
                 ),
             )
             .child(
+                Self::block("PageView", cx).child(
+                    PageView::new("page", 105.0, 60.0, 3.0).grid(5.0).shapes(vec![
+                        PageShape::Rect { x: 0.0, y: 0.0, w: 105.0, h: 12.0, fill: Some(0x1e3a5f), stroke: None, dashed: false },
+                        PageShape::Text { x: 6.0, y: 3.0, text: "Garage Martin Moto".into(), size: 12.0, bold: true, color: 0xffffff },
+                        PageShape::Badge { x: 6.0, y: 18.0, w: 34.0, h: 4.4, label: "Nom complet (Client)".into(), size: 9.0, bold: false },
+                        PageShape::Rect { x: 60.0, y: 16.0, w: 39.0, h: 20.0, fill: Some(0xeef2f6), stroke: Some((0xd0d5db, 0.25)), dashed: false },
+                        PageShape::Text { x: 63.0, y: 19.0, text: "Total TTC".into(), size: 9.0, bold: false, color: 0x5c6166 },
+                        PageShape::Text { x: 80.0, y: 26.0, text: "378,48 €".into(), size: 11.0, bold: true, color: 0x1a1a1a },
+                        PageShape::Line { x1: 6.0, y1: 42.0, x2: 99.0, y2: 42.0, color: 0x1a1a1a, width: 0.1 },
+                        PageShape::Placeholder { x: 6.0, y: 26.0, w: 24.0, h: 12.0 },
+                    ]),
+                ),
+            )
+            .child(
                 Self::block("Composer, Prose", cx).child(
                     row()
                         .gap(m.space_6)

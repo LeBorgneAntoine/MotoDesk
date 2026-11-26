@@ -18,10 +18,14 @@ tracing = "0.1"
 # Reading a CSV file as people export it: Excel saves Windows-1252, and headers carry accents.
 encoding_rs = "0.8"
 unicode-normalization = "0.1"
+# Documents: dates as this PC reads them, pictures decoded for the page, and the PDF itself.
+chrono = { workspace = true }
+base64 = "0.22"
+flate2 = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+resvg = "0.45"
 
 [dev-dependencies]
-# The fiscal tests work on today's date, as the service does.
-chrono = { workspace = true }
 motodesk-server = { path = "../motodesk-server", features = ["test-support"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { workspace = true }
