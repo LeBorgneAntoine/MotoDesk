@@ -3,6 +3,7 @@
 //! A screen imports its controls from `motodesk_ui` and nothing else: no colour written by
 //! hand, no rounded corner, no GPUI Kit type (see `tests/ui_rules.rs`).
 
+pub mod assistant;
 pub mod atelier;
 pub mod auth;
 pub mod billing;

@@ -63,13 +63,29 @@ impl Local {
 
     /// Ask for something large (a file): its bytes are handed to `sink` as they arrive, never
     /// held whole. Answers how many there were. An error answer is read as any other.
-    pub async fn download(&self, path: &str, mut sink: impl FnMut(&[u8]) -> std::io::Result<()>) -> ApiResult<u64> {
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri(path)
-            .header(LOCAL_TOKEN_HEADER, &self.token)
-            .body(Body::empty())
-            .map_err(|e| ApiError::new(0, "bad_request", format!("Requête invalide ({path}) : {e}")))?;
+    pub async fn download(&self, path: &str, sink: impl FnMut(&[u8]) -> std::io::Result<()>) -> ApiResult<u64> {
+        self.stream(Method::GET, path, None, sink).await
+    }
+
+    /// Send one request and hand its answer to `sink` piece by piece, as the service writes it
+    /// (a file, or the answer of the assistant as it is being written).
+    pub async fn stream(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Vec<u8>>,
+        mut sink: impl FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> ApiResult<u64> {
+        let mut request = Request::builder().method(method).uri(path).header(LOCAL_TOKEN_HEADER, &self.token);
+        let body = match body {
+            Some(bytes) => {
+                request = request.header(header::CONTENT_TYPE, JSON);
+                Body::from(bytes)
+            }
+            None => Body::empty(),
+        };
+        let request =
+            request.body(body).map_err(|e| ApiError::new(0, "bad_request", format!("Requête invalide ({path}) : {e}")))?;
         let response = match self.router.clone().oneshot(request).await {
             Ok(response) => response,
             Err(never) => match never {},

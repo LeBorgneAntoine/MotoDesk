@@ -9,7 +9,7 @@ use std::future::Future;
 use std::path::PathBuf;
 
 use motodesk_client::Client;
-use motodesk_ui::gpui::{App, Context, Global, PathPromptOptions, Window};
+use motodesk_ui::gpui::{App, Context, Global, PathPromptOptions, Task, Window};
 
 /// What the interface needs to reach the service. Set once the service has started.
 pub struct Backend {
@@ -248,9 +248,66 @@ pub trait ApiExt<V: 'static> {
     ) where
         T: Send + 'static,
         Fut: Future<Output = T> + Send + 'static;
+
+    /// Run `work`, which reports as it goes (an answer being written): `each` hears every
+    /// report on the view, in order, then `done` the result.
+    ///
+    /// Dropping the returned task stops listening and gives the work up.
+    fn api_stream<E, T, Fut>(
+        &mut self,
+        work: impl FnOnce(Client, Reporter<E>) -> Fut + Send + 'static,
+        each: impl Fn(&mut V, E, &mut Context<V>) + 'static,
+        done: impl FnOnce(&mut V, T, &mut Context<V>) + 'static,
+    ) -> Task<()>
+    where
+        E: Send + 'static,
+        T: Send + 'static,
+        Fut: Future<Output = T> + Send + 'static;
+}
+
+/// What a piece of work on the service's threads calls to report to the screen.
+pub type Reporter<E> = Box<dyn Fn(E) + Send + Sync>;
+
+/// Work on the service's threads that ends when nobody waits for it any more.
+struct GivenUpOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for GivenUpOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl<V: 'static> ApiExt<V> for Context<'_, V> {
+    fn api_stream<E, T, Fut>(
+        &mut self,
+        work: impl FnOnce(Client, Reporter<E>) -> Fut + Send + 'static,
+        each: impl Fn(&mut V, E, &mut Context<V>) + 'static,
+        done: impl FnOnce(&mut V, T, &mut Context<V>) + 'static,
+    ) -> Task<()>
+    where
+        E: Send + 'static,
+        T: Send + 'static,
+        Fut: Future<Output = T> + Send + 'static,
+    {
+        let Some(backend) = self.try_global::<Backend>() else { return Task::ready(()) };
+        let (reports, mut heard) = tokio::sync::mpsc::unbounded_channel::<E>();
+        let report: Reporter<E> = Box::new(move |event| {
+            // Nobody listens any more: the report is dropped, and the work is being given up.
+            let _ = reports.send(event);
+        });
+        let mut answer = GivenUpOnDrop(backend.runtime.spawn(work(backend.client.clone(), report)));
+        self.spawn(async move |view, cx| {
+            while let Some(event) = heard.recv().await {
+                if view.update(cx, |view, cx| each(view, event, cx)).is_err() {
+                    return;
+                }
+            }
+            if let Ok(result) = (&mut answer.0).await {
+                let _ = view.update(cx, |view, cx| done(view, result, cx));
+            }
+        })
+    }
+
     fn api<T, Fut>(
         &mut self,
         work: impl FnOnce(Client) -> Fut + Send + 'static,

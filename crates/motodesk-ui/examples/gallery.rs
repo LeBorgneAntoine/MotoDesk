@@ -18,6 +18,7 @@ struct Gallery {
     notes: TextModel,
     search: TextModel,
     colour: TextModel,
+    message: TextModel,
     vehicle_type: SelectModel,
     buyer: ComboModel,
     panels: Entity<PanelStack>,
@@ -75,6 +76,7 @@ impl Gallery {
             notes: TextModel::builder().placeholder("Notes").multiline(3).build(window, cx),
             search: TextModel::builder().placeholder("Rechercher un client…").build(window, cx),
             colour: TextModel::builder().placeholder("#1976d2").value("#1976d2").build(window, cx),
+            message: TextModel::builder().placeholder("Demander à l'assistant…").composer(6).build(window, cx),
             vehicle_type: SelectModel::new(
                 vec![
                     SelectOption::new("moto", "Moto"),
@@ -252,6 +254,15 @@ impl Gallery {
                                 .line("Formats acceptés : .csv · séparateur détecté automatiquement")
                                 .action(Button::new("drop-pick").primary().icon(IconName::Upload).label("Choisir un fichier")),
                         ),
+                ),
+            )
+            .child(
+                Self::block("Composer, Prose", cx).child(
+                    row()
+                        .gap(m.space_6)
+                        .items_start()
+                        .child(div().w(px(360.)).child(Composer::new("message", &self.message).on_send(|_, _| {})))
+                        .child(div().w(px(420.)).child(Prose::new("prose", "## Révision des 600 km\n\nÀ prévoir : **vidange**, filtre et `tension de chaîne`.\n\n| Poste | Durée |\n| --- | ---: |\n| Vidange | 0,5 h |\n| Contrôles | 1 h |\n\n> Voir le module [Ventes](#/sales)."))),
                 ),
             )
             .child(

@@ -27,7 +27,8 @@ use crate::theme::{FONT_MONO, Themed};
 pub enum TextEvent {
     /// The text changed (typing, paste, undo).
     Changed,
-    /// Enter was pressed. `with_modifier` for Ctrl+Enter.
+    /// Enter was pressed. `with_modifier` for Ctrl+Enter. In a field of several lines,
+    /// Shift+Enter is a new line and is not reported.
     Submitted { with_modifier: bool },
     Focused,
     Blurred,
@@ -63,6 +64,7 @@ pub struct TextModelBuilder {
     value: SharedString,
     password: bool,
     rows: Option<usize>,
+    grows_to: Option<usize>,
 }
 
 impl TextModelBuilder {
@@ -89,13 +91,23 @@ impl TextModelBuilder {
         self
     }
 
+    /// A message being written: one line that grows with the text up to `max_rows`, where
+    /// Enter submits and Shift+Enter starts a new line. Drawn by [`crate::Composer`].
+    pub fn composer(mut self, max_rows: usize) -> Self {
+        self.grows_to = Some(max_rows.max(2));
+        self
+    }
+
     pub fn build(self, window: &mut Window, cx: &mut App) -> TextModel {
-        let Self { placeholder, value, password, rows } = self;
-        let kind = match rows {
-            Some(rows) => Kind::Area(cx.new(|cx| {
+        let Self { placeholder, value, password, rows, grows_to } = self;
+        let kind = match (grows_to, rows) {
+            (Some(max_rows), _) => Kind::Area(cx.new(|cx| {
+                TextareaState::new(window, cx).auto_grow(1, max_rows).submit_on_enter(true).placeholder(placeholder).default_value(value)
+            })),
+            (None, Some(rows)) => Kind::Area(cx.new(|cx| {
                 TextareaState::new(window, cx).rows(rows).placeholder(placeholder).default_value(value)
             })),
-            None => Kind::Line(cx.new(|cx| {
+            (None, None) => Kind::Line(cx.new(|cx| {
                 InputState::new(window, cx).masked(password).placeholder(placeholder).default_value(value)
             })),
         };
@@ -140,6 +152,22 @@ impl TextModel {
         self.set_text("", window, cx);
     }
 
+    /// The state of a field of several lines, for the kit's own drawing.
+    pub(crate) fn area(&self) -> Option<Entity<TextareaState>> {
+        match &self.kind {
+            Kind::Area(state) => Some(state.clone()),
+            Kind::Line(_) => None,
+        }
+    }
+
+    /// Whether the keyboard is in the field.
+    pub fn is_focused(&self, window: &Window, cx: &App) -> bool {
+        match &self.kind {
+            Kind::Line(state) => state.read(cx).focus_handle(cx).is_focused(window),
+            Kind::Area(state) => state.read(cx).focus_handle(cx).is_focused(window),
+        }
+    }
+
     /// Put the caret in the field.
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         match &self.kind {
@@ -176,7 +204,10 @@ impl TextModel {
                 handler(view, TextEvent::from_kit(event), window, cx)
             }),
             Kind::Area(state) => cx.subscribe_in(state, window, move |view, _, event: &InputEvent, window, cx| {
-                handler(view, TextEvent::from_kit(event), window, cx)
+                // Shift+Enter wrote a new line (reported as a change): it is not a submission.
+                if !matches!(event, InputEvent::PressEnter { shift: true, secondary: false }) {
+                    handler(view, TextEvent::from_kit(event), window, cx)
+                }
             }),
         }
     }

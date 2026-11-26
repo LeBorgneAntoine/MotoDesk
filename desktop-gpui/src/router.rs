@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use motodesk_ui::gpui::{App, AppContext as _, Context, Entity, Global, SharedString};
 
 pub const DASHBOARD: &str = "dashboard";
+pub const ASSISTANT: &str = "assistant";
 pub const CLIENTS: &str = "clients";
 pub const ATELIER: &str = "atelier";
 pub const PARC: &str = "parc";

@@ -25,3 +25,5 @@ chrono = { workspace = true }
 motodesk-server = { path = "../motodesk-server", features = ["test-support"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { workspace = true }
+# A stand-in for the assistant's streamed answer, written piece by piece.
+futures-util = "0.3"
