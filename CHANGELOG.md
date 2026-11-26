@@ -32,6 +32,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Réseau local : ouvrir de nombreuses tentatives d'adhésion en même temps ne contourne plus le verrouillage après cinq essais.
 - Réseau local : se déconnecter n'efface plus le secret du réseau (le poste cessait d'en faire partie au redémarrage suivant).
 - Réseau local : « Synchroniser » (Paramètres › Synchronisation) ne déconnecte plus la personne connectée.
+- Réseau local : vider « Raison sociale » dans les informations de l'entreprise l'efface bien (l'ancienne valeur restait).
 - Réseau local : désactiver ou supprimer un compte, ou changer son mot de passe, ferme ses sessions ouvertes ; un changement de rôle s'applique sans se reconnecter.
 - Restaurer une sauvegarde ne reconnecte plus la personne qui était connectée au moment de la sauvegarde.
 - Réseau local : une vente en caisse ou un avoir déduit maintenant le stock sur les autres postes ; une fiche reçue avant ce à quoi elle se rattache (véhicule avant son client) n'est plus perdue ; un poste resté éteint récupère aussi les modifications plus anciennes que la dernière reçue.
