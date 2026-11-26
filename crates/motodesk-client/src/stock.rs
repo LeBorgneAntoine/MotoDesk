@@ -1,4 +1,4 @@
-//! Suppliers and what moves the stock (port of `desktop/src/lib/api/stock.ts`).
+//! Suppliers and what moves the stock.
 
 use serde::{Deserialize, Serialize};
 

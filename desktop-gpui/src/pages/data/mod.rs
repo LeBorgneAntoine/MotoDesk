@@ -1,5 +1,5 @@
-//! Données (port of `routes/DataManager.svelte`): the administrator's tools on the local
-//! database, one per tab. The tables one page at a time, a SQL console, and the CSV import.
+//! Données: the administrator's tools on the local database, one per tab. The tables one
+//! page at a time, a SQL console, and the CSV import.
 
 mod import;
 mod sql;

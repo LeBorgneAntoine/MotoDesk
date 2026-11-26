@@ -1,6 +1,5 @@
-//! The rules of the till's cart (port of `desktop/src/lib/pos/cart.ts`, `money.ts` and
-//! `agec.ts`): what a line is, what it comes to, what is still owed, and when a paper
-//! ticket is printed without being asked for.
+//! The rules of the till's cart: what a line is, what it comes to, what is still owed,
+//! and when a paper ticket is printed without being asked for.
 //!
 //! The amounts come from `motodesk_fiscal::vat`, the arithmetic the service seals with: what
 //! the cart shows is what the ticket will say.

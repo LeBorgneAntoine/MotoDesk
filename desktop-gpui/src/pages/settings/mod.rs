@@ -1,5 +1,5 @@
-//! Paramètres (port of `routes/Settings.svelte`): a rail of categories and, for most of them,
-//! a grid of fields whose changes wait in a bar at the bottom until they are saved together.
+//! Paramètres: a rail of categories and, for most of them, a grid of fields whose changes
+//! wait in a bar at the bottom until they are saved together.
 //!
 //! Five categories draw themselves: the company's identity, the backups, the sync, the till
 //! and the assistant.

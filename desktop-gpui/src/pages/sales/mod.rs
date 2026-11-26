@@ -1,5 +1,4 @@
-//! Ventes (port of `routes/Sales.svelte` and `routes/sales/*`): quotes, invoices, credit notes
-//! and their payments.
+//! Ventes: quotes, invoices, credit notes and their payments.
 //!
 //! A document is freely edited until it is validated. Validation seals it into the fiscal
 //! journal: from then on the screen offers no form, only a credit note to correct it and the

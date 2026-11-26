@@ -1,4 +1,4 @@
-//! Sync with the other PCs and the cloud (port of `desktop/src/lib/api/sync.ts`).
+//! Sync with the other PCs and the cloud.
 
 use axum::http::Method;
 use serde::Deserialize;
@@ -125,7 +125,7 @@ pub struct LanPeer {
     pub port: i64,
 }
 
-/// Where the sync of this PC stands, in detail (port of `SyncDiagnostics` in `meshAdmin.ts`).
+/// Where the sync of this PC stands, in detail.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Diagnostics {

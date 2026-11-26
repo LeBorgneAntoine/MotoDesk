@@ -1,5 +1,4 @@
-//! L'Atelier (port of `routes/Atelier.svelte` and `routes/atelier/*`): the repair orders, on
-//! a board with one column per step.
+//! L'Atelier: the repair orders, on a board with one column per step.
 //!
 //! A card moves by hand through "En attente", "En cours" and "Prêt". "Facturé" is not a move:
 //! an order is invoiced when the invoice made from it is validated, on the sales screen.

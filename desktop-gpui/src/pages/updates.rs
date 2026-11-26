@@ -1,5 +1,5 @@
-//! A new version on screen (port of `routes/UpdateDialog.svelte` and `routes/UpdatesCard.svelte`):
-//! what it brings and the button that installs it, and the card of the settings.
+//! A new version on screen: what it brings and the button that installs it, and the card of the
+//! settings.
 //!
 //! The installer is downloaded and its signature verified before it runs; nothing here can
 //! install an update that is not signed by the maintainer (see `crate::updates`).

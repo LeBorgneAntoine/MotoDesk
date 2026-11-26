@@ -1,4 +1,4 @@
-//! The vehicles for sale, new and used (port of `Parc.svelte`).
+//! The vehicles for sale, new and used.
 //!
 //! A list of the stock, narrowed by type in the rail and by a search. A row opens the vehicle's
 //! panel; "Vendre" asks for the buyer (and a trade-in, if there is one) and creates the draft

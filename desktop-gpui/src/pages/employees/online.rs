@@ -1,5 +1,5 @@
-//! The team of an online company (port of `Employees.svelte`, `EmployeePanel.svelte` and
-//! `EmployeeForm.svelte`): who has an access, with which role, and whether it is switched on.
+//! The team of an online company: who has an access, with which role, and whether it is
+//! switched on.
 
 use std::rc::Rc;
 

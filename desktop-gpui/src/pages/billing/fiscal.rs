@@ -1,7 +1,6 @@
-//! What an inspector asks to see (ports of `RegisterView`, `ClosuresView`, `ArchivesView` and
-//! `JournalView`): the register and its integrity, the closures, the archives, and the journal
-//! itself. Read-only, except closing a period and producing an archive, which append to the
-//! journal and can never be undone.
+//! What an inspector asks to see: the register and its integrity, the closures, the archives,
+//! and the journal itself. Read-only, except closing a period and producing an archive, which
+//! append to the journal and can never be undone.
 
 use std::collections::HashMap;
 use std::rc::Rc;

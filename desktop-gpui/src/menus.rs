@@ -1,5 +1,4 @@
-//! The menus of the title bar (port of `lib/menus/titlebar-menus.svelte.ts` and of the help
-//! windows of `Dashboard.svelte`).
+//! The menus of the title bar.
 //!
 //! Each screen says which menus it offers (`menus()` on its page); the shell shows them in the
 //! title bar and runs the entry whose keys are pressed. What is here is what the screens share:

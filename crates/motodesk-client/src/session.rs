@@ -1,5 +1,4 @@
-//! The client: the local API, the cloud, and the session that ties them
-//! (port of the token half of `desktop/src/lib/api/client.ts`).
+//! The client: the local API, the cloud, and the session that ties them.
 
 use std::sync::{Arc, Mutex};
 

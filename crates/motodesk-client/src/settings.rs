@@ -1,4 +1,4 @@
-//! Application settings, a key → JSON value store (port of `desktop/src/lib/api/settings.ts`).
+//! Application settings, a key → JSON value store.
 
 use std::collections::BTreeMap;
 

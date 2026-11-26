@@ -1,6 +1,5 @@
-//! The look the shop chose (port of `applyAppearance` in `desktop/src/lib/theme.ts`): light
-//! or dark, the accent colour, the compact layout. Read from the same settings as the Svelte
-//! interface, so a PC looks the same in both.
+//! The look the shop chose: light or dark, the accent colour, the compact layout. Read from
+//! the shop's settings.
 //!
 //! The corner setting (`system.radius`) is not read: corners are square.
 

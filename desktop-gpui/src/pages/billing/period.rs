@@ -1,5 +1,4 @@
-//! Periods: the selector shared by the accounting reports (port of `PeriodBar.svelte`), and
-//! the days a closure covers.
+//! Periods: the selector shared by the accounting reports, and the days a closure covers.
 
 use chrono::{Datelike, Days, Months, NaiveDate};
 use motodesk_client::fiscal::ClosureKind;

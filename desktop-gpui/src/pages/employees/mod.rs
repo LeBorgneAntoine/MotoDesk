@@ -1,4 +1,4 @@
-//! Employés (port of `routes/Employees.svelte`): who can open the shop's data.
+//! Employés: who can open the shop's data.
 //!
 //! Two screens share the place. An online company manages its team in the cloud: roles,
 //! invitations, accounts switched on and off. A local network has no cloud: its accounts live

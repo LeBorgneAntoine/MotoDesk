@@ -1,4 +1,4 @@
-//! The controls. Same names as the Svelte kit (`desktop/src/lib/components`).
+//! The controls.
 
 mod button;
 mod chat;

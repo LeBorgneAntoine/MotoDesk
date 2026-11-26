@@ -1,5 +1,4 @@
-//! The local network as this PC sees it (port of `getMeshStatus` in
-//! `desktop/src/lib/api/meshAdmin.ts` and of `reconnectToNetwork` in `networkDevices.ts`).
+//! The local network as this PC sees it.
 
 use axum::http::Method;
 use serde::{Deserialize, Serialize};

@@ -1,9 +1,8 @@
-//! What a template is made of (port of `desktop/src/lib/templates/schema.ts`): a page and the
-//! elements placed on it.
+//! What a template is made of: a page and the elements placed on it.
 //!
 //! Positions and sizes are in **millimetres**, font sizes in points, so a template reads the
-//! same on a screen at any zoom and on paper. This is the JSON the Svelte editor wrote: a
-//! template made there opens here unchanged, and the other way round.
+//! same on a screen at any zoom and on paper. This is the JSON the service stores: a template
+//! made with an earlier version opens unchanged.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

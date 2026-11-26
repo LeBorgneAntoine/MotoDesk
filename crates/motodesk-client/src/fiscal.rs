@@ -1,5 +1,5 @@
 //! The fiscal register: its identity, its journal, the closures, the archives and the
-//! integrity check (port of `desktop/src/lib/api/fiscal.ts`).
+//! integrity check.
 //!
 //! These are the controls an inspector asks to see under CGI art. 286 I-3° bis. Everything is
 //! read-only except closing a period and producing an archive, both of which append to the

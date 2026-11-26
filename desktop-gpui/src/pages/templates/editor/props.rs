@@ -1,6 +1,6 @@
-//! The properties of the selected element (port of `routes/templates/PropertiesPanel.svelte`):
-//! where it is and how large, then what is its own (the text and its style, the source of a
-//! picture, the list and the columns of a table, the border and fill of a frame).
+//! The properties of the selected element: where it is and how large, then what is its own
+//! (the text and its style, the source of a picture, the list and the columns of a table, the
+//! border and fill of a frame).
 //!
 //! The fields are built from the element each time the selection changes, or the element is
 //! changed from elsewhere (dragged, undone). What is typed goes to the element at once; a

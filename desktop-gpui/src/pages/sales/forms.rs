@@ -1,4 +1,4 @@
-//! The forms of the sales screen (ports of `SaleForm.svelte` and `PaymentPanel.svelte`).
+//! The forms of the sales screen.
 //!
 //! The lines of a document are edited by the editor shared with the workshop's repair orders:
 //! see `pages/lines.rs`.

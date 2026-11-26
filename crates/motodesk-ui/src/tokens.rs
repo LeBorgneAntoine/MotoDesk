@@ -1,8 +1,7 @@
 //! Sizes: spacing, control heights, the type ramp, the chrome.
 //!
-//! The numbers of `desktop/src/lib/styles/dimensions.css` and `typography.css`. A component
-//! reads them from the theme (`cx.ui().m`) and never writes a size of its own, so the three
-//! densities stay coherent.
+//! A component reads these numbers from the theme (`cx.ui().m`) and never writes a size of its
+//! own, so the three densities stay coherent.
 //!
 //! There is no radius here: every corner in Motodesk is square.
 

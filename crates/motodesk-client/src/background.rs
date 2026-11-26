@@ -1,5 +1,5 @@
 //! Keep Motodesk running when its window is closed, and start it with Windows, so that the PC
-//! stays in the shop's network (port of `desktop/src/lib/api/background.ts`).
+//! stays in the shop's network.
 //!
 //! The service holds the choice and decides what applies; carrying it out (hiding the window,
 //! the icon near the clock, the start-up entry) is the app's part.

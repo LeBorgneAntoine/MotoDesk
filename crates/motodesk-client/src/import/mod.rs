@@ -1,4 +1,4 @@
-//! Importing a CSV file (port of `desktop/src/lib/api/import.ts` and `desktop/src/lib/import`).
+//! Importing a CSV file.
 //!
 //! The file is read, mapped and typed on this side ([`csv`], [`schema`], [`transforms`]); the
 //! service has the last word: it checks the rows again, finds the rows they point at, decides

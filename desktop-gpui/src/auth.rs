@@ -1,4 +1,4 @@
-//! Who is signed in (port of `desktop/src/lib/stores/auth.svelte.ts` and `access.svelte.ts`).
+//! Who is signed in.
 //!
 //! [`AuthStore`] is what the screens observe. The steps that talk to the service or the cloud
 //! are the free functions of [`flows`]: they run on the service's threads and return what the

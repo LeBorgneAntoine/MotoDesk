@@ -1,4 +1,4 @@
-//! Which screen is shown (port of `desktop/src/lib/router/router.svelte.ts`).
+//! Which screen is shown.
 //!
 //! A route is an id (`clients`, `stock`, ...) and a few parameters. The parameters carry the
 //! state worth finding again, most importantly the open panel stack.

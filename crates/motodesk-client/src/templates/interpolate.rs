@@ -1,4 +1,4 @@
-//! Variables in a template's text (port of `desktop/src/lib/templates/interpolate.ts`).
+//! Variables in a template's text.
 //!
 //! `{{client.full_name}}` is replaced by the value found at that path in the document's data;
 //! `{{doc.total_ttc | price}}` also says how to write it. A path that leads nowhere is replaced
@@ -257,7 +257,7 @@ mod tests {
             ]
         );
         assert!(tokenize("").is_empty());
-        // A third brace belongs to the path, as the Svelte editor read it.
+        // A third brace belongs to the path.
         assert_eq!(tokenize("{{{a}}"), [Segment::Var { path: "{a".into(), hint: Hint::Text }]);
     }
 

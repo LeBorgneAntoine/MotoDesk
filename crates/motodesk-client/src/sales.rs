@@ -1,4 +1,4 @@
-//! Quotes, invoices, credit notes and payments (port of `desktop/src/lib/api/sales.ts`).
+//! Quotes, invoices, credit notes and payments.
 //!
 //! A document is freely editable until [`validate`]. After that it is sealed into the fiscal
 //! journal and the service refuses every edit and deletion: the interface offers a credit note

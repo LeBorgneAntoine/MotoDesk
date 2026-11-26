@@ -1,5 +1,4 @@
-//! The network's recovery key (port of `desktop/src/lib/api/recovery.ts`;
-//! see `local_server/recovery_key.rs`).
+//! The network's recovery key (see `local_server/recovery_key.rs`).
 
 use axum::http::Method;
 use chrono::{Datelike, NaiveDate};
@@ -66,9 +65,8 @@ fn long_date(day: NaiveDate) -> String {
     format!("{number} {} {}", MONTHS[day.month0() as usize], day.year())
 }
 
-/// A page holding nothing but the key and what it is for, as a PDF (port of `recoveryKeyPage`
-/// in `desktop/src/lib/recoveryKey.ts`). Anything in `key` that a key is not made of is left
-/// out.
+/// A page holding nothing but the key and what it is for, as a PDF. Anything in `key` that a
+/// key is not made of is left out.
 pub fn key_page(key: &str, created: NaiveDate) -> Vec<u8> {
     pdf::write(&[key_drawing(key, created)], &Pictures::new(), "Clé de récupération Motodesk")
 }

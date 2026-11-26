@@ -1,7 +1,7 @@
 //! Colours and the live theme.
 //!
-//! The values of `desktop/src/lib/styles/colors.css` and `elevation.css`. A component reads
-//! them from the theme (`cx.ui().colors`) and never writes a colour of its own.
+//! A component reads its colours and its shadows from the theme (`cx.ui().colors`) and never
+//! writes a colour of its own.
 //!
 //! The accent ramp is derived from one base colour, so the light theme, the dark theme and the
 //! owner's own accent stay in step.

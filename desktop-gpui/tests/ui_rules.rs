@@ -1,5 +1,4 @@
-//! Guards the design-system rules a type checker cannot see (the native counterpart of
-//! `desktop/scripts/lint-ui.mjs`).
+//! Guards the design-system rules a type checker cannot see.
 //!
 //! In a screen (`src/pages`, the shell and the root):
 //!

@@ -1,5 +1,4 @@
-//! Document templates (port of `desktop/src/lib/api/templates.ts` and of `lib/templates/`): the
-//! layouts invoices, quotes and delivery notes are printed with.
+//! Document templates: the layouts invoices, quotes and delivery notes are printed with.
 //!
 //! A template is a page and a list of elements placed on it in millimetres ([`schema`]). Texts
 //! may hold variables (`{{client.full_name}}`) that are replaced when a document is printed
@@ -169,8 +168,8 @@ impl Template {
 /// A template to create, or what replaces an existing one. A field left `None` keeps its value
 /// (or takes the service's default on creation).
 ///
-/// The picture of the page the Svelte interface stored with each template is not sent: the
-/// service then keeps the one it has, and this interface draws the page itself.
+/// The picture of the page a template may be stored with is not sent: the service then keeps
+/// the one it has, and this interface draws the page itself.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TemplateInput {
     pub name: String,

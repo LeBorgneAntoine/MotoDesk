@@ -1,4 +1,4 @@
-//! The company's identity: its logo and its names (port of `routes/CompanySettings.svelte`).
+//! The company's identity: its logo and its names.
 
 use std::sync::Arc;
 

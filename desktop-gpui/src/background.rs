@@ -1,5 +1,4 @@
-//! Keeping the PC in the network when nobody has the window open (port of
-//! `desktop/src-tauri/src/background.rs`).
+//! Keeping the PC in the network when nobody has the window open.
 //!
 //! The data service and the mesh live inside the app's process, so a PC is reachable by the
 //! others only while that process runs. With the background mode on:
@@ -182,8 +181,8 @@ pub mod platform {
 
     pub type TrayHandle = TrayIcon;
 
-    /// The name of the start-up entry. It is the one the Tauri shell wrote: this app takes that
-    /// entry over instead of adding a second one.
+    /// The name of the start-up entry. The uninstaller removes the entry by this name
+    /// (`preinstall-section` in Cargo.toml).
     const STARTUP_ENTRY: &str = "Motodesk";
 
     // ---- starting with the session -------------------------------------------------------------
@@ -415,7 +414,7 @@ mod tests {
     #[test]
     fn the_start_up_entry_starts_this_program_hidden() {
         let entry = super::platform::startup_entry(std::path::Path::new(r"C:\Program Files\Motodesk\motodesk.exe")).unwrap();
-        // The entry the Tauri shell wrote, taken over; the path survives its space.
+        // The path survives its space.
         assert_eq!(entry.get_app_name(), "Motodesk");
         assert_eq!(entry.get_app_path(), r#""C:\Program Files\Motodesk\motodesk.exe""#);
         assert_eq!(entry.get_args(), [BACKGROUND_ARG]);

@@ -1,5 +1,4 @@
-//! Modèles (port of `desktop/src/routes/templates/`): the library of document templates, and
-//! the editor a template is laid out in.
+//! Modèles: the library of document templates, and the editor a template is laid out in.
 //!
 //! Each card shows its template's page as it prints, drawn from the template itself with a
 //! sample document: there is no picture of the page to keep up to date.

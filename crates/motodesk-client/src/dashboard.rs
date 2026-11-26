@@ -1,5 +1,4 @@
-//! The figures and the recent documents of the home screen (port of
-//! `desktop/src/lib/api/dashboard.ts`).
+//! The figures and the recent documents of the home screen.
 
 use serde::Deserialize;
 

@@ -1,6 +1,5 @@
-//! The variables a template can show (port of `desktop/src/lib/templates/variables.ts`), by
-//! group and by kind of template. A plain variable goes in a text (or as the source of a
-//! picture); a list feeds a table.
+//! The variables a template can show, by group and by kind of template. A plain variable
+//! goes in a text (or as the source of a picture); a list feeds a table.
 
 use super::schema::Format;
 use super::TemplateKind;

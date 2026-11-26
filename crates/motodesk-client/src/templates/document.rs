@@ -1,4 +1,4 @@
-//! A real document as a template reads it (port of `desktop/src/lib/templates/documentData.ts`).
+//! A real document as a template reads it.
 //!
 //! Everything an invoice must carry by law is put together here: who issues it and under which
 //! registration numbers (CGI ann. II art. 242 nonies A), the payment terms and the penalties

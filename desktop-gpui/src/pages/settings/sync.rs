@@ -1,6 +1,5 @@
 //! Where the sync of this PC stands, the other PCs it sees, and the step that puts a local
-//! network online (port of `routes/SyncSettings.svelte` and `routes/GoOnline.svelte`).
-//! Administrators only.
+//! network online. Administrators only.
 
 use std::time::Duration;
 

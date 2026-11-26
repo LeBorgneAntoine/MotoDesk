@@ -1,5 +1,5 @@
-//! The layouts that come with the app (port of `desktop/src/lib/templates/starters.ts`): an
-//! invoice, a quote, a delivery note, a customer sheet and a product sheet.
+//! The layouts that come with the app: an invoice, a quote, a delivery note, a customer
+//! sheet and a product sheet.
 //!
 //! They are templates like any other, so a shop prints a complete document from the first day
 //! and then duplicates or adjusts one rather than starting from a blank page.

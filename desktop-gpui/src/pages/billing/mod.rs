@@ -1,6 +1,5 @@
-//! Comptabilité (port of `routes/Billing.svelte` and `routes/billing/*`): the read-only side
-//! of the fiscal module, plus the two controls that write to the journal without touching a
-//! document: closing a period and producing an archive.
+//! Comptabilité: the read-only side of the fiscal module, plus the two controls that write
+//! to the journal without touching a document: closing a period and producing an archive.
 //!
 //! The split mirrors how the questions arrive: an accountant asks for journals and a FEC, an
 //! inspector asks for the register, the closures and the archive.

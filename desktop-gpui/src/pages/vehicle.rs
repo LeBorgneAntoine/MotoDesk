@@ -1,6 +1,5 @@
-//! What the screens that show vehicles share (port of `VehicleForm.svelte` and of the body of
-//! `VehiclePanel.svelte`): the form, the sections of the detail panel, the icon and the summary
-//! line of a vehicle. Used by Clients & Véhicules and by Parc VN/VO.
+//! What the screens that show vehicles share: the form, the sections of the detail panel, the
+//! icon and the summary line of a vehicle. Used by Clients & Véhicules and by Parc VN/VO.
 
 use motodesk_client::clients::{OdometerUnit, Vehicle, VehicleInput, VehicleType};
 use motodesk_ui::gpui::*;

@@ -1,12 +1,10 @@
-//! The way into the application: sign in or sign up, online or on the local network
-//! (port of `Login`, `Register`, `LocalLogin`, `LocalRegister`, `AuthTabs` and `AccessSwitch`).
+//! The way into the application: sign in or sign up, online or on the local network.
 //!
 //! One card shows one of four forms. The tabs choose between signing in and signing up; the
 //! switch under the card chooses between an online account and a local one.
 //!
-//! Two ways back in hang from the local sign-in (port of `RecoverAccess` and
-//! `RestoreFirstRun`): the recovery key when a password is lost, and a backup file on a PC
-//! with nothing set up.
+//! Two ways back in hang from the local sign-in: the recovery key when a password is lost,
+//! and a backup file on a PC with nothing set up.
 
 use std::path::PathBuf;
 

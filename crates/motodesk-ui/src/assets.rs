@@ -10,8 +10,7 @@ use gpui_kit::{AssetSource, Result, SharedString};
 #[folder = "assets"]
 struct Embedded;
 
-/// The asset source of the application: the kit's files first, then the Lucide icon catalog
-/// (the same set the Svelte interface used).
+/// The asset source of the application: the kit's files first, then the Lucide icon catalog.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Assets;
 

@@ -1,5 +1,5 @@
-//! A document on its way to paper: an invoice, a credit note, a ticket or a quote, as a PDF
-//! (port of `doPrint` in `desktop/src/routes/Sales.svelte`).
+//! A document on its way to paper: an invoice, a credit note, a ticket or a quote, as a
+//! PDF.
 //!
 //! Printing a sealed document is an operation the fiscal rules want traced, and every copy
 //! after the first has to be told from the original (BOI-TVA-DECLA-30-10-30 § 50). So the

@@ -1,4 +1,4 @@
-//! The cloud's account API (port of `desktop/src/lib/api/cloudClient.ts`).
+//! The cloud's account API.
 //!
 //! Only sign-in goes to the cloud directly: everything else is asked of the local API, which
 //! does its own syncing.

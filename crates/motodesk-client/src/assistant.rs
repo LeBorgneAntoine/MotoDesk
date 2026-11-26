@@ -1,6 +1,5 @@
-//! The assistant (port of `desktop/src/lib/api/assistant.ts` and of `lib/assistant/`'s `map`,
-//! `models`, `sse` and `types`): the OpenRouter key of this PC, its conversations, and the
-//! answer of the model as it is being written.
+//! The assistant: the OpenRouter key of this PC, its conversations, and the answer of the
+//! model as it is being written.
 //!
 //! The key and the chosen model belong to this PC. The key is kept by the service outside the
 //! shop's settings (those travel to every PC); the model is kept in a file of its own.
@@ -400,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn preferences_are_kept_in_the_file_the_tauri_app_used() {
+    fn preferences_are_kept_in_the_file_of_this_pc() {
         let dir = std::env::temp_dir().join(format!("motodesk-assistant-prefs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let store = PrefsStore::in_dir(&dir);

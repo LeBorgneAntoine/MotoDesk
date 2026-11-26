@@ -1,5 +1,5 @@
-//! The form of a repair order (port of `WorkshopForm.svelte`): who and what it is for, who
-//! works on it, and the parts and labour that will be invoiced.
+//! The form of a repair order: who and what it is for, who works on it, and the parts and
+//! labour that will be invoiced.
 //!
 //! The lines are edited by the editor shared with the sales documents: see `pages/lines.rs`.
 

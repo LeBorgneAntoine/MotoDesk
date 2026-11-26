@@ -1,4 +1,4 @@
-//! The identity of the company: its names and its logo (port of `desktop/src/lib/api/company.ts`).
+//! The identity of the company: its names and its logo.
 //!
 //! Reads come from the copy this PC keeps, so the name and the logo are there offline. Writes
 //! are for administrators: an online company writes to the cloud and refreshes the copy, a

@@ -1,6 +1,5 @@
-//! What a template draws (port of the layout half of `desktop/src/lib/templates/engine.ts` and
-//! `print.ts`): a template and the data of a document become, page by page, a list of plain
-//! shapes in millimetres.
+//! What a template draws: a template and the data of a document become, page by page, a list
+//! of plain shapes in millimetres.
 //!
 //! The screen and the PDF both draw these shapes and nothing else, so what is shown is what is
 //! printed. Nothing here knows about pixels, windows or files.

@@ -1,5 +1,5 @@
-//! The frame around every screen once signed in (port of `Shell.svelte`): title bar,
-//! navigation rail, the screen itself, status bar.
+//! The frame around every screen once signed in: title bar, navigation rail, the
+//! screen itself, status bar.
 
 use std::time::Duration;
 
@@ -159,7 +159,7 @@ impl Shell {
             }
         })
         .detach();
-        // The look the shop chose, from the same settings as the Svelte interface.
+        // The look the shop chose, from its settings.
         cx.api(
             |client| async move { settings::list(&client).await },
             |_, settings, cx| {

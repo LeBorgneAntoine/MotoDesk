@@ -1,8 +1,8 @@
-//! Where the session is kept between two runs (port of `desktop/src/lib/api/tokenStore.ts`).
+//! Where the session is kept between two runs.
 //!
-//! The same file and key as the Svelte interface (`auth.store.json` in the app's data folder,
-//! written there by Tauri's store plugin), so a PC that was signed in stays signed in when it
-//! moves to the native interface, and back.
+//! One file, `auth.store.json` in the app's data folder: a JSON object, one entry per key. The
+//! file and its key have not changed since the first version, so a PC that was signed in stays
+//! signed in from one version to the next.
 
 use std::path::{Path, PathBuf};
 

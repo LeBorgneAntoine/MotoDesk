@@ -1,4 +1,4 @@
-//! The root of the window (port of `App.svelte`): one of four things is on screen.
+//! The root of the window: one of four things is on screen.
 //!
 //! - the data service could not start: one clear page replaces every screen;
 //! - the stored session is being read: a spinner;

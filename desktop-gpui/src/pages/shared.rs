@@ -1,7 +1,6 @@
-//! Dossier partagé (port of `routes/SharedFolder.svelte` and `routes/shared/*`): the shop's
-//! sensitive files (accounts, contracts, IDs), encrypted on disk. Administrators create
-//! folders and choose who sees each one; anyone who can see a folder can add and open files
-//! in it.
+//! Dossier partagé: the shop's sensitive files (accounts, contracts, IDs), encrypted on
+//! disk. Administrators create folders and choose who sees each one; anyone who can see a
+//! folder can add and open files in it.
 //!
 //! A file is sent and fetched a piece at a time by the client; this screen only says which
 //! file and where, and shows how far it is.

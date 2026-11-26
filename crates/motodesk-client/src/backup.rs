@@ -1,6 +1,5 @@
 //! Backups: one encrypted file holds the database, the fiscal archives and the signing keys,
-//! so a new PC can pick up where this one stopped (port of `desktop/src/lib/api/backup.ts`).
-//! Administrators only.
+//! so a new PC can pick up where this one stopped. Administrators only.
 
 use axum::http::Method;
 use serde::Deserialize;
@@ -101,9 +100,9 @@ pub const MANUAL_GRACE_DAYS: i64 = 7;
 /// With automatic backups, how many days past the chosen frequency count as stuck.
 pub const AUTOMATIC_SLACK_DAYS: i64 = 3;
 
-/// Why the owner is told that the shop's data is not being backed up (port of
-/// `desktop/src/lib/backupReminder.ts`). Automatic backups write nothing until a password has
-/// been chosen, so a shop can run for months believing it is protected when it is not.
+/// Why the owner is told that the shop's data is not being backed up. Automatic backups write
+/// nothing until a password has been chosen, so a shop can run for months believing it is
+/// protected when it is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reminder {
     /// No automatic backup is set up, and the last backup of any kind is old or missing

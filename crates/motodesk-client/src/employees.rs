@@ -1,4 +1,4 @@
-//! The team of an online company (port of `desktop/src/lib/api/employees.ts`).
+//! The team of an online company.
 //!
 //! Employee management is admin-only and authoritative on the cloud, so these calls go straight
 //! to the cloud API rather than to the local mirror. A local network manages its accounts with

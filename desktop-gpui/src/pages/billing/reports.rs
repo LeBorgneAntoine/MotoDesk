@@ -1,6 +1,5 @@
-//! The accounting reports (ports of `SalesJournalView`, `CashJournalView`, `VatRecapView`,
-//! `AgeingView` and `FecView`). Every figure comes from sealed documents: nothing here writes
-//! to the books.
+//! The accounting reports. Every figure comes from sealed documents: nothing here writes to
+//! the books.
 
 use std::rc::Rc;
 

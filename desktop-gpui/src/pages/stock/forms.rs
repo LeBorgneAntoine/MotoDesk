@@ -1,5 +1,4 @@
-//! The forms of the catalogue (ports of `ProductForm.svelte`, `CategoryForm.svelte` and
-//! `VariantForm.svelte`).
+//! The forms of the catalogue.
 //!
 //! A form owns its fields, knows whether they differ from what it started with, and turns
 //! them into what the API takes. It is created when its panel or dialog opens and dropped when
