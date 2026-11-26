@@ -88,6 +88,9 @@ pub struct Till {
     busy: bool,
 
     float: TextModel,
+    /// Why the service would not open the till (the day is already closed, for one). It stays
+    /// on the opening screen: a toast is gone before the cashier has read it.
+    open_error: Option<SharedString>,
     client: ComboModel,
     client_searches: u64,
     held: Vec<HeldTicket>,
@@ -188,6 +191,7 @@ impl Till {
             tenders: Vec::new(),
             busy: false,
             float,
+            open_error: None,
             client,
             client_searches: 0,
             held: Vec::new(),
@@ -283,6 +287,7 @@ impl Till {
         }
         let float_cents = typed_cents(&self.float.text(cx)).unwrap_or(0).max(0);
         self.busy = true;
+        self.open_error = None;
         cx.notify();
         cx.api_in(
             window,
@@ -295,7 +300,8 @@ impl Till {
                         toast::success("Session ouverte", window, cx);
                         this.search.focus(window, cx);
                     }
-                    Err(error) => toast::error(humanize_error(&error, "La session n'a pas pu être ouverte."), window, cx),
+                    // The service's own words, kept on screen.
+                    Err(error) => this.open_error = Some(humanize_error(&error, "La session n'a pas pu être ouverte.").into()),
                 }
                 cx.notify();
             },
@@ -1063,7 +1069,7 @@ impl Till {
                     .title("Ouverture de session")
                     .subtitle("Comptez le fond de caisse avant d'encaisser. Le montant est journalisé.")
                     .icon(IconName::Store)
-                    .child(FormField::new("Fond de caisse (€)").child(Input::new(&self.float)))
+                    .child(FormField::new("Fond de caisse (€)").error(self.open_error.clone()).child(Input::new(&self.float)))
                     .footer(
                         Button::new("till-open")
                             .primary()
