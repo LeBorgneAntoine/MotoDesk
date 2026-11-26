@@ -495,7 +495,7 @@ impl TablesTab {
                     .small()
                     .label("Suivant")
                     .icon_after(IconName::ChevronRight)
-                    .disabled(!data::has_next_page(self.offset, shown, total, searching, PAGE_SIZE) || self.preview_loading)
+                    .disabled(!data::has_next_page(self.offset, total, PAGE_SIZE) || self.preview_loading)
                     .on_click(cx.listener(|this, _, _, cx| this.turn_page(true, cx))),
             );
 

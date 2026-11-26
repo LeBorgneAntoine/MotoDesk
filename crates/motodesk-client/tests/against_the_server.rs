@@ -941,8 +941,10 @@ async fn an_administrator_looks_into_a_table_runs_sql_and_empties_a_table() {
     assert_eq!((page.total, page.rows.len()), (3, 2));
     assert!(page.columns.iter().any(|c| c == "last_name"));
     let found = data::preview_table(&api, "clients", " dub ", 100, 0).await.unwrap();
-    // The count is the table's, whatever was searched for: the rows of the page say what was found.
-    assert_eq!((found.rows.len(), found.total), (1, 3));
+    // The count follows the search: one row found out of three.
+    assert_eq!((found.rows.len(), found.total), (1, 1));
+    // A cell with nothing in it comes back empty, not as a zero.
+    assert_eq!(data::cell_text(found.rows[0].get("phone")), None);
     assert_eq!(data::cell_text(found.rows[0].get("last_name")).as_deref(), Some("Dubois"));
     assert!(data::rows_to_csv(&found.columns, &found.rows).contains("Dubois"));
 
