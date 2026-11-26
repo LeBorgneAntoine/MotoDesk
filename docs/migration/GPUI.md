@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, import CSV (lecture du fichier, correspondance, envoi), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -26,10 +26,11 @@ sont pas passés.
 | L'Atelier (tableau des ordres de réparation, fiche, facturation) | migré |
 | Comptabilité (journaux des ventes et de caisse, TVA, balance âgée, FEC, caisse et intégrité, clôtures, archives, journal fiscal) | migré |
 | Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré, sans les réglages de la Caisse et de l'Assistant |
+| Données : import CSV (fichier, destination, correspondance, aperçu, résultat) | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Modèles, Dossier partagé, Données, Assistant, Caisse | à faire |
+| Modèles, Dossier partagé, Données (onglets Simple et Avancé), Assistant, Caisse | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -65,6 +66,35 @@ Svelte en portait une copie dans chaque formulaire.
 Sur L'Atelier, le champ « Technicien » propose l'équipe d'une entreprise en ligne, comme dans
 Svelte : sur un réseau local, où l'équipe n'existe pas, il reste vide. Une affectation déjà
 enregistrée est conservée et affichée « Technicien assigné ».
+
+Sur l'import CSV (écran Données, onglet « Import CSV », sur lequel l'écran s'ouvre tant que les
+deux autres onglets ne sont pas migrés) :
+
+- Les règles sont dans `motodesk_client::import` : `schema` (ce qui s'importe, champ par
+  champ), `csv` (lecture du fichier : séparateur trouvé seul, UTF-8 ou Windows-1252, guillemets)
+  et `transforms` (colonne → champ, lecture des montants, taux, quantités, oui/non). Le fichier
+  est lu et ses lignes préparées hors du fil de l'interface.
+- **Correction par rapport à Svelte** : les en-têtes qui portent exactement le nom d'un champ
+  sont attribués d'abord. Avec un fichier « Nom;Email », Svelte donnait la colonne « Nom » au
+  prénom (« prenom » contient « nom ») et laissait le nom, obligatoire, sans colonne.
+- Une ligne refusée par le service pour une valeur déjà prise s'affiche « Référence (SKU) :
+  cette valeur est déjà utilisée par une autre fiche » et non la phrase de la base de données.
+- Le rapport d'erreurs est proposé dès qu'une ligne n'est pas entrée, y compris celles écartées
+  avant l'envoi. Il est écrit avec le séparateur du fichier d'origine et marqué UTF-8, pour
+  s'ouvrir en colonnes dans Excel ; Svelte l'écrivait toujours avec des virgules.
+- « Ignorer les doublons », imposé pour les lignes de vente, n'est plus conservé en revenant à
+  un autre type de données.
+- L'aperçu répartit ses colonnes sur la largeur, sans défilement horizontal.
+- En développement, `MOTODESK_DEV_IMPORT_FILE=<chemin>` ouvre l'assistant sur un fichier, sans
+  passer par la fenêtre du système.
+- Non essayés dans l'application : le choix d'un fichier par la fenêtre du système, le
+  glisser-déposer, l'enregistrement du rapport d'erreurs, les modes « Mettre à jour » et
+  « Ajouter ou mettre à jour » (ce dernier est couvert par le test du client), et l'import de
+  véhicules, de ventes et de lignes de vente. Clients et produits ont été importés pour de bon
+  dans un dossier de démonstration.
+- Constat sur le service, identique sous Svelte : la recherche d'un client existant par e-mail
+  tient compte des majuscules, alors que l'assistant signale les doublons sans en tenir compte.
+  Deux lignes à la même adresse écrite différemment créent deux fiches.
 
 Sur les Paramètres :
 
@@ -162,7 +192,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Import, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
+Ordre prévu : Données (onglets Simple et Avancé), Dossier partagé, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
 

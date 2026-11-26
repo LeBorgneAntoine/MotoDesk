@@ -234,6 +234,26 @@ impl Gallery {
                 ),
             )
             .child(
+                Self::block("Stepper, DropZone", cx).child(
+                    col()
+                        .gap(m.space_4)
+                        .child(
+                            Stepper::new("steps", 2)
+                                .step("Fichier", "CSV source")
+                                .step("Destination", "Table et mode")
+                                .step("Correspondance", "Colonnes → champs")
+                                .step("Aperçu", "Contrôle avant import")
+                                .step("Résultat", "Bilan")
+                                .on_select(|_, _, _| {}),
+                        )
+                        .child(
+                            DropZone::new("drop", "Glissez-déposez un fichier CSV ici")
+                                .line("Formats acceptés : .csv · séparateur détecté automatiquement")
+                                .action(Button::new("drop-pick").primary().icon(IconName::Upload).label("Choisir un fichier")),
+                        ),
+                ),
+            )
+            .child(
                 Self::block("Tabs", cx).child(
                     Tabs::new(
                         "tabs",

@@ -13,6 +13,7 @@ mod panel;
 mod table;
 mod text_field;
 mod tooltip;
+mod wizard;
 
 pub use button::{Button, ButtonSize, ButtonVariant};
 pub use combobox::{ComboModel, ComboOption, Combobox};
@@ -35,3 +36,4 @@ pub use panel::{MAX_DEPTH, Panel, PanelHost, PanelLayer, PanelSection, PanelStac
 pub use table::{Align, Column, DataTable};
 pub use text_field::{Input, TextEvent, TextModel, TextModelBuilder, Textarea};
 pub use tooltip::tooltip;
+pub use wizard::{DropZone, Stepper};
