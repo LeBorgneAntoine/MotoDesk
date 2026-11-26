@@ -96,8 +96,19 @@ fn describe(d: &Diagnosis) -> String {
     if d.keys_at_hand.is_empty() {
         out.push_str("  clé secrète disponible    : aucune (ni trousseau, ni base)\n");
     }
+    // The key that signs is the one the journal names, wherever it is kept. Any other
+    // key kept for this register is shown as what it is: not the till's key.
+    let mut signing = d.signing_key_in;
     for (source, key) in &d.keys_at_hand {
-        out.push_str(&format!("  clé secrète disponible    : {key}  ({source:?})\n"));
+        let role = if signing == Some(*source) {
+            signing = None;
+            "celle que le journal déclare : la caisse signe avec"
+        } else if d.signing_key_in.is_some() && d.keys_at_hand.iter().filter(|(_, k)| k == key).count() > 1 {
+            "la même clé, en double"
+        } else {
+            "pas celle que le journal déclare : la caisse ne signe pas avec"
+        };
+        out.push_str(&format!("  clé secrète disponible    : {key}  ({source:?} ; {role})\n"));
     }
     out.push_str(&match &d.verdict {
         Verdict::Healthy => "  ÉTAT : saine. Rien à faire.\n".to_string(),

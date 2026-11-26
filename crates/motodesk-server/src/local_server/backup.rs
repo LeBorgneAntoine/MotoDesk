@@ -34,6 +34,7 @@ use crate::local_server::backup_format::{
 /// both the published PBKDF2 vectors and the production floor.
 const KDF_ITERATIONS: u32 = if cfg!(test) { 2_000 } else { DEFAULT_ITERATIONS };
 use crate::local_server::error::{LocalError, LocalResult};
+use crate::local_server::fiscal::keys::{self, SigningKeychain, SystemKeychain};
 use crate::local_server::state::SharedState;
 
 const BACKUP_FORMAT: u32 = 2;
@@ -250,7 +251,7 @@ async fn write_backup(state: &SharedState, password: &str, prefix: &str) -> Loca
     // A consistent copy taken while the app keeps running.
     vacuum_into(&state.db, &db_copy).await?;
 
-    let secrets = collect_secrets(state).await?;
+    let secrets = collect_secrets(&SystemKeychain, state).await?;
     let manifest = BackupManifest {
         format: BACKUP_FORMAT,
         created_at: Utc::now().to_rfc3339(),
@@ -664,7 +665,7 @@ async fn adopt_secrets(path: &Path, secrets: &SecretsPayload, made_at: Option<&s
     let pool = crate::local_server::db::init_pool(path)
         .await
         .map_err(|e| LocalError::BadRequest(format!("base de données illisible : {e}")))?;
-    let mut outcome = store_secrets(&pool, secrets).await;
+    let mut outcome = store_secrets(&SystemKeychain, &pool, secrets).await;
     // The copy also holds whoever was signed in when it was made. Restoring must not sign
     // anyone in without their password.
     if outcome.is_ok() {
@@ -688,9 +689,21 @@ async fn adopt_secrets(path: &Path, secrets: &SecretsPayload, made_at: Option<&s
     outcome
 }
 
-async fn store_secrets(pool: &sqlx::SqlitePool, secrets: &SecretsPayload) -> LocalResult<()> {
+/// The keys of a backup, kept on this computer.
+///
+/// A key goes over whatever the keychain held under the register's code: that was the key
+/// of the data being replaced, and `verify_open_database` has checked that this one is the
+/// key the restored journal names. When the keychain will not take it, the old key stays
+/// there beside the restored one in the database, and the two differ. That is harmless:
+/// the till signs with the key the journal names (`fiscal::keys::named_by`), not with the
+/// first one it finds.
+async fn store_secrets(
+    keychain: &dyn SigningKeychain,
+    pool: &sqlx::SqlitePool,
+    secrets: &SecretsPayload,
+) -> LocalResult<()> {
     for (code, hex) in &secrets.fiscal_keys {
-        if let Err(e) = crate::local_server::secrets::store_fiscal_key(code, hex) {
+        if let Err(e) = keychain.store(code, hex) {
             tracing::warn!(error = %e, register = %code, "keychain unavailable; fiscal key stored in the database");
             sqlx::query(
                 "INSERT OR REPLACE INTO fiscal_key_fallback (register_code, secret_key, created_at) VALUES ($1, $2, $3)",
@@ -802,29 +815,26 @@ async fn vacuum_into(pool: &sqlx::SqlitePool, dest: &Path) -> LocalResult<()> {
     Ok(())
 }
 
-async fn collect_secrets(state: &SharedState) -> LocalResult<SecretsPayload> {
+/// What a backup carries beside the database. For each register, its signing key: the key
+/// at hand that the register's journal names, wherever it is kept. A restore refuses a
+/// backup whose key is not the one its journal names, so carrying whichever key is found
+/// first (the keychain's, when it holds another than the journal's) would make a backup
+/// nobody can restore. When no key at hand is the named one, what is there is carried as
+/// before: it may be the only copy of a key that signed part of the journal.
+async fn collect_secrets(keychain: &dyn SigningKeychain, state: &SharedState) -> LocalResult<SecretsPayload> {
     let mesh_secret = crate::local_server::secrets::load_mesh_secret()
         .ok()
         .flatten()
         .or(crate::local_server::db::load_mesh_secret(&state.db).await.ok().flatten());
-    let codes: Vec<(String,)> = sqlx::query_as("SELECT code FROM fiscal_registers")
+    let registers: Vec<(String, String)> = sqlx::query_as("SELECT code, public_key FROM fiscal_registers")
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
     let mut fiscal_keys = Vec::new();
-    for (code,) in codes {
-        if let Ok(Some(hex)) = crate::local_server::secrets::load_fiscal_key(&code) {
-            fiscal_keys.push((code, hex));
-            continue;
-        }
-        if let Ok(Some((hex,))) = sqlx::query_as::<_, (String,)>(
-            "SELECT secret_key FROM fiscal_key_fallback WHERE register_code = $1",
-        )
-        .bind(&code)
-        .fetch_optional(&state.db)
-        .await
-        {
-            fiscal_keys.push((code, hex));
+    for (code, public_key) in registers {
+        let at_hand = keys::at_hand(keychain, &state.db, &code).await.unwrap_or_default();
+        if let Some((_, key)) = keys::named_by(&public_key, &at_hand).or(at_hand.first()) {
+            fiscal_keys.push((code, key.to_hex()));
         }
     }
     Ok(SecretsPayload { mesh_secret, fiscal_keys })
@@ -1187,5 +1197,61 @@ mod tests {
         let err = restore_named(&state, "junk.mgbak", "un-mot-de-passe-solide").await.unwrap_err();
         assert!(matches!(err, LocalError::BadRequest(_)));
         assert!(!state.data_dir.join(PENDING_DB).exists());
+    }
+
+    /// The keychain holds a key the journal does not name (a refused repair left it there),
+    /// the database holds the named one. The backup must carry the named key: a restore
+    /// refuses a backup whose key is not its journal's.
+    #[tokio::test]
+    async fn a_backup_carries_the_key_its_journal_names_not_the_first_one_found() {
+        use crate::local_server::test_support::MemoryKeychain;
+        let state = shop().await;
+        let register = crate::local_server::fiscal::current(&state).await.unwrap();
+        let keychain = MemoryKeychain::new();
+        keychain.put(&register.code, &motodesk_fiscal::SecretKey::generate().to_hex());
+
+        let secrets = collect_secrets(&keychain, &state).await.unwrap();
+        assert_eq!(secrets.fiscal_keys.len(), 1);
+        let (code, hex) = &secrets.fiscal_keys[0];
+        assert_eq!(code, &register.code);
+        assert_eq!(
+            motodesk_fiscal::SecretKey::from_hex(hex).unwrap().public().to_hex(),
+            register.public_key_hex()
+        );
+
+        let dir = backups_dir(&state.data_dir);
+        fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join("named-key.db");
+        vacuum_into(&state.db, &copy).await.unwrap();
+        verify_database(&copy, &secrets).await.expect("and such a backup can be restored");
+    }
+
+    /// A restore onto a computer whose keychain still holds another key for the register
+    /// and will not take the backup's: the backup's key goes into the database, the two
+    /// places hold different keys, and the till signs with the one the journal names.
+    #[tokio::test]
+    async fn a_restore_the_keychain_refuses_leaves_a_till_that_signs_with_the_journals_key() {
+        use crate::local_server::fiscal;
+        use crate::local_server::test_support::{MemoryKeychain, OnStore};
+        let state = shop().await;
+        // The register was opened with its key in the keychain, and says so.
+        let before = MemoryKeychain::new();
+        let register = fiscal::current_with(&state, &before).await.unwrap();
+        assert_eq!(register.key_store, fiscal::keys::KeyStore::Keychain);
+        let secrets = collect_secrets(&before, &state).await.unwrap();
+        assert_eq!(secrets.fiscal_keys.len(), 1);
+
+        // The computer restored onto: another key under the same code, no write accepted.
+        let here = MemoryKeychain::that(OnStore::Refuses);
+        let other = motodesk_fiscal::SecretKey::generate().to_hex();
+        here.put(&register.code, &other);
+        store_secrets(&here, &state.db, &secrets).await.unwrap();
+        assert_eq!(here.get(&register.code), Some(other), "the key that was there is still there");
+
+        let till = fiscal::current_with(&state, &here).await.unwrap();
+        assert_eq!(till.public_key_hex(), register.public_key_hex());
+        let d = fiscal::keyrepair::diagnose_with(&here, &state.db, None).await.unwrap();
+        assert_eq!(d[0].verdict, fiscal::keyrepair::Verdict::Healthy);
+        assert_eq!(d[0].signing_key_in, Some(fiscal::keys::KeyStore::Database));
     }
 }

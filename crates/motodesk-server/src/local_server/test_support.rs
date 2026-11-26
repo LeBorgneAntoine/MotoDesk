@@ -175,3 +175,68 @@ pub async fn past_invoice(
     .await
     .unwrap();
 }
+
+/// What a [`MemoryKeychain`] answers to a write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnStore {
+    /// Keeps the key and says so.
+    Keeps,
+    /// Keeps the key but answers that it did not: what Windows Credential Manager does
+    /// when it shows a write later than the caller waits for it.
+    KeepsButSaysNo,
+    /// Keeps nothing and says so: no keychain, a locked one, a full one.
+    Refuses,
+}
+
+/// A keychain held in memory, for tests of what is done with signing keys: which key a
+/// till signs with, what a repair leaves behind, what a restore finds. Nothing here
+/// reaches the operating system's credential store.
+pub struct MemoryKeychain {
+    kept: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    on_store: OnStore,
+}
+
+impl MemoryKeychain {
+    /// An empty keychain that keeps what it is given.
+    pub fn new() -> Self {
+        Self::that(OnStore::Keeps)
+    }
+
+    /// An empty keychain that answers writes as told.
+    pub fn that(on_store: OnStore) -> Self {
+        Self { kept: Default::default(), on_store }
+    }
+
+    /// Put a key there directly, as if it had been kept at some earlier time.
+    pub fn put(&self, register_code: &str, key_hex: &str) {
+        self.kept.lock().unwrap().insert(register_code.to_string(), key_hex.to_string());
+    }
+
+    pub fn get(&self, register_code: &str) -> Option<String> {
+        self.kept.lock().unwrap().get(register_code).cloned()
+    }
+
+    pub fn remove(&self, register_code: &str) {
+        self.kept.lock().unwrap().remove(register_code);
+    }
+}
+
+impl crate::local_server::fiscal::keys::SigningKeychain for MemoryKeychain {
+    fn load(&self, register_code: &str) -> Option<String> {
+        self.get(register_code)
+    }
+
+    fn store(&self, register_code: &str, key_hex: &str) -> anyhow::Result<()> {
+        match self.on_store {
+            OnStore::Keeps => {
+                self.put(register_code, key_hex);
+                Ok(())
+            }
+            OnStore::KeepsButSaysNo => {
+                self.put(register_code, key_hex);
+                anyhow::bail!("le trousseau du système a accepté l'écriture mais ne la conserve pas")
+            }
+            OnStore::Refuses => anyhow::bail!("pas de trousseau"),
+        }
+    }
+}

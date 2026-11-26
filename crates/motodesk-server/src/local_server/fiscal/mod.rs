@@ -80,6 +80,14 @@ pub struct RegisterInfo {
 /// machines that have never met must still produce numbers that cannot collide,
 /// and asking a server for a code would make invoicing depend on the network.
 pub async fn current(state: &SharedState) -> LocalResult<Register> {
+    current_with(state, &keys::SystemKeychain).await
+}
+
+/// [`current`], with the keychain given by the caller (tests give one of their own).
+pub(crate) async fn current_with(
+    state: &SharedState,
+    keychain: &dyn keys::SigningKeychain,
+) -> LocalResult<Register> {
     // First use can arrive as several requests at once (the till asks for the
     // session and the register in parallel). Without this, each would see "no
     // register yet" and generate its own key.
@@ -97,9 +105,14 @@ pub async fn current(state: &SharedState) -> LocalResult<Register> {
     .fetch_optional(&state.db)
     .await?;
 
-    let (key, key_store) = keys::load_or_create(&state.db, &code, existing.is_none()).await?;
+    // An existing register signs with the key its journal names and no other: the key
+    // is chosen among those at hand by the public key on record, not by where it is kept.
+    let recorded = existing.as_ref().map(|(_, _, _, public_key)| public_key.as_str());
+    let (key, key_store) = keys::load_or_create(keychain, &state.db, &code, recorded).await?;
 
     if let Some((id, stored_store, stored_company, stored_public_key)) = existing {
+        // `load_or_create` already refuses any other key; this is the last line before
+        // a signature is made, kept in case the choice above is ever changed.
         if key.public().to_hex() != stored_public_key {
             return Err(LocalError::BadRequest(format!(
                 "la clé de signature de la caisse {code} ne correspond pas à la clé publique enregistrée ;                  les écritures fiscales sont bloquées pour ne pas produire de signatures invalides"
