@@ -28,6 +28,7 @@ pub mod recovery;
 pub mod sales;
 pub mod session;
 pub mod settings;
+pub mod shared;
 pub mod stock;
 pub mod sync;
 pub mod token_store;

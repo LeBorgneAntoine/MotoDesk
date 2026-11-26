@@ -3,6 +3,7 @@
 use axum::body::Body;
 use axum::http::{header, HeaderValue, Method, Request};
 use axum::Router;
+use http_body_util::BodyExt as _;
 use tower::ServiceExt;
 
 use crate::error::{ApiError, ApiResult};
@@ -57,6 +58,39 @@ impl Local {
             Ok(response) => response,
             Err(never) => match never {},
         };
+        Self::whole(response).await
+    }
+
+    /// Ask for something large (a file): its bytes are handed to `sink` as they arrive, never
+    /// held whole. Answers how many there were. An error answer is read as any other.
+    pub async fn download(&self, path: &str, mut sink: impl FnMut(&[u8]) -> std::io::Result<()>) -> ApiResult<u64> {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .header(LOCAL_TOKEN_HEADER, &self.token)
+            .body(Body::empty())
+            .map_err(|e| ApiError::new(0, "bad_request", format!("Requête invalide ({path}) : {e}")))?;
+        let response = match self.router.clone().oneshot(request).await {
+            Ok(response) => response,
+            Err(never) => match never {},
+        };
+        if !response.status().is_success() {
+            return Self::whole(response).await.map(|_| 0);
+        }
+        let mut body = response.into_body();
+        let mut total = 0u64;
+        while let Some(frame) = body.frame().await {
+            let frame = frame.map_err(|e| ApiError::network(format!("Réponse interrompue du service de données : {e}")))?;
+            if let Ok(bytes) = frame.into_data() {
+                sink(&bytes).map_err(|e| ApiError::new(0, "unwritable", format!("Écriture impossible : {e}")))?;
+                total += bytes.len() as u64;
+            }
+        }
+        Ok(total)
+    }
+
+    /// Read an answer whole: its bytes on success, the server's error otherwise.
+    async fn whole(response: axum::response::Response) -> ApiResult<Vec<u8>> {
         let status = response.status();
         let bytes = axum::body::to_bytes(response.into_body(), MAX_RESPONSE_BYTES)
             .await

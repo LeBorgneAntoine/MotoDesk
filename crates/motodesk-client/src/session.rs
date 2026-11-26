@@ -138,6 +138,12 @@ impl Client {
 
     // ---- requests ---------------------------------------------------------------------------
 
+    /// Ask the local API for something large (a file): its bytes go to `sink` as they arrive.
+    /// Answers how many there were.
+    pub async fn download(&self, path: &str, sink: impl FnMut(&[u8]) -> std::io::Result<()>) -> ApiResult<u64> {
+        self.inner.local.download(path, sink).await
+    }
+
     pub fn call(&self, method: Method, path: impl Into<String>) -> Call<'_> {
         Call { client: self, method, path: path.into(), body: None, auth: true }
     }

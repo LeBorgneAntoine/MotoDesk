@@ -12,6 +12,7 @@ use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAcc
 use motodesk_client::products::{
     self, CategoryInput, ListQuery as ListProducts, ProductInput, Unit, VariantAttr, VariantInput,
 };
+use motodesk_client::shared::{self, Visibility};
 use motodesk_client::sales::{self, DraftStatus, ListQuery as ListSales, PaymentInput, SaleInput, SaleLineInput};
 use motodesk_client::stock::{self, MovementInput, SupplierInput};
 use motodesk_client::workshop::{NewOrder, OrderEdit, Step, WorkshopLineInput};
@@ -953,4 +954,67 @@ async fn an_administrator_looks_into_a_table_runs_sql_and_empties_a_table() {
     assert_eq!(cleared.rows_affected, 3);
     assert_eq!(clients::list(&api, &ListQuery::default()).await.unwrap().total, 0);
     assert!(data::impact_clear(&api, "change_log").await.is_err(), "a system table is not emptied");
+}
+
+#[tokio::test]
+async fn a_file_goes_into_the_shared_folder_and_comes_back_the_same() {
+    let (api, _) = local_network().await;
+
+    let status = shared::status(&api).await.unwrap();
+    assert!(status.available && status.is_admin && status.replicated, "a local network has its key from the start");
+    assert!(shared::browse(&api, None).await.unwrap().folders.is_empty());
+
+    let folder = shared::create_folder(&api, None, "Comptabilité 2026", Visibility::Admins).await.unwrap();
+    assert_eq!(folder.visibility(), Visibility::Admins);
+    let opened = shared::update_folder(&api, &folder.id, "Comptabilité", Visibility::Everyone).await.unwrap();
+    assert_eq!((opened.name.as_str(), opened.visibility()), ("Comptabilité", Visibility::Everyone));
+    let top = shared::browse(&api, None).await.unwrap();
+    assert!(top.can_manage && top.folder.is_none());
+    assert_eq!(top.folders.len(), 1);
+
+    // Two and a half chunks, so the file really travels in pieces.
+    let content: Vec<u8> = (0..2_600_000u32).map(|i| (i % 251) as u8).collect();
+    let dir = std::env::temp_dir().join(format!("motodesk-shared-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("Bilan 2026.pdf");
+    std::fs::write(&source, &content).unwrap();
+
+    let steps = std::sync::Mutex::new(Vec::new());
+    let sent = shared::upload(&api, &folder.id, &source, |done| steps.lock().unwrap().push(done)).await.unwrap();
+    assert_eq!((sent.name.as_str(), sent.size_bytes, sent.state.as_str()), ("Bilan 2026.pdf", content.len() as u64, "ready"));
+    let steps = steps.into_inner().unwrap();
+    assert_eq!(steps.first(), Some(&0));
+    assert_eq!(steps.last(), Some(&(content.len() as u64)));
+    assert!(steps.len() >= 4, "one step per chunk: {steps:?}");
+
+    let inside = shared::browse(&api, Some(&folder.id)).await.unwrap();
+    assert_eq!(inside.breadcrumb.len(), 1);
+    assert_eq!(inside.files.len(), 1);
+    assert_eq!(shared::status(&api).await.unwrap().usage.unwrap().files, 1);
+
+    // Back out, to the byte.
+    let copy = dir.join("copie.pdf");
+    assert_eq!(shared::download_to(&api, &sent.id, &copy).await.unwrap(), content.len() as u64);
+    assert!(std::fs::read(&copy).unwrap() == content, "the file came back changed");
+
+    let renamed = shared::rename_file(&api, &sent.id, "Bilan définitif.pdf").await.unwrap();
+    assert_eq!(renamed.name, "Bilan définitif.pdf");
+
+    let trail = shared::audit(&api, 50).await.unwrap();
+    assert!(trail.iter().any(|entry| entry.action == "file_added"));
+    assert!(trail.iter().any(|entry| entry.action == "file_opened"));
+
+    // A file that does not exist leaves nothing behind at the destination.
+    let nowhere = dir.join("rien.bin");
+    assert!(shared::download_to(&api, "no-such-file", &nowhere).await.is_err());
+    assert!(!nowhere.exists());
+    // Nor does a source that cannot be read announce a file.
+    assert!(shared::upload(&api, &folder.id, &dir.join("absent.pdf"), |_| {}).await.is_err());
+    assert_eq!(shared::browse(&api, Some(&folder.id)).await.unwrap().files.len(), 1);
+
+    shared::delete_file(&api, &sent.id).await.unwrap();
+    assert!(shared::browse(&api, Some(&folder.id)).await.unwrap().files.is_empty());
+    shared::delete_folder(&api, &folder.id).await.unwrap();
+    assert!(shared::browse(&api, None).await.unwrap().folders.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }

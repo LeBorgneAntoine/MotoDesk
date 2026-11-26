@@ -148,6 +148,21 @@ impl TextModel {
         }
     }
 
+    /// Put the caret in the field with everything in it selected: what is typed replaces
+    /// it, an arrow key keeps it. For a field that opens already filled (a name to change).
+    pub fn focus_selected(&self, window: &mut Window, cx: &mut App) {
+        match &self.kind {
+            Kind::Line(state) => state.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.select_all(window, cx);
+            }),
+            Kind::Area(state) => state.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.select_all(window, cx);
+            }),
+        }
+    }
+
     /// Call `handler` on the owning view for everything that happens in the field. Keep the
     /// returned subscription for as long as the view lives.
     pub fn on_event<V: 'static>(

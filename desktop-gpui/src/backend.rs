@@ -31,6 +31,72 @@ fn documents_dir() -> PathBuf {
     documents.filter(|folder| folder.is_dir()).unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Development only: stand in for the system's file dialogs, so that a screen can be driven
+/// without them. `MOTODESK_DEV_PICK_FILES` holds the files an "open" dialog answers (separated
+/// the way `PATH` is); `MOTODESK_DEV_SAVE_DIR` is the folder a "save as" dialog answers in,
+/// under the name suggested. Neither exists in a release build.
+#[cfg(debug_assertions)]
+mod dev {
+    use std::path::PathBuf;
+
+    pub fn picked() -> Option<Vec<PathBuf>> {
+        std::env::var_os("MOTODESK_DEV_PICK_FILES").map(|paths| std::env::split_paths(&paths).collect())
+    }
+
+    pub fn save_path(suggested_name: &str) -> Option<PathBuf> {
+        std::env::var_os("MOTODESK_DEV_SAVE_DIR").map(|folder| PathBuf::from(folder).join(suggested_name))
+    }
+}
+
+#[cfg(not(debug_assertions))]
+mod dev {
+    use std::path::PathBuf;
+
+    pub fn picked() -> Option<Vec<PathBuf>> {
+        None
+    }
+
+    pub fn save_path(_: &str) -> Option<PathBuf> {
+        None
+    }
+}
+
+/// Ask where to save a file. `None` when the dialog was closed, or went away with the window.
+fn ask_save_path<V: 'static>(cx: &mut Context<V>, suggested_name: &str) -> impl Future<Output = std::io::Result<Option<PathBuf>>> + use<V> {
+    let stand_in = dev::save_path(suggested_name);
+    let asked = stand_in.is_none().then(|| cx.prompt_for_new_path(&documents_dir(), Some(suggested_name)));
+    async move {
+        match (stand_in, asked) {
+            (Some(path), _) => Ok(Some(path)),
+            (None, Some(asked)) => match asked.await {
+                Ok(Ok(path)) => Ok(path),
+                Ok(Err(error)) => Err(std::io::Error::other(error.to_string())),
+                Err(_) => Ok(None),
+            },
+            (None, None) => Ok(None),
+        }
+    }
+}
+
+/// Ask which files to open. Empty when the dialog was closed.
+fn ask_paths<V: 'static>(cx: &mut Context<V>, prompt: &str, multiple: bool) -> impl Future<Output = std::io::Result<Vec<PathBuf>>> + use<V> {
+    let stand_in = dev::picked();
+    let asked = stand_in.is_none().then(|| {
+        cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple, prompt: Some(prompt.to_string().into()) })
+    });
+    async move {
+        match (stand_in, asked) {
+            (Some(paths), _) => Ok(paths),
+            (None, Some(asked)) => match asked.await {
+                Ok(Ok(paths)) => Ok(paths.unwrap_or_default()),
+                Ok(Err(error)) => Err(std::io::Error::other(error.to_string())),
+                Err(_) => Ok(Vec::new()),
+            },
+            (None, None) => Ok(Vec::new()),
+        }
+    }
+}
+
 pub trait SaveExt<V: 'static> {
     /// Ask the user where to save `bytes` (the system's "save as" dialog, offering
     /// `suggested_name`), write them there, then call `done` on the view with the path
@@ -40,6 +106,14 @@ pub trait SaveExt<V: 'static> {
         window: &Window,
         suggested_name: &str,
         bytes: Vec<u8>,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    );
+
+    /// Only ask where: for a file that is fetched and written afterwards, a piece at a time.
+    fn choose_save_path(
+        &mut self,
+        window: &Window,
+        suggested_name: &str,
         done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
     );
 }
@@ -52,17 +126,27 @@ impl<V: 'static> SaveExt<V> for Context<'_, V> {
         bytes: Vec<u8>,
         done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
     ) {
-        let chosen = self.prompt_for_new_path(&documents_dir(), Some(suggested_name));
+        let chosen = ask_save_path(self, suggested_name);
         self.spawn_in(window, async move |view, cx| {
             let outcome = match chosen.await {
-                Ok(Ok(Some(path))) => {
-                    // Off the interface's thread: a year of entries is a file of some size.
-                    cx.background_executor().spawn(async move { std::fs::write(&path, bytes).map(|()| Some(path)) }).await
-                }
-                // The dialog was closed, or went away with the window.
-                Ok(Ok(None)) | Err(_) => Ok(None),
-                Ok(Err(error)) => Err(std::io::Error::other(error.to_string())),
+                // Off the interface's thread: a year of entries is a file of some size.
+                Ok(Some(path)) => cx.background_executor().spawn(async move { std::fs::write(&path, bytes).map(|()| Some(path)) }).await,
+                other => other,
             };
+            let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
+        })
+        .detach();
+    }
+
+    fn choose_save_path(
+        &mut self,
+        window: &Window,
+        suggested_name: &str,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    ) {
+        let chosen = ask_save_path(self, suggested_name);
+        self.spawn_in(window, async move |view, cx| {
+            let outcome = chosen.await;
             let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
         })
         .detach();
@@ -89,6 +173,15 @@ pub trait PickExt<V: 'static> {
         max_bytes: usize,
         done: impl FnOnce(&mut V, std::io::Result<Option<PickedFile>>, &mut Window, &mut Context<V>) + 'static,
     );
+
+    /// Ask the user for any number of files and hand back where they are, unread: for files
+    /// that are sent a piece at a time. Empty when the dialog was closed.
+    fn pick_files(
+        &mut self,
+        window: &Window,
+        prompt: &str,
+        done: impl FnOnce(&mut V, std::io::Result<Vec<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    );
 }
 
 impl<V: 'static> PickExt<V> for Context<'_, V> {
@@ -99,18 +192,27 @@ impl<V: 'static> PickExt<V> for Context<'_, V> {
         max_bytes: usize,
         done: impl FnOnce(&mut V, std::io::Result<Option<PickedFile>>, &mut Window, &mut Context<V>) + 'static,
     ) {
-        let options = PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some(prompt.to_string().into()) };
-        let chosen = self.prompt_for_paths(options);
+        let chosen = ask_paths(self, prompt, false);
         self.spawn_in(window, async move |view, cx| {
-            let outcome = match chosen.await {
-                Ok(Ok(Some(paths))) => match paths.into_iter().next() {
-                    Some(path) => cx.background_executor().spawn(async move { read_picked(&path, max_bytes).map(Some) }).await,
-                    None => Ok(None),
-                },
-                // The dialog was closed, or went away with the window.
-                Ok(Ok(None)) | Err(_) => Ok(None),
-                Ok(Err(error)) => Err(std::io::Error::other(error.to_string())),
+            let outcome = match chosen.await.map(|paths| paths.into_iter().next()) {
+                Ok(Some(path)) => cx.background_executor().spawn(async move { read_picked(&path, max_bytes).map(Some) }).await,
+                Ok(None) => Ok(None),
+                Err(error) => Err(error),
             };
+            let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
+        })
+        .detach();
+    }
+
+    fn pick_files(
+        &mut self,
+        window: &Window,
+        prompt: &str,
+        done: impl FnOnce(&mut V, std::io::Result<Vec<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    ) {
+        let chosen = ask_paths(self, prompt, true);
+        self.spawn_in(window, async move |view, cx| {
+            let outcome = chosen.await;
             let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
         })
         .detach();

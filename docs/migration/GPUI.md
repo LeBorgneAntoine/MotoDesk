@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, dossier partagé (envoi et lecture par morceaux), import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -27,10 +27,11 @@ sont pas passés.
 | Comptabilité (journaux des ventes et de caisse, TVA, balance âgée, FEC, caisse et intégrité, clôtures, archives, journal fiscal) | migré |
 | Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré, sans les réglages de la Caisse et de l'Assistant |
 | Données : tables (aperçu, recherche, export d'une page, vidage), console SQL, import CSV | migré |
+| Dossier partagé (dossiers, visibilité, envoi et téléchargement de fichiers, historique) | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Modèles, Dossier partagé, Assistant, Caisse | à faire |
+| Modèles, Assistant, Caisse | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -66,6 +67,31 @@ Svelte en portait une copie dans chaque formulaire.
 Sur L'Atelier, le champ « Technicien » propose l'équipe d'une entreprise en ligne, comme dans
 Svelte : sur un réseau local, où l'équipe n'existe pas, il reste vide. Une affectation déjà
 enregistrée est conservée et affichée « Technicien assigné ».
+
+Les fenêtres de fichiers du système (« Ouvrir », « Enregistrer sous ») ne se pilotent pas
+depuis un essai automatique. En développement seulement (`desktop-gpui/src/backend.rs`),
+`MOTODESK_DEV_PICK_FILES=<fichiers>` répond à la place d'une fenêtre « Ouvrir » et
+`MOTODESK_DEV_SAVE_DIR=<dossier>` à la place d'une fenêtre « Enregistrer sous ». Ces deux
+variables n'existent pas dans une version publiée.
+
+Sur le Dossier partagé :
+
+- Un fichier fait jusqu'à 100 Mo : il est lu sur le disque morceau par morceau à l'envoi, et
+  écrit sur le disque à mesure qu'il arrive au téléchargement (`motodesk_client::shared`,
+  `Client::download`). Il n'est jamais tenu entier en mémoire, ce que faisait Svelte au
+  téléchargement.
+- Télécharger demande où enregistrer le fichier (fenêtre du système) ; Svelte l'envoyait dans
+  les téléchargements du navigateur intégré.
+- Les fichiers choisis ensemble partent l'un après l'autre et continuent de partir si l'écran
+  est quitté ; ceux ajoutés pendant cet envoi attendent, et sont perdus si l'écran est quitté
+  avant leur tour.
+- Les champs d'un nom déjà rempli (renommer, modifier un dossier) s'ouvrent avec le nom
+  sélectionné : `TextModel::focus_selected`.
+- Vérifié dans l'application sur un dossier de démonstration à part : création d'un dossier,
+  envoi de deux fichiers, téléchargement (fichier identique à l'octet près), renommage,
+  suppression, changement de visibilité, historique. Non essayés : le glisser-déposer, les
+  vraies fenêtres du système, le menu du clic droit, la vue d'un employé, et la copie entre
+  deux postes.
 
 Sur les onglets « Simple » et « Avancé » de l'écran Données :
 
@@ -104,8 +130,6 @@ Sur l'import CSV (écran Données, onglet « Import CSV ») :
 - « Ignorer les doublons », imposé pour les lignes de vente, n'est plus conservé en revenant à
   un autre type de données.
 - L'aperçu répartit ses colonnes sur la largeur, sans défilement horizontal.
-- En développement, `MOTODESK_DEV_IMPORT_FILE=<chemin>` ouvre l'assistant sur un fichier, sans
-  passer par la fenêtre du système.
 - Non essayés dans l'application : le choix d'un fichier par la fenêtre du système, le
   glisser-déposer, l'enregistrement du rapport d'erreurs, les modes « Mettre à jour » et
   « Ajouter ou mettre à jour » (ce dernier est couvert par le test du client), et l'import de
@@ -211,7 +235,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Dossier partagé, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
+Ordre prévu : Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
 

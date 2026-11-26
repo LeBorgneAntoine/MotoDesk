@@ -192,12 +192,6 @@ impl ImportWizard {
             _subscriptions: subscriptions,
         };
         wizard.rebuild_mappings(window, cx);
-        // Development only: start with a file already chosen (`MOTODESK_DEV_IMPORT_FILE=<path>`),
-        // to look at the wizard without going through the system's file dialog.
-        #[cfg(debug_assertions)]
-        if let Some(path) = std::env::var_os("MOTODESK_DEV_IMPORT_FILE") {
-            wizard.read_path(PathBuf::from(path), window, cx);
-        }
         wizard
     }
 

@@ -339,6 +339,32 @@ impl RenderOnce for Spinner {
     }
 }
 
+// ---- ProgressBar ----------------------------------------------------------------------------
+
+/// How far something is, as a bar: a file being sent.
+#[derive(IntoElement)]
+pub struct ProgressBar {
+    percent: u32,
+}
+
+impl ProgressBar {
+    /// `percent` between 0 and 100; anything above is a full bar.
+    pub fn new(percent: u32) -> Self {
+        Self { percent: percent.min(100) }
+    }
+}
+
+impl RenderOnce for ProgressBar {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let c = cx.ui().colors;
+        div()
+            .w_full()
+            .h(px(6.))
+            .bg(c.bg_active)
+            .child(div().h_full().w(gpui_kit::relative(self.percent as f32 / 100.)).bg(c.accent))
+    }
+}
+
 // ---- Picture --------------------------------------------------------------------------------
 
 /// Read the bytes of an image file (PNG, JPEG, GIF, WebP, BMP or SVG). `None` when they are

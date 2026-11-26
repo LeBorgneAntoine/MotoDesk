@@ -18,7 +18,7 @@ mod wizard;
 pub use button::{Button, ButtonSize, ButtonVariant};
 pub use combobox::{ComboModel, ComboOption, Combobox};
 pub use content::{
-    Alert, Divider, Heading, HeadingSize, Picture, Preformatted, Spinner, StateKind, StateView, Status, Tag, Tone,
+    Alert, Divider, Heading, HeadingSize, Picture, Preformatted, ProgressBar, Spinner, StateKind, StateView, Status, Tag, Tone,
     picture_from_bytes,
 };
 pub use controls::{
