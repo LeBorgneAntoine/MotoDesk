@@ -372,6 +372,10 @@ async fn open_session(
     };
 
     let mut tx = state.db.begin_with("BEGIN IMMEDIATE").await?;
+    // After the Z the till stays shut until tomorrow. Opening it would put the
+    // cashier in front of a till that looks ready and can record nothing: the
+    // checkout is refused, but only once the customer's card has been charged.
+    fiscal::ensure_day_open(&mut *tx, register.id, &fiscal::business_day(now)).await?;
     let entry = fiscal::append(
         &mut tx,
         &register,
@@ -744,7 +748,15 @@ pub struct ChargeBody {
     pub force: Option<String>,
 }
 
-async fn charge_card(Json(body): Json<ChargeBody>) -> LocalResult<Json<Value>> {
+async fn charge_card(
+    State(state): State<SharedState>,
+    Json(body): Json<ChargeBody>,
+) -> LocalResult<Json<Value>> {
+    // Nothing goes to the terminal on a closed day: the checkout that follows would
+    // be refused, and the customer would have paid for a sale that is not recorded.
+    let register = fiscal::current(&state).await?;
+    fiscal::ensure_day_open(&state.db, register.id, &fiscal::business_day(Utc::now())).await?;
+
     let mode = terminal::TerminalMode::parse(body.mode.as_deref().unwrap_or("simulator"));
     let outcome = terminal::charge(mode, body.amount_cents, body.force.as_deref());
     if matches!(outcome, terminal::ChargeOutcome::Accepted { .. }) {
@@ -1290,13 +1302,146 @@ mod tests {
 
     #[tokio::test]
     async fn refused_card_does_not_seal() {
-        let refused = charge_card(Json(ChargeBody {
-            amount_cents: 2_520,
-            mode: Some("simulator".into()),
-            force: Some("refuse".into()),
-        }))
+        let state = shop().await;
+        let refused = charge_card(
+            State(state.clone()),
+            Json(ChargeBody {
+                amount_cents: 2_520,
+                mode: Some("simulator".into()),
+                force: Some("refuse".into()),
+            }),
+        )
         .await;
         assert!(matches!(refused, Err(LocalError::BadRequest(_))));
+    }
+
+    fn charge(amount: i64) -> Json<ChargeBody> {
+        Json(ChargeBody {
+            amount_cents: amount,
+            mode: Some("simulator".into()),
+            force: Some("accept".into()),
+        })
+    }
+
+    async fn sessions_opened(state: &SharedState) -> i64 {
+        let (n,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM fiscal_journal WHERE event_type = 'session_opened'",
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        n
+    }
+
+    /// Once the day is closed with the till (the Z), the till cannot be opened again
+    /// that day and nothing is sent to the card terminal. Both used to go through, and
+    /// only the checkout was refused: by then the customer's card had been charged for
+    /// a sale that could not be recorded.
+    #[tokio::test]
+    async fn a_closed_day_refuses_a_new_session_and_a_card_charge() {
+        let state = shop().await;
+        let _ = open_session(
+            State(state.clone()),
+            Json(OpenSessionBody {
+                opening_float_cents: 10_000,
+            }),
+        )
+        .await
+        .expect("the till opens on a day that is not closed");
+        let Json(accepted) = charge_card(State(state.clone()), charge(25_200))
+            .await
+            .expect("and the terminal takes a card");
+        assert_eq!(accepted["status"], "accepted");
+        let _ = checkout(
+            State(state.clone()),
+            Json(CheckoutBody {
+                client_id: None,
+                kind: None,
+                notes: None,
+                lines: helmet_and_service(),
+                payments: vec![card(25_200, accepted["auth_ref"].as_str().unwrap())],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let Json(closed) = close_session(
+            State(state.clone()),
+            Json(CloseSessionBody {
+                counted_cents: 10_000,
+                close_day: true,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(closed["day_closure"].is_object(), "{closed}");
+        assert!(closed["day_closure_error"].is_null(), "{closed}");
+
+        let refusal = |err: LocalError| match err {
+            LocalError::BadRequest(msg) => msg,
+            other => panic!("expected a refusal the cashier can read, got {other:?}"),
+        };
+
+        let msg = refusal(
+            open_session(
+                State(state.clone()),
+                Json(OpenSessionBody {
+                    opening_float_cents: 10_000,
+                }),
+            )
+            .await
+            .unwrap_err(),
+        );
+        assert!(msg.contains("est clôturée"), "{msg}");
+        assert!(msg.contains("La caisse reprend demain"), "{msg}");
+        let Json(current) = current_session(State(state.clone())).await.unwrap();
+        assert!(current.is_null(), "no session is left open: {current}");
+        assert_eq!(sessions_opened(&state).await, 1, "the refused opening is not journalled");
+
+        let msg = refusal(charge_card(State(state.clone()), charge(25_200)).await.unwrap_err());
+        assert!(msg.contains("est clôturée"), "{msg}");
+
+        // The checkout was already refused; it still is, with the same words.
+        let msg = refusal(
+            checkout(
+                State(state.clone()),
+                Json(CheckoutBody {
+                    client_id: None,
+                    kind: None,
+                    notes: None,
+                    lines: helmet_and_service(),
+                    payments: vec![cash(25_200)],
+                }),
+            )
+            .await
+            .unwrap_err(),
+        );
+        assert!(msg.contains("est clôturée"), "{msg}");
+    }
+
+    /// Only today's closure shuts the till: yesterday closed is the normal state of
+    /// every morning.
+    #[tokio::test]
+    async fn yesterdays_closure_does_not_keep_the_till_shut() {
+        let state = shop().await;
+        let register = fiscal::current(&state).await.unwrap();
+        let yesterday = chrono::Local::now().date_naive().pred_opt().unwrap();
+        closures::close(&state, &register, motodesk_fiscal::ClosureKind::Day, yesterday)
+            .await
+            .unwrap();
+
+        let (_, Json(open)) = open_session(
+            State(state.clone()),
+            Json(OpenSessionBody {
+                opening_float_cents: 5_000,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(open["opening_float_cents"], 5_000);
+        assert_eq!(sessions_opened(&state).await, 1);
+        let Json(accepted) = charge_card(State(state.clone()), charge(2_520)).await.unwrap();
+        assert_eq!(accepted["status"], "accepted");
     }
 
     #[tokio::test]

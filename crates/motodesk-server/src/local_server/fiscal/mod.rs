@@ -286,18 +286,7 @@ pub async fn append(
     // A closed day is final. Without this a sale rung up after the Z would land
     // on a day whose totals are already sealed.
     if moves_money(event) {
-        let closed: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM fiscal_closures WHERE register_id = $1 AND kind = 'day' AND period_start = $2",
-        )
-        .bind(register.id.to_string())
-        .bind(&day)
-        .fetch_optional(&mut **tx)
-        .await?;
-        if closed.is_some() {
-            return Err(LocalError::BadRequest(format!(
-                "la journée du {day} est clôturée : plus aucune vente ni aucun règlement ne peut y être enregistré. La caisse reprend demain."
-            )));
-        }
+        ensure_day_open(&mut **tx, register.id, &day).await?;
     }
 
     sqlx::query(
@@ -502,6 +491,30 @@ pub async fn announce_unsent(state: &SharedState) -> LocalResult<usize> {
         announced += 1;
     }
     Ok(announced)
+}
+
+/// Refuse whatever would land on a day whose closure (the Z) is already sealed.
+///
+/// One check and one message, shared by the journal (`append`) and by the till
+/// routes that must stop before the journal is reached: a till opened or a card
+/// charged on a closed day takes money that no ticket can record that day.
+pub async fn ensure_day_open<'e, E>(db: E, register_id: Uuid, day: &str) -> LocalResult<()>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    let closed: Option<(i64,)> = sqlx::query_as(
+        "SELECT 1 FROM fiscal_closures WHERE register_id = $1 AND kind = 'day' AND period_start = $2",
+    )
+    .bind(register_id.to_string())
+    .bind(day)
+    .fetch_optional(db)
+    .await?;
+    if closed.is_some() {
+        return Err(LocalError::BadRequest(format!(
+            "la journée du {day} est clôturée : plus aucune vente ni aucun règlement ne peut y être enregistré. La caisse reprend demain."
+        )));
+    }
+    Ok(())
 }
 
 async fn load_tip(tx: &mut Transaction<'_, Sqlite>, register_id: Uuid) -> LocalResult<ChainTip> {
