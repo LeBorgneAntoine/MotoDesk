@@ -17,6 +17,7 @@ struct Gallery {
     password: TextModel,
     notes: TextModel,
     search: TextModel,
+    colour: TextModel,
     vehicle_type: SelectModel,
     buyer: ComboModel,
     panels: Entity<PanelStack>,
@@ -73,6 +74,7 @@ impl Gallery {
             password: TextModel::builder().placeholder("Mot de passe").password().build(window, cx),
             notes: TextModel::builder().placeholder("Notes").multiline(3).build(window, cx),
             search: TextModel::builder().placeholder("Rechercher un client…").build(window, cx),
+            colour: TextModel::builder().placeholder("#1976d2").value("#1976d2").build(window, cx),
             vehicle_type: SelectModel::new(
                 vec![
                     SelectOption::new("moto", "Moto"),
@@ -211,13 +213,24 @@ impl Gallery {
                                         cx.notify();
                                     })
                                 }))
-                                .child(Switch::new("w1", self.switched).label("Affichage compact").on_change(move |on, _, cx| {
+                                .child(Switch::new("w1", self.switched).label("Affichage compact").hint("Réduit l'espacement entre les éléments.").on_change(move |on, _, cx| {
                                     switch.update(cx, |this, cx| {
                                         this.switched = on;
                                         cx.notify();
                                     })
                                 })),
                         ),
+                ),
+            )
+            .child(
+                Self::block("ColorField, Picture", cx).child(
+                    row()
+                        .gap(m.space_6)
+                        .child(ColorField::new("accent", &self.colour).presets(&[0x1976d2, 0x00897b, 0x2e7d32, 0x546e7a]))
+                        .child(Picture::new(None))
+                        .child(Picture::new(picture_from_bytes(
+                            br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#1976d2"/></svg>"##.to_vec(),
+                        ))),
                 ),
             )
             .child(

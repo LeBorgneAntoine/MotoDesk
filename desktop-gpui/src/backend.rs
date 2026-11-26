@@ -9,7 +9,7 @@ use std::future::Future;
 use std::path::PathBuf;
 
 use motodesk_client::Client;
-use motodesk_ui::gpui::{App, Context, Global, Window};
+use motodesk_ui::gpui::{App, Context, Global, PathPromptOptions, Window};
 
 /// What the interface needs to reach the service. Set once the service has started.
 pub struct Backend {
@@ -67,6 +67,62 @@ impl<V: 'static> SaveExt<V> for Context<'_, V> {
         })
         .detach();
     }
+}
+
+/// A file the user chose.
+pub struct PickedFile {
+    /// Its name, without the folders.
+    pub name: String,
+    /// Its size on disk.
+    pub size: usize,
+    /// What it holds; empty when it is larger than the caller said it would read.
+    pub bytes: Vec<u8>,
+}
+
+pub trait PickExt<V: 'static> {
+    /// Ask the user for one file (the system's "open" dialog), read it when it is no larger
+    /// than `max_bytes`, then call `done` on the view: `None` when the dialog was closed.
+    fn pick_file(
+        &mut self,
+        window: &Window,
+        prompt: &str,
+        max_bytes: usize,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PickedFile>>, &mut Window, &mut Context<V>) + 'static,
+    );
+}
+
+impl<V: 'static> PickExt<V> for Context<'_, V> {
+    fn pick_file(
+        &mut self,
+        window: &Window,
+        prompt: &str,
+        max_bytes: usize,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PickedFile>>, &mut Window, &mut Context<V>) + 'static,
+    ) {
+        let options = PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some(prompt.to_string().into()) };
+        let chosen = self.prompt_for_paths(options);
+        self.spawn_in(window, async move |view, cx| {
+            let outcome = match chosen.await {
+                Ok(Ok(Some(paths))) => match paths.into_iter().next() {
+                    Some(path) => cx.background_executor().spawn(async move { read_picked(&path, max_bytes).map(Some) }).await,
+                    None => Ok(None),
+                },
+                // The dialog was closed, or went away with the window.
+                Ok(Ok(None)) | Err(_) => Ok(None),
+                Ok(Err(error)) => Err(std::io::Error::other(error.to_string())),
+            };
+            let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
+        })
+        .detach();
+    }
+}
+
+/// Read a chosen file, unless it is larger than the caller is ready to take.
+fn read_picked(path: &std::path::Path, max_bytes: usize) -> std::io::Result<PickedFile> {
+    let size = usize::try_from(std::fs::metadata(path)?.len()).unwrap_or(usize::MAX);
+    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let bytes = if size <= max_bytes { std::fs::read(path)? } else { Vec::new() };
+    Ok(PickedFile { name, size, bytes })
 }
 
 pub trait ApiExt<V: 'static> {

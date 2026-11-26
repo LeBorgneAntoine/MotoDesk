@@ -79,6 +79,18 @@ impl Cloud {
         self.send(self.http.patch(format!("{}{path}", self.base)).json(body), access_token).await
     }
 
+    /// Send a file as it is (a logo), under its own content type.
+    pub async fn put_bytes<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        bytes: Vec<u8>,
+        content_type: &str,
+        access_token: Option<&str>,
+    ) -> ApiResult<T> {
+        let request = self.http.put(format!("{}{path}", self.base)).header(reqwest::header::CONTENT_TYPE, content_type).body(bytes);
+        self.send(request, access_token).await
+    }
+
     pub async fn delete<T: DeserializeOwned>(&self, path: &str, access_token: Option<&str>) -> ApiResult<T> {
         self.send(self.http.delete(format!("{}{path}", self.base)), access_token).await
     }

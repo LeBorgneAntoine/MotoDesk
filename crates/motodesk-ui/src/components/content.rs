@@ -2,13 +2,14 @@
 //! "loading", "nothing here" or "it failed".
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::spinner::Spinner as KitSpinner;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled as _,
-    Window, div, px,
+    AnyElement, App, ClickEvent, FontWeight, Hsla, Image, ImageFormat, IntoElement, ObjectFit, ParentElement, Pixels,
+    RenderOnce, SharedString, Styled as _, StyledImage as _, Window, div, img, px,
 };
 
 use crate::components::button::Button;
@@ -335,6 +336,77 @@ impl RenderOnce for Spinner {
             .fs(m.fs_sm)
             .child(if self.large { wheel.large() } else { wheel.small() })
             .when_some(self.label, |this, label| this.child(label))
+    }
+}
+
+// ---- Picture --------------------------------------------------------------------------------
+
+/// Read the bytes of an image file (PNG, JPEG, GIF, WebP, BMP or SVG). `None` when they are
+/// none of these.
+pub fn picture_from_bytes(bytes: Vec<u8>) -> Option<Arc<Image>> {
+    let format = if bytes.starts_with(b"\x89PNG") {
+        ImageFormat::Png
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        ImageFormat::Jpeg
+    } else if bytes.starts_with(b"GIF8") {
+        ImageFormat::Gif
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP".as_slice()) {
+        ImageFormat::Webp
+    } else if bytes.starts_with(b"BM") {
+        ImageFormat::Bmp
+    } else if String::from_utf8_lossy(&bytes[..bytes.len().min(2048)]).contains("<svg") {
+        ImageFormat::Svg
+    } else {
+        return None;
+    };
+    Some(Arc::new(Image::from_bytes(format, bytes)))
+}
+
+/// A picture in a square frame, shown whole (a logo); an icon stands in while there is none.
+#[derive(IntoElement)]
+pub struct Picture {
+    image: Option<Arc<Image>>,
+    side: Pixels,
+    placeholder: IconName,
+}
+
+impl Picture {
+    pub fn new(image: Option<Arc<Image>>) -> Self {
+        Self { image, side: px(96.), placeholder: IconName::Image }
+    }
+
+    /// The side of the frame.
+    pub fn side(mut self, side: Pixels) -> Self {
+        self.side = side;
+        self
+    }
+
+    pub fn placeholder(mut self, icon: IconName) -> Self {
+        self.placeholder = icon;
+        self
+    }
+}
+
+impl RenderOnce for Picture {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.ui();
+        let (c, m) = (theme.colors, theme.m);
+        let frame = div()
+            .size(self.side)
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(m.space_2)
+            .bg(c.bg_app)
+            .border_1()
+            .border_color(c.border)
+            .text_color(c.text_subtle)
+            .overflow_hidden();
+        match self.image {
+            Some(image) => frame.child(img(image).size_full().object_fit(ObjectFit::Contain)),
+            None => frame.child(Icon::new(self.placeholder).xl()),
+        }
     }
 }
 

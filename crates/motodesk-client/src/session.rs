@@ -53,7 +53,8 @@ pub struct Call<'a> {
     client: &'a Client,
     method: Method,
     path: String,
-    body: Option<Vec<u8>>,
+    /// The body and its content type.
+    body: Option<(String, Vec<u8>)>,
     auth: bool,
 }
 
@@ -66,7 +67,13 @@ impl Call<'_> {
     }
 
     pub fn json<B: Serialize + ?Sized>(mut self, body: &B) -> Self {
-        self.body = serde_json::to_vec(body).ok();
+        self.body = serde_json::to_vec(body).ok().map(|bytes| (crate::transport::JSON.to_string(), bytes));
+        self
+    }
+
+    /// A body sent as it is, under its own content type (an image).
+    pub fn raw(mut self, content_type: impl Into<String>, bytes: Vec<u8>) -> Self {
+        self.body = Some((content_type.into(), bytes));
         self
     }
 
@@ -80,13 +87,14 @@ impl Call<'_> {
         self.bytes().await.map(|_| ())
     }
 
-    async fn bytes(self) -> ApiResult<Vec<u8>> {
+    /// Send, and hand back the answer as it came (an image).
+    pub async fn bytes(self) -> ApiResult<Vec<u8>> {
         let Call { client, method, path, body, auth } = self;
         let local = &client.inner.local;
-        match local.send(method.clone(), &path, body.clone()).await {
+        match local.send_as(method.clone(), &path, body.clone()).await {
             Err(e) if e.is_unauthorized() && auth && client.has_refresh_token() => {
                 if client.refresh_session().await.is_some() {
-                    return local.send(method, &path, body).await;
+                    return local.send_as(method, &path, body).await;
                 }
                 // Only a rejected session signs out; an unreachable cloud leaves it alone.
                 if client.tokens().is_none() {
