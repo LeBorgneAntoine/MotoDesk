@@ -11,7 +11,7 @@ sont pas passés.
 | Élément | Où | État |
 |---|---|---|
 | Service de données indépendant de Tauri | `crates/motodesk-server` | fait |
-| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, import CSV (lecture du fichier, correspondance, envoi), comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
+| Accès typé à l'API locale, sans passer par le réseau | `crates/motodesk-client` | clients, véhicules en stock, catalogue, fournisseurs et mouvements de stock, ventes et règlements, ordres de réparation, comptabilité et contrôles fiscaux, identité de l'entreprise, sauvegardes, import CSV (lecture du fichier, correspondance, envoi), tables et console SQL, comptes, équipe, postes du réseau, tableau de bord, réglages, synchro |
 | Kit d'interface (jetons, thèmes, composants) | `crates/motodesk-ui` | fait pour les écrans migrés |
 | Application native | `desktop-gpui` | fenêtre, connexion, coquille |
 
@@ -26,11 +26,11 @@ sont pas passés.
 | L'Atelier (tableau des ordres de réparation, fiche, facturation) | migré |
 | Comptabilité (journaux des ventes et de caisse, TVA, balance âgée, FEC, caisse et intégrité, clôtures, archives, journal fiscal) | migré |
 | Paramètres (réglages par catégorie, entreprise et logo, sauvegardes, synchronisation, passage en ligne) | migré, sans les réglages de la Caisse et de l'Assistant |
-| Données : import CSV (fichier, destination, correspondance, aperçu, résultat) | migré |
+| Données : tables (aperçu, recherche, export d'une page, vidage), console SQL, import CSV | migré |
 | Coquille : bandeaux du réseau local et « Reconnecter ce poste » | migré |
 | Employés : comptes du réseau local, clé de récupération, postes du réseau | migré |
 | Employés : équipe d'une entreprise en ligne (rôles, invitation, fiche) | migré, vu contre un service de démonstration seulement |
-| Modèles, Dossier partagé, Données (onglets Simple et Avancé), Assistant, Caisse | à faire |
+| Modèles, Dossier partagé, Assistant, Caisse | à faire |
 
 Des dernières évolutions de l'interface Svelte (master `f6e767d`), les postes du réseau et la
 carte de la clé de récupération sont portés avec l'écran Employés. Restent la récupération
@@ -67,8 +67,27 @@ Sur L'Atelier, le champ « Technicien » propose l'équipe d'une entreprise en l
 Svelte : sur un réseau local, où l'équipe n'existe pas, il reste vide. Une affectation déjà
 enregistrée est conservée et affichée « Technicien assigné ».
 
-Sur l'import CSV (écran Données, onglet « Import CSV », sur lequel l'écran s'ouvre tant que les
-deux autres onglets ne sont pas migrés) :
+Sur les onglets « Simple » et « Avancé » de l'écran Données :
+
+- Une table de la base a bien plus de colonnes que la fenêtre n'est large : `DataTable::scroll_x`
+  donne à chaque colonne une largeur lisible et fait défiler le tableau de côté, avec sa barre.
+- Le vidage d'une table tient en une fenêtre à deux temps (ce que cela retire, puis le nom de
+  la table à retaper) au lieu de deux fenêtres.
+- La sortie de la console SQL montre l'entrée la plus récente en premier ; Ctrl+Entrée lance
+  l'aperçu.
+- **Le service compte toute la table même quand une recherche est active** : sous Svelte, le
+  pied de page affiche alors « 1–12 sur 137 » et propose une page suivante qui n'existe pas.
+  Ici il affiche « Lignes trouvées 1–12 · 137 dans la table » et ne propose la suite que si la
+  page est pleine.
+- **Défaut du service, visible aussi sous Svelte** : une cellule vide (NULL) revient du service
+  sous la forme `0`. Le gestionnaire affiche donc « 0 » pour un téléphone, une note ou une date
+  de suppression absents, à l'écran comme dans l'export. Cela ne se corrige que dans le service
+  (`cell_to_value` dans `local_server/routes/data`).
+- Vérifié dans l'application sur un dossier de démonstration à part : lecture et recherche,
+  défilement de côté, vidage d'une table, aperçu et exécution d'une écriture SQL, refus d'un
+  `DROP`. Non essayé : l'export d'une page (fenêtre « Enregistrer sous » du système).
+
+Sur l'import CSV (écran Données, onglet « Import CSV ») :
 
 - Les règles sont dans `motodesk_client::import` : `schema` (ce qui s'importe, champ par
   champ), `csv` (lecture du fichier : séparateur trouvé seul, UTF-8 ou Windows-1252, guillemets)
@@ -192,7 +211,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 5. **Comparer** avec l'écran Svelte, côte à côte, sur les mêmes données.
 6. Un commit par écran : `feat(gpui): <écran>`.
 
-Ordre prévu : Données (onglets Simple et Avancé), Dossier partagé, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
+Ordre prévu : Dossier partagé, Caisse, Assistant, Modèles et impression. Viennent ensuite l'icône de la zone
 de notification, le démarrage avec Windows, les mises à jour et l'installateur, puis le retrait de
 Svelte et de Tauri.
 
