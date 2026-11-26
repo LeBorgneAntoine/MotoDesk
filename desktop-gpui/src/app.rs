@@ -280,7 +280,9 @@ impl Render for Root {
 /// second try after a failed start.
 pub fn restart(cx: &mut App) {
     if let Ok(exe) = std::env::current_exe() {
-        let _ = std::process::Command::new(exe).args(std::env::args().skip(1)).spawn();
+        // Marked as a restart: the new copy waits for this one to be gone instead of taking
+        // itself for a second start (see `background`).
+        let _ = std::process::Command::new(exe).args(crate::background::restart_arguments(std::env::args().skip(1))).spawn();
     }
     cx.quit();
 }
