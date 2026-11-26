@@ -1366,6 +1366,40 @@ impl Render for StockPage {
     }
 }
 
+// ---- menus ----------------------------------------------------------------------------------
+
+impl StockPage {
+    /// The menus of the title bar while this screen is shown.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![
+                    MenuEntry::new("Nouveau produit…", crate::menus::on(&page, |this, window, cx| this.open_create_product(window, cx)))
+                        .icon(IconName::Plus)
+                        .shortcut("Ctrl+N"),
+                    MenuEntry::new("Réception fournisseur…", crate::menus::on(&page, |this, window, cx| this.open_reception(window, cx)))
+                        .icon(IconName::Package)
+                        .shortcut("Ctrl+Maj+R"),
+                    MenuEntry::new("Nouvelle catégorie…", crate::menus::on(&page, |this, window, cx| this.open_category(None, window, cx)))
+                        .icon(IconName::Tag)
+                        .shortcut("Ctrl+Maj+T"),
+                ],
+            ),
+            MenuGroup::new(
+                "Affichage",
+                vec![
+                    MenuEntry::new("Tous les produits", crate::menus::on(&page, |this, _, cx| this.set_filter(Filter::All, cx))).icon(IconName::Boxes),
+                    MenuEntry::new("Stock bas", crate::menus::on(&page, |this, _, cx| this.set_filter(Filter::Low, cx))).icon(IconName::TriangleAlert),
+                    MenuEntry::separator(),
+                    MenuEntry::new("Actualiser", crate::menus::on(&page, |this, _, cx| this.refresh_all(cx))).icon(IconName::RefreshCw).shortcut("F5"),
+                ],
+            ),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: it would bring in GPUI's own `test` attribute in place of Rust's.

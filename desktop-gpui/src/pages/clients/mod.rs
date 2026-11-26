@@ -19,6 +19,8 @@ use motodesk_ui::gpui::prelude::FluentBuilder as _;
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
 
+use crate::menus;
+
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
 use crate::router::Router;
@@ -145,6 +147,9 @@ impl ClientsPage {
         let remembered = Router::global(cx).read(cx).param("panel").map(PanelStack::parse).unwrap_or_default();
         if let Some((_, id)) = remembered.iter().find(|(kind, key)| kind == CLIENT && key != NEW) {
             page.open_client(id.clone(), None, cx);
+        } else if remembered.iter().any(|(kind, key)| kind == CLIENT && key == NEW) {
+            // Asked for from elsewhere (« Nouveau client… » in the menus of the dashboard).
+            page.open_create_client(window, cx);
         }
         page
     }
@@ -933,6 +938,55 @@ impl Render for ClientsPage {
             )
             .child(div().flex_1().min_h_0().child(self.list(cx)))
             .child(PanelHost::new(&self.panels).children(panels))
+    }
+}
+
+// ---- menus ----------------------------------------------------------------------------------
+
+impl ClientsPage {
+    /// The menus of the title bar while this screen is shown.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        let open = self.detail.as_ref().filter(|_| self.client_mode == Mode::View);
+        let none_open = open.is_none();
+        let target = open.map(|detail| (detail.client.id.clone(), format_client_name(detail.client.first_name.as_deref(), &detail.client.last_name)));
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![
+                    MenuEntry::new("Nouveau client…", menus::on(&page, |this, window, cx| this.open_create_client(window, cx)))
+                        .icon(IconName::UserPlus)
+                        .shortcut("Ctrl+Maj+C"),
+                    MenuEntry::new("Ajouter un véhicule…", menus::on(&page, |this, window, cx| this.open_create_vehicle(window, cx)))
+                        .icon(IconName::Wrench)
+                        .disabled(none_open),
+                ],
+            ),
+            MenuGroup::new(
+                "Édition",
+                vec![
+                    MenuEntry::new("Modifier la fiche client…", menus::on(&page, |this, window, cx| this.start_edit_client(window, cx)))
+                        .icon(IconName::Pencil)
+                        .disabled(none_open)
+                        .shortcut("F2"),
+                    MenuEntry::separator(),
+                    MenuEntry::new(
+                        "Supprimer le client…",
+                        menus::on(&page, move |this, window, cx| {
+                            if let Some((id, name)) = target.clone() {
+                                this.ask_delete_client(id, name, window, cx);
+                            }
+                        }),
+                    )
+                    .icon(IconName::Trash)
+                    .disabled(none_open),
+                ],
+            ),
+            MenuGroup::new(
+                "Affichage",
+                vec![MenuEntry::new("Actualiser la liste", menus::on(&page, |this, _, cx| this.load_list(cx))).icon(IconName::RefreshCw).shortcut("F5")],
+            ),
+        ]
     }
 }
 

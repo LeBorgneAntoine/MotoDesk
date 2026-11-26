@@ -49,14 +49,45 @@ un test (`crates/motodesk-client/tests/cloud_employees.rs`) et l'écran a été 
 service de démonstration (voir « Lancer »), jamais contre le vrai cloud. « Inviter » copie
 l'invitation dans le presse-papiers : le bouton n'a pas été essayé dans l'application.
 
-Non repris pour l'instant sur les écrans migrés : « Mot de passe perdu ? » et « Restaurer une
-sauvegarde » sur la page de connexion, les ventes et
-ordres d'atelier dans la fiche client (ils arrivent avec leurs écrans), les bandeaux d'alerte et
-les menus de la barre de titre. Avec ces menus manquent ce qu'ils ouvraient depuis le tableau de
-bord : les raccourcis (Ctrl+N, F5...) et les fenêtres d'aide (documentation, raccourcis, à
-propos). Sur
-l'Inventaire, les entrées de ces menus (nouveau produit, réception, nouvelle catégorie) ont
-toutes leur bouton à l'écran ; F5 actualise.
+Ce qui manquait encore sur les écrans migrés est repris :
+
+- **Page de connexion** : « Mot de passe perdu ? » (la clé de récupération donne un nouveau mot
+  de passe à un compte, puis la clé qui la remplace est montrée) et « Restaurer une
+  sauvegarde » sur un poste vierge (choix du fichier `.mgbak`, mot de passe, redémarrage).
+- **Bandeaux d'alerte**, au-dessus de tous les écrans, dans l'ordre de Svelte : profil fiscal
+  incomplet (sinon, une fois, « ce poste n'est pas une caisse »), clé de récupération à noter,
+  réseau local, versions différentes, nouvelle version, données non sauvegardées (« Demain »
+  le repousse d'un jour), base plus ancienne que le cloud, clôtures à faire. Un bandeau n'est
+  pas répété sur l'écran où il se règle, et chacun est relu quand l'écran change. Ce que le
+  poste a repoussé est dans `notices.store.json` (Svelte le gardait dans le navigateur).
+- **Fiche client** : ses ventes et ses ordres de réparation récents, sous ses véhicules. Un
+  ordre s'ouvre sur sa fiche dans L'Atelier (Svelte menait seulement au tableau).
+- **Menus de la barre de titre** : chaque écran qui en avait sous Svelte dit les siens
+  (`menus()` sur sa page ; `desktop-gpui/src/menus.rs` pour ce qu'ils partagent), la coquille
+  les montre et lance l'entrée dont on tape le raccourci (Ctrl+N, Ctrl+Maj+C, F2, F5,
+  Ctrl+1/2/3…). Dans un champ de saisie, copier, coller et annuler restent au champ. Les
+  fenêtres d'aide (documentation, raccourcis, à propos) sont dans « Aide », sur le tableau de
+  bord. Les entrées grisées suivent l'état de la page (pas de client ouvert, document scellé).
+  Dans l'éditeur de modèles, les raccourcis affichés sont ceux de l'éditeur lui-même : le menu
+  les rappelle sans les doubler.
+- **Écarts avec Svelte** : « Exporter le tableau… » (une entrée grisée qui ne faisait rien)
+  et « Propriétés du modèle… » (le nom se saisit dans la barre de l'éditeur) ne sont pas
+  repris ; « Importer CSV… » n'est proposé qu'à un administrateur.
+- **Un défaut corrigé en chemin** : depuis que l'application ne tourne qu'en une copie,
+  « Redémarrer » (après une restauration, ou après un démarrage raté) lançait une copie qui se
+  prenait pour un second lancement et se retirait. Une copie relancée attend maintenant que
+  celle qu'elle remplace soit partie.
+- Vérifié dans l'application : récupération d'un compte avec la clé (la nouvelle clé est
+  montrée), restauration d'une sauvegarde sur un dossier vide jusqu'au redémarrage et au
+  réseau retrouvé, les bandeaux profil fiscal, caisse, clé, sauvegardes et clôtures sur trois
+  dossiers de démonstration, « Demain », le lien vers les réglages, les ventes d'un client et
+  l'ouverture d'une facture depuis sa fiche, les menus du tableau de bord et des clients, une
+  entrée qui change d'écran (« Nouveau client… »), une fenêtre d'aide, F2. **Non essayés** :
+  les raccourcis avec Ctrl (l'essai automatique ne tient pas de touche enfoncée ; leur
+  lecture est couverte par des tests), les menus des autres écrans un à un, le bandeau « base
+  plus ancienne que le cloud » et sa récupération (il faut un cloud), les ordres de réparation
+  dans la fiche client (l'appel est testé contre le service). Le composant des menus n'a pas
+  encore sa démonstration dans la galerie du kit.
 
 Sur l'arrière-plan (`desktop-gpui/src/background.rs`, port de `src-tauri/src/background.rs`) :
 
@@ -532,8 +563,7 @@ Un composant qui manque s'ajoute au kit, avec sa démonstration dans la galerie
 6. Un commit par écran : `feat(gpui): <écran>`.
 
 Ordre prévu : essayer l'installateur sur un poste de test, puis le retrait de Svelte et de
-Tauri (avec la bascule du workflow *Release* sur l'application native). Reste aussi ce qui
-n'est pas repris sur les écrans migrés, noté plus haut.
+Tauri (avec la bascule du workflow *Release* sur l'application native).
 
 ## Comment un écran parle au service
 

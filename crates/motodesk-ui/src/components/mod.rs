@@ -35,7 +35,7 @@ pub use data::{
 pub use document::{PageShape, PageView};
 pub use icon::{Icon, IconName, IconSize};
 pub use layout::{FilterRail, PageToolbar, Sidebar, SidebarItem, StatusBar, StatusBarButton, TitleBar};
-pub use menu::{MenuEntry, with_context_menu};
+pub use menu::{MenuEntry, MenuGroup, MenuStrip, pressed_shortcut, typing_in_a_field, with_context_menu};
 pub use overlay::{Confirm, Modal, close_modal, element, toast};
 pub use panel::{MAX_DEPTH, Panel, PanelHost, PanelLayer, PanelSection, PanelStack, PanelWidth, request_close};
 pub use pos::{PosCartLine, PosItem, PosKey};

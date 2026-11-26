@@ -1054,3 +1054,69 @@ impl Render for TemplateEditor {
             )
     }
 }
+
+// ---- menus ----------------------------------------------------------------------------------
+
+impl TemplateEditor {
+    /// The menus of the title bar while a template is being edited. The keys named here are the
+    /// editor's own (they act while the page has the keyboard): the menus only recall them.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        let nothing_selected = self.selected.is_none();
+        let add = |label: &'static str, icon: IconName, tool: Tool| MenuEntry::new(label, crate::menus::on(&page, move |this: &mut Self, window, cx| this.add(tool, window, cx))).icon(icon);
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![
+                    MenuEntry::new("Enregistrer", crate::menus::on(&page, |this, window, cx| this.save(window, cx))).icon(IconName::Save).hint("Ctrl+S"),
+                    MenuEntry::new("Aperçu", crate::menus::on(&page, |this, window, cx| this.preview(window, cx))).icon(IconName::Eye).hint("Ctrl+P"),
+                    MenuEntry::separator(),
+                    MenuEntry::new("Retour à la liste", crate::menus::on(&page, |this, window, cx| this.back(window, cx))).icon(IconName::ArrowLeft),
+                ],
+            ),
+            MenuGroup::new(
+                "Édition",
+                vec![
+                    MenuEntry::new("Annuler", crate::menus::on(&page, |this, window, cx| this.undo(window, cx)))
+                        .icon(IconName::Undo)
+                        .disabled(!self.history.can_undo())
+                        .hint("Ctrl+Z"),
+                    MenuEntry::new("Rétablir", crate::menus::on(&page, |this, window, cx| this.redo(window, cx)))
+                        .icon(IconName::Redo)
+                        .disabled(!self.history.can_redo())
+                        .hint("Ctrl+Maj+Z"),
+                    MenuEntry::separator(),
+                    MenuEntry::new("Dupliquer", crate::menus::on(&page, |this, window, cx| this.duplicate_selected(window, cx)))
+                        .icon(IconName::Copy)
+                        .disabled(nothing_selected)
+                        .hint("Ctrl+D"),
+                    MenuEntry::new(
+                        "Copier",
+                        crate::menus::on(&page, |this, _, cx| {
+                            this.clipboard = this.selected_element().cloned();
+                            cx.notify();
+                        }),
+                    )
+                    .disabled(nothing_selected)
+                    .hint("Ctrl+C"),
+                    MenuEntry::new("Coller", crate::menus::on(&page, |this, window, cx| this.paste(this.clipboard.clone(), window, cx)))
+                        .disabled(self.clipboard.is_none())
+                        .hint("Ctrl+V"),
+                    MenuEntry::new("Supprimer", crate::menus::on(&page, |this, window, cx| this.delete_selected(window, cx)))
+                        .icon(IconName::Trash)
+                        .disabled(nothing_selected)
+                        .hint("Suppr"),
+                ],
+            ),
+            MenuGroup::new(
+                "Insertion",
+                vec![
+                    add("Texte", IconName::Type, Tool::Text),
+                    add("Image", IconName::Image, Tool::Image),
+                    add("Tableau", IconName::Table, Tool::Table),
+                    add("Cadre", IconName::Square, Tool::Rect),
+                ],
+            ),
+        ]
+    }
+}

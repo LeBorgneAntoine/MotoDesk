@@ -7,6 +7,8 @@ use motodesk_client::dashboard::{self, DashboardStats, RecentActivity};
 use motodesk_ui::gpui::*;
 use motodesk_ui::*;
 
+use crate::menus;
+
 use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
@@ -299,6 +301,39 @@ impl Render for DashboardPage {
                     ),
             )
             .child(div().flex_1().min_h_0().child(body))
+    }
+}
+
+// ---- menus ----------------------------------------------------------------------------------
+
+impl DashboardPage {
+    /// The menus of the title bar while this screen is shown.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        let may_import = crate::auth::AuthStore::global(cx).read(cx).is_admin();
+        let mut file = vec![
+            MenuEntry::new("Nouveau devis…", menus::go_panel(router::SALES, "sale:new")).icon(IconName::FileText).shortcut("Ctrl+N"),
+            MenuEntry::new("Nouvel ordre de réparation", menus::go_panel(router::ATELIER, "order:new")).icon(IconName::Wrench).shortcut("Ctrl+Maj+R"),
+            MenuEntry::new("Nouveau client…", menus::go_panel(router::CLIENTS, "client:new")).icon(IconName::Users).shortcut("Ctrl+Maj+C"),
+        ];
+        if may_import {
+            file.push(MenuEntry::separator());
+            file.push(MenuEntry::new("Importer CSV…", menus::go(router::DATA)).icon(IconName::Upload));
+        }
+        vec![
+            MenuGroup::new("Fichier", file),
+            MenuGroup::new(
+                "Affichage",
+                vec![
+                    menus::to_dashboard(),
+                    menus::to_workshop(),
+                    menus::to_stock(),
+                    MenuEntry::separator(),
+                    MenuEntry::new("Actualiser", menus::on(&page, |this, _, cx| this.refresh(cx))).icon(IconName::RefreshCw).shortcut("F5"),
+                ],
+            ),
+            menus::help(),
+        ]
     }
 }
 

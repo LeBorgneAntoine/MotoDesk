@@ -824,6 +824,33 @@ impl Render for AtelierPage {
     }
 }
 
+// ---- menus ----------------------------------------------------------------------------------
+
+impl AtelierPage {
+    /// The menus of the title bar while this screen is shown.
+    pub fn menus(&self, cx: &mut Context<Self>) -> Vec<MenuGroup> {
+        let page = cx.entity();
+        vec![
+            MenuGroup::new(
+                "Fichier",
+                vec![
+                    MenuEntry::new("Nouvel ordre de réparation", crate::menus::on(&page, |this, window, cx| this.open_new_order(window, cx)))
+                        .icon(IconName::Wrench)
+                        .shortcut("Ctrl+Maj+R"),
+                ],
+            ),
+            MenuGroup::new(
+                "Affichage",
+                vec![
+                    crate::menus::to_dashboard(),
+                    crate::menus::to_workshop(),
+                    MenuEntry::new("Actualiser", crate::menus::on(&page, |this, _, cx| this.refresh(cx))).icon(IconName::RefreshCw).shortcut("F5"),
+                ],
+            ),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: it would bring in GPUI's own `test` attribute in place of Rust's.
