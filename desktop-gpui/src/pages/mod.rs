@@ -14,6 +14,7 @@ pub mod lines;
 pub mod parc;
 pub mod sales;
 pub mod settings;
+pub mod shared;
 pub mod stock;
 pub mod vehicle;
 

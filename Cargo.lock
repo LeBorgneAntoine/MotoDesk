@@ -5480,6 +5480,7 @@ dependencies = [
  "axum",
  "chrono",
  "encoding_rs",
+ "http-body-util",
  "motodesk-server",
  "reqwest 0.12.28",
  "serde",

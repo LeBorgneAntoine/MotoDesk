@@ -17,6 +17,7 @@ pub const BILLING: &str = "billing";
 pub const EMPLOYEES: &str = "employees";
 pub const SETTINGS: &str = "settings";
 pub const DATA: &str = "data";
+pub const SHARED: &str = "shared";
 
 /// The screen the app opens on.
 pub const HOME: &str = DASHBOARD;

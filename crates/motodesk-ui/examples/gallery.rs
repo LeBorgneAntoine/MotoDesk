@@ -227,6 +227,7 @@ impl Gallery {
                     row()
                         .gap(m.space_6)
                         .child(ColorField::new("accent", &self.colour).presets(&[0x1976d2, 0x00897b, 0x2e7d32, 0x546e7a]))
+                        .child(div().w(px(160.)).child(ProgressBar::new(42)))
                         .child(Picture::new(None))
                         .child(Picture::new(picture_from_bytes(
                             br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#1976d2"/></svg>"##.to_vec(),

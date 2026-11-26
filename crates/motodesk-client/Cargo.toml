@@ -10,6 +10,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 axum = "0.7"
 tower = { version = "0.5", features = ["util"] }
+# A large answer (a file of the shared folder) is read a piece at a time.
+http-body-util = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"
