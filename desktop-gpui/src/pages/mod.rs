@@ -8,6 +8,7 @@ pub mod auth;
 pub mod billing;
 pub mod clients;
 pub mod dashboard;
+pub mod data;
 pub mod employees;
 pub mod lines;
 pub mod parc;

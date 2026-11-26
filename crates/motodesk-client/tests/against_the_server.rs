@@ -5,6 +5,8 @@ use motodesk_client::clients::{
 };
 use motodesk_client::employees::Role;
 use motodesk_client::fiscal::{ClosureKind, JournalQuery};
+use motodesk_client::import::schema::{self as import_schema, Mode};
+use motodesk_client::import::{self, transforms, ImportRequest, ImportResult};
 use motodesk_client::local_account::SetupPayload;
 use motodesk_client::network_accounts::{self, NetworkAccountPatch, NewNetworkAccount};
 use motodesk_client::products::{
@@ -825,4 +827,75 @@ async fn syncing_from_a_local_network_keeps_its_session() {
 
     let me = auth::local_me(&api).await.expect("the session still stands");
     assert_eq!(me.id, session.user.id);
+}
+
+/// Send a CSV text the way the wizard does: mapped by its headers, clean rows only, in batches.
+async fn import_csv(api: &Client, entity: &str, mode: Mode, match_key: &str, text: &str, write: bool) -> (ImportResult, Vec<usize>) {
+    let parsed = import::csv::parse(text).unwrap();
+    let entity = import_schema::entity(entity).unwrap();
+    let mappings = transforms::suggest_mappings(entity, &parsed.headers);
+    assert!(transforms::unmapped_required(&mappings).is_empty(), "a required field has no column");
+    let results = transforms::transform(&parsed, &mappings);
+    let (rows, index_map) = transforms::sendable(&results);
+    let request = ImportRequest {
+        entity: entity.id,
+        mode,
+        match_key: match_key.to_string(),
+        ignore_duplicates: false,
+        create_missing_categories: true,
+        references: transforms::references(&mappings),
+        rows: Vec::new(),
+    };
+    let mut whole = ImportResult::default();
+    // Two rows at a time, to go through the batching.
+    for (batch, chunk) in rows.chunks(2).enumerate() {
+        let body = request.with_rows(chunk);
+        let answer = if write { import::commit(api, &body).await } else { import::preview(api, &body).await };
+        whole.absorb(answer.unwrap(), batch * 2);
+    }
+    (whole, index_map)
+}
+
+#[tokio::test]
+async fn a_csv_file_becomes_customers_and_products() {
+    let api = client().await;
+    let customers = "Nom;Prénom;Email;Téléphone\n\
+                     Martin;Léa;lea@example.fr;06 12 34 56 78\n\
+                     ;Sans Nom;personne@example.fr;\n\
+                     Dubois;Rémi;remi@example.fr;\n\
+                     Moreau;Inès;ines@example.fr;07 00 00 00 01\n";
+
+    // Looking first writes nothing.
+    let (looked, _) = import_csv(&api, "clients", Mode::Insert, "email", customers, false).await;
+    assert_eq!((looked.inserted, looked.skipped, looked.errored), (3, 0, 0));
+    assert_eq!(clients::list(&api, &ListQuery::default()).await.unwrap().total, 0);
+
+    let (written, index_map) = import_csv(&api, "clients", Mode::Insert, "email", customers, true).await;
+    assert_eq!((written.inserted, written.rows.len()), (3, 3));
+    // The row without a name never left: the rows sent are lines 2, 4 and 5 of the file.
+    assert_eq!(index_map.iter().map(|&i| transforms::line_of(i)).collect::<Vec<_>>(), [2, 4, 5]);
+    let page = clients::list(&api, &ListQuery { q: "martin".into(), limit: Some(10), offset: Some(0) }).await.unwrap();
+    assert_eq!(page.items[0].first_name.as_deref(), Some("Léa"));
+
+    // The same file again: everyone is already there.
+    let (again, _) = import_csv(&api, "clients", Mode::Insert, "email", customers, true).await;
+    assert_eq!((again.inserted, again.skipped), (0, 3));
+
+    // Add-or-update, found by e-mail: one changes, one is new.
+    let changes = "Nom;Email;Téléphone\nMartin;lea@example.fr;06 99 99 99 99\nKervella;chloe@example.fr;\n";
+    let (merged, _) = import_csv(&api, "clients", Mode::Upsert, "email", changes, true).await;
+    assert_eq!((merged.inserted, merged.updated), (1, 1));
+    assert_eq!(clients::list(&api, &ListQuery::default()).await.unwrap().total, 4);
+
+    // Products: prices in euros, a rate in percent, a quantity with decimals, a category by name.
+    let catalogue = "Référence,Désignation,Catégorie,Prix TTC,TVA,Stock\n\
+                     HUI-5W40,Huile 5W40 1L,Lubrifiants,\"12,90\",20,\"7,5\"\n\
+                     PLQ-AV,Plaquettes avant,Freinage,34.50,20,4\n";
+    let (stocked, _) = import_csv(&api, "products", Mode::Insert, "sku", catalogue, true).await;
+    assert_eq!((stocked.inserted, stocked.errored), (2, 0), "{:?}", stocked.rows);
+    let found = products::list(&api, &ListProducts { q: "HUI".into(), ..Default::default() }).await.unwrap();
+    let oil = &found[0];
+    assert_eq!((oil.name.as_str(), oil.selling_price_ttc_cents, oil.vat_rate_bp), ("Huile 5W40 1L", Some(1290), 2000));
+    assert_eq!(oil.stock_milli, 7_500);
+    assert!(products::list_categories(&api).await.unwrap().iter().any(|c| c.name == "Lubrifiants"));
 }

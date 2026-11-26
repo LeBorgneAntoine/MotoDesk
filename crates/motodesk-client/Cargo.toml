@@ -13,6 +13,9 @@ tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"
+# Reading a CSV file as people export it: Excel saves Windows-1252, and headers carry accents.
+encoding_rs = "0.8"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 # The fiscal tests work on today's date, as the service does.

@@ -5479,6 +5479,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "encoding_rs",
  "motodesk-server",
  "reqwest 0.12.28",
  "serde",
@@ -5487,6 +5488,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "unicode-normalization",
  "uuid",
 ]
 
