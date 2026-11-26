@@ -1,2 +1,31 @@
 // The window takes the icon numbered 1.
 1 ICON "icon.ico"
+
+// What Windows says of the program: its name in the task manager and in the firewall's
+// question the first time it listens on the network, its version in the file's properties.
+// Without this block Windows shows the bare file name and no version at all.
+// The numbers are the package's version: build.rs writes them into version.h.
+#include "version.h"
+
+1 VERSIONINFO
+FILEVERSION VERSION_NUMBERS
+PRODUCTVERSION VERSION_NUMBERS
+FILEOS 0x40004L
+FILETYPE 0x1L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040C04B0"
+    BEGIN
+      VALUE "CompanyName", "Motodesk"
+      VALUE "FileDescription", "Motodesk"
+      VALUE "ProductName", "Motodesk"
+      VALUE "FileVersion", VERSION_TEXT
+      VALUE "ProductVersion", VERSION_TEXT
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x040C, 1200
+  END
+END

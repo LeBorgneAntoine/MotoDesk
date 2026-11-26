@@ -421,6 +421,19 @@ mod tests {
         assert_eq!(entry.get_args(), [BACKGROUND_ARG]);
     }
 
+    /// The uninstaller removes the entry by its name (Cargo.toml, `preinstall-section`): a
+    /// renamed entry would stay behind on every PC the program is removed from.
+    #[cfg(windows)]
+    #[test]
+    fn the_uninstaller_removes_the_start_up_entry_by_the_same_name() {
+        let entry = super::platform::startup_entry(std::path::Path::new(r"C:\motodesk.exe")).unwrap();
+        let packaging = include_str!("../Cargo.toml");
+        for key in [r"CurrentVersion\Run", r"CurrentVersion\Explorer\StartupApproved\Run"] {
+            let removal = format!(r"DeleteRegValue HKCU Software\Microsoft\Windows\{key} {}", entry.get_app_name());
+            assert!(packaging.contains(&removal), "the uninstaller does not run: {removal}");
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_second_copy_finds_the_first_and_wakes_it() {
