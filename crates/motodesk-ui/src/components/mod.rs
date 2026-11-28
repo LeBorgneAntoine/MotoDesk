@@ -9,6 +9,7 @@ mod data;
 mod document;
 mod icon;
 mod layout;
+mod logo;
 mod menu;
 mod notifications;
 mod overlay;
@@ -36,6 +37,7 @@ pub use data::{
 pub use document::{PageShape, PageView};
 pub use icon::{Icon, IconName, IconSize};
 pub use layout::{FilterRail, PageToolbar, Sidebar, SidebarItem, StatusBar, StatusBarButton, TitleBar};
+pub use logo::Logo;
 pub use menu::{MenuEntry, MenuGroup, MenuStrip, pressed_shortcut, typing_in_a_field, with_context_menu};
 pub use notifications::{Notice, NoticeAction, NotificationBell};
 pub use overlay::{Confirm, Modal, close_modal, element, toast};
