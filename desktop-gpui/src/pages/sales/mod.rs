@@ -261,13 +261,15 @@ impl SalesPage {
                 if let Some(customers) = customers {
                     this.clients = customers.items;
                 }
-                if let Some(catalogue) = catalogue {
+                let stored = stored.unwrap_or_default();
+                if let Some(mut catalogue) = catalogue {
+                    if !settings::charges_vat(&stored) {
+                        products::without_vat(&mut catalogue);
+                    }
                     this.products = Rc::new(catalogue);
                 }
                 this.profile = profile.or(this.profile.take());
-                let rate = stored.into_iter().flatten().find(|s| s.key == "vat.default_rate_bp").and_then(|s| s.value.as_i64());
-                // A rate the lists cannot show would be saved without being seen.
-                this.default_vat_bp = rate.filter(|rate| products::VAT_PRESETS.iter().any(|(_, bp)| bp == rate)).unwrap_or(2000);
+                this.default_vat_bp = settings::default_vat_bp(&stored);
                 if then_create {
                     this.open_create(window, cx);
                 }

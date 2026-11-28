@@ -1188,3 +1188,74 @@ async fn the_till_opens_sells_puts_aside_and_closes() {
     assert_eq!(closed.day_closure, None);
     assert_eq!(pos::session(&api).await.unwrap(), None);
 }
+
+/// A business that is not subject to VAT cannot seal a document that charges it, whichever way the
+/// line got there; what it sealed while it was subject can still be credited.
+#[tokio::test]
+async fn a_business_without_vat_cannot_charge_it() {
+    let (api, _) = local_network().await;
+    let line = |rate: i64| SaleLineInput {
+        label: Some("Révision".into()),
+        quantity_milli: 1_000,
+        unit_price_ht_cents: 8_000,
+        vat_rate_bp: rate,
+        ..Default::default()
+    };
+    let invoice = |rate: i64| SaleInput { lines: vec![line(rate)], ..Default::default() };
+
+    // Sealed while the shop charged VAT.
+    let earlier = sales::create(&api, &invoice(2_000)).await.unwrap();
+    sales::validate(&api, &earlier.id).await.unwrap();
+
+    settings::set(&api, "vat.is_subject", &serde_json::json!(false)).await.unwrap();
+    settings::set(&api, "vat.exemption_text", &serde_json::json!("TVA non applicable, art. 293 B du CGI.")).await.unwrap();
+    let stored = settings::list(&api).await.unwrap();
+    assert!(!settings::charges_vat(&stored));
+    assert_eq!(settings::default_vat_bp(&stored), 0);
+
+    // An invoice that charges it is refused and stays a draft.
+    let charging = sales::create(&api, &invoice(2_000)).await.unwrap();
+    let refused = sales::validate(&api, &charging.id).await.unwrap_err();
+    assert!(refused.message.contains("assujettie à la TVA"), "{}", refused.message);
+    assert!(!sales::get(&api, &charging.id).await.unwrap().is_sealed());
+
+    // So is a till ticket, and nothing of it is kept.
+    pos::open_session(&api, 0).await.unwrap();
+    let before = sales::list(&api, &ListSales::default()).await.unwrap().len();
+    let ticket = Checkout {
+        lines: vec![line(2_000)],
+        payments: vec![PosPayment { method: "cash", amount_cents: 9_600, ..Default::default() }],
+        client_id: None,
+        kind: PosDocument::Receipt,
+    };
+    assert!(pos::checkout(&api, &ticket).await.unwrap_err().message.contains("assujettie à la TVA"));
+    assert_eq!(sales::list(&api, &ListSales::default()).await.unwrap().len(), before);
+
+    // Without VAT it seals.
+    let plain = sales::create(&api, &invoice(0)).await.unwrap();
+    assert!(sales::validate(&api, &plain.id).await.unwrap().is_sealed());
+
+    // A vehicle sold from the yard starts without VAT, at the price on its ticket.
+    let bike = clients::create_stock_vehicle(
+        &api,
+        &VehicleInput {
+            vehicle_type: VehicleType::Moto,
+            make: "Yamaha".into(),
+            model: "MT-07".into(),
+            selling_price_ttc_cents: Some(720_000),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let buyer = clients::create(&api, &ClientInput { last_name: "Kervella".into(), ..Default::default() }).await.unwrap();
+    let sale = clients::sell_stock_vehicle(&api, &bike.id, &VehicleSellInput { client_id: buyer.id, reprise: None }).await.unwrap();
+    let draft = sales::get(&api, &sale.id).await.unwrap();
+    assert!(draft.lines.iter().all(|line| line.vat_rate_bp == 0));
+    assert_eq!(draft.total_ttc_cents, Some(720_000));
+    assert!(sales::validate(&api, &sale.id).await.unwrap().is_sealed());
+
+    // The earlier invoice is corrected by its mirror image, VAT included.
+    let note = sales::create_credit_note(&api, &earlier.id).await.unwrap();
+    assert_eq!(note.total_ttc_cents, Some(-9_600));
+}
