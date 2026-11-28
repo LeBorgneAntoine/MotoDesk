@@ -56,6 +56,7 @@ directe des données d'origine ».
 | Verrouillage de la ligne de travail à la validation | `routes/sales.rs`, fonction `validate` |
 | Refus de fusionner une vente déjà scellée | `crates/motodesk-sync/src/merge/mod.rs` |
 | Réplication du journal en insertion seule | `EntityType::FiscalEntry`, `fiscal::replicate` |
+| Contrôle des entrées reçues d'un autre poste par la synchronisation : empreintes exactes, signature d'une clé déclarée par sa caisse, et pour la caisse du poste lui-même, aucune clé nommée de l'extérieur qu'il ne détienne | `local_server/mesh/admission.rs` ; la première copie depuis le cloud (`bootstrap.rs`) n'est pas encore contrôlée |
 
 Le journal ne possède ni `deleted_at`, ni `row_version`, ni `field_meta` : les
 colonnes qui rendent une entité fusionnable n'existent pas.

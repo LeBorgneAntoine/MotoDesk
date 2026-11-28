@@ -3478,7 +3478,7 @@ pub(crate) mod tests {
     async fn what_is_recorded_is_never_answered_as_failed() {
         let state = shop().await;
         let paid = draft_with(&state, vec![shelf_line("Casque", 12_000, 1_000)]).await;
-        validate(State(state.clone()), Path(paid)).await.unwrap();
+        let _ = validate(State(state.clone()), Path(paid)).await.unwrap();
         let sealed_later = draft_with(&state, vec![shelf_line("Chaîne", 4_000, 1_000)]).await;
 
         sqlx::query("CREATE TRIGGER broken_change_log BEFORE INSERT ON change_log BEGIN SELECT RAISE(ABORT, 'broken on purpose'); END")

@@ -9,6 +9,9 @@
 pub mod catchup;
 mod deferred;
 pub mod join;
+mod admission;
+#[cfg(test)]
+mod journal_admission_tests;
 #[cfg(test)]
 mod network_tests;
 #[cfg(test)]
@@ -673,7 +676,15 @@ async fn apply_op_to_sqlite(
             soft_delete_entity(tx, op.entity_type, op.entity_id, snap.deleted_at.unwrap_or(op.created_at))
                 .await?;
         }
-        Some(snap) => persist_snapshot(tx, &snap).await?,
+        Some(snap) => {
+            // The merge takes any journal row it has not seen: what arrives through sync is
+            // written down only if its own till signed it. (The first copy from the cloud,
+            // `bootstrap`, is not a sync change and does not come through here.)
+            if op.entity_type == motodesk_core::entity::EntityType::FiscalEntry {
+                admission::admit(tx, &snap.payload).await?;
+            }
+            persist_snapshot(tx, &snap).await?
+        }
         None if op.op == OpKind::Delete => {
             soft_delete_entity(tx, op.entity_type, op.entity_id, op.created_at).await?;
         }
@@ -1042,19 +1053,25 @@ mod merge_tests {
     async fn another_pcs_journal_is_stored_with_a_register_built_from_its_opening_entry() {
         let state = shop().await;
         let register = Uuid::new_v4().to_string();
-        let entry = |event: &str, seq: i64, payload: serde_json::Value| {
+        let key = motodesk_fiscal::SecretKey::generate();
+        let public_key = key.public().to_hex();
+        let mut tip = motodesk_fiscal::chain::ChainTip { seq: 0, chain_hash: motodesk_fiscal::chain::GENESIS_HASH.into(), occurred_at: String::new() };
+        let mut entry = |event: &str, payload: serde_json::Value| {
             let id = Uuid::new_v4();
+            let mut sealed = motodesk_fiscal::seal(&tip, "C7", event, chrono::Utc::now(), payload).unwrap();
+            sealed.signature = key.sign_entry(&sealed).unwrap();
+            tip = sealed.tip();
             remote_op(
                 EntityType::FiscalEntry,
                 id,
                 OpKind::Insert,
                 json!({
-                    "id": id.to_string(), "register_id": register, "seq": seq, "event_type": event,
-                    "occurred_at": "2026-11-10T09:00:00+00:00", "business_day": "2026-11-10",
-                    "payload": payload, "payload_hash": "h", "prev_hash": "p", "chain_hash": format!("c{seq}"),
-                    "signature": "s", "total_ttc_cents": 0,
+                    "id": id.to_string(), "register_id": register, "seq": sealed.seq, "event_type": event,
+                    "occurred_at": sealed.occurred_at, "business_day": "2026-11-10",
+                    "payload": sealed.payload, "payload_hash": sealed.payload_hash, "prev_hash": sealed.prev_hash,
+                    "chain_hash": sealed.chain_hash, "signature": sealed.signature, "total_ttc_cents": 0,
                 }),
-                seq,
+                sealed.seq,
             )
         };
         apply_batch(
@@ -1062,22 +1079,21 @@ mod merge_tests {
             vec![
                 entry(
                     "register_opened",
-                    1,
-                    json!({ "register_code": "C7", "public_key": "ab12", "device_id": Uuid::new_v4().to_string() }),
+                    json!({ "register_code": "C7", "public_key": public_key, "device_id": Uuid::new_v4().to_string() }),
                 ),
-                entry("document_sealed", 2, json!({ "reference": "FA-2026-C7-00001" })),
+                entry("document_sealed", json!({ "reference": "FA-2026-C7-00001" })),
             ],
         )
         .await
         .unwrap();
 
-        let (code, key): (String, String) =
+        let (code, stored): (String, String) =
             sqlx::query_as("SELECT code, public_key FROM fiscal_registers WHERE id = $1")
                 .bind(&register)
                 .fetch_one(&state.db)
                 .await
                 .unwrap();
-        assert_eq!((code.as_str(), key.as_str()), ("C7", "ab12"));
+        assert_eq!((code.as_str(), stored.as_str()), ("C7", public_key.as_str()));
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM fiscal_journal WHERE register_id = $1")
             .bind(&register)
             .fetch_one(&state.db)

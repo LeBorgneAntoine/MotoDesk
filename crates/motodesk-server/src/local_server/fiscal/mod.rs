@@ -143,7 +143,7 @@ pub(crate) async fn current_with(
     Ok(register)
 }
 
-fn code_for_device(device_id: Uuid) -> String {
+pub(crate) fn code_for_device(device_id: Uuid) -> String {
     let hex = device_id.simple().to_string();
     normalise_register_code(&format!("C{}", &hex[..4]))
 }
