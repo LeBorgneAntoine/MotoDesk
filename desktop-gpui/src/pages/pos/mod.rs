@@ -54,6 +54,7 @@ struct Opening {
     frequents: Vec<pos::FrequentItem>,
     held: Vec<HeldTicket>,
     allow_negative_stock: bool,
+    charges_vat: bool,
 }
 
 /// What a closed session is summed up as.
@@ -79,6 +80,7 @@ pub struct Till {
     products: Vec<Article>,
     frequents: Vec<Article>,
     allow_negative_stock: bool,
+    charges_vat: bool,
 
     search: TextModel,
     /// Counts the keystrokes of the search: a code looked up for an older text is dropped.
@@ -185,6 +187,7 @@ impl Till {
             products: Vec::new(),
             frequents: Vec::new(),
             allow_negative_stock: false,
+            charges_vat: true,
             search,
             scans: 0,
             cart: Cart::default(),
@@ -246,7 +249,8 @@ impl Till {
                 let stored = settings::list(&client).await.unwrap_or_default();
                 let allow_negative_stock =
                     stored.iter().find(|setting| setting.key == "stock.allow_negative").and_then(|setting| setting.value.as_bool()).unwrap_or(false);
-                Ok(Opening { session, products, register_code, frequents, held, allow_negative_stock })
+                let charges_vat = settings::charges_vat(&stored);
+                Ok(Opening { session, products, register_code, frequents, held, allow_negative_stock, charges_vat })
             },
             |this, result: ApiResult<Opening>, window, cx| {
                 this.loading = false;
@@ -257,6 +261,7 @@ impl Till {
                         this.products = opening.products.iter().map(Article::from).collect();
                         this.held = opening.held;
                         this.allow_negative_stock = opening.allow_negative_stock;
+                        this.charges_vat = opening.charges_vat;
                         this.set_frequents(opening.frequents, cx);
                         if this.session.is_some() {
                             this.search.focus(window, cx);
@@ -368,8 +373,11 @@ impl Till {
     fn pick(&mut self, article: &Article, window: &mut Window, cx: &mut Context<Self>) {
         if article.out_of_stock(self.allow_negative_stock) {
             toast::error("Article en rupture", window, cx);
-        } else {
+        } else if self.charges_vat {
             self.cart.add(article);
+        } else {
+            // Every way into the cart comes through here: search, scan and favourites.
+            self.cart.add(&article.without_vat());
         }
         // What was typed is used up; a code looked up for it is no longer wanted.
         self.scans += 1;

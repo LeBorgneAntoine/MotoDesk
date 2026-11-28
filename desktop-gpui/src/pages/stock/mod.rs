@@ -202,15 +202,10 @@ impl StockPage {
             |client| async move { settings::list(&client).await },
             |this, result, cx| {
                 let Ok(stored) = result else { return };
+                this.default_vat_bp = settings::default_vat_bp(&stored);
                 for setting in stored {
                     match setting.key.as_str() {
                         "stock.alert_low_stock" => this.low_stock_alerts = setting.value.as_bool() != Some(false),
-                        "vat.default_rate_bp" => {
-                            let rate = setting.value.as_i64();
-                            // A rate the lists cannot show would be saved without being seen.
-                            this.default_vat_bp =
-                                rate.filter(|rate| products::VAT_PRESETS.iter().any(|(_, bp)| bp == rate)).unwrap_or(2000);
-                        }
                         "stock.low_threshold_default" => {
                             this.default_threshold = setting.value.as_f64().filter(|n| *n >= 0.).map(|n| n.round() as i64);
                         }

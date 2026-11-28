@@ -944,6 +944,16 @@ pub(crate) async fn seal_in_tx(
     now: chrono::DateTime<Utc>,
     actor: Option<String>,
 ) -> LocalResult<SealedLot> {
+    // A business that is not subject to VAT (franchise en base) may not charge it: tax written on
+    // an invoice is owed for being written (CGI art. 283-3), and the document would say at once
+    // that VAT does not apply and how much of it was charged. Every invoice and till ticket is
+    // sealed here. A credit note is let through: it mirrors what the corrected document charged.
+    if !profile.vat_subject && kind != DocumentKind::CreditNote && lines.iter().any(|line| line.vat_rate_bp != 0) {
+        return Err(LocalError::BadRequest(
+            "votre entreprise n'est pas assujettie à la TVA (Réglages › Légal & fiscal) : mettez la TVA de chaque ligne à 0 % avant de valider."
+                .into(),
+        ));
+    }
     let totals = compute(lines)?;
     let (_, reference) = fiscal::next_number(tx, register, kind, now.year()).await?;
 

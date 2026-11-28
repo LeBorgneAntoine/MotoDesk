@@ -83,6 +83,11 @@ impl From<&Product> for Article {
 }
 
 impl Article {
+    /// The article as a shop that charges no VAT sells it: same price, no tax in it.
+    pub fn without_vat(&self) -> Article {
+        Article { vat_rate_bp: 0, ..self.clone() }
+    }
+
     /// What tells two articles of the same name apart: variant, brand, reference.
     pub fn meta(&self) -> String {
         [&self.variant, &self.brand, &self.sku]

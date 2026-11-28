@@ -223,7 +223,9 @@ async fn sell_stock_vehicle(
         .ok_or_else(|| {
             LocalError::BadRequest("ce véhicule n'a pas de prix de vente TTC".into())
         })?;
-    let vat = body.vat_rate_bp.unwrap_or(2_000);
+    // A business that charges no VAT sells at the price on the ticket, with none in it.
+    let usual = if crate::local_server::fiscal::mentions::load(&state.db).await?.vat_subject { 2_000 } else { 0 };
+    let vat = body.vat_rate_bp.unwrap_or(usual);
     let ht = ht_from_ttc(ttc, vat);
     let make = vehicle.get("make").and_then(|v| v.as_str()).unwrap_or("");
     let model = vehicle.get("model").and_then(|v| v.as_str()).unwrap_or("");

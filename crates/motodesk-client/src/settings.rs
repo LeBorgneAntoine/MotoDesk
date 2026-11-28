@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::ApiResult;
+use crate::products::VAT_PRESETS;
 use crate::session::Client;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -18,6 +19,23 @@ pub struct AppSetting {
 
 /// A flat key → value map, the shape the bulk write expects.
 pub type SettingsBulk = BTreeMap<String, Value>;
+
+/// Whether the shop charges VAT: it does until it says it is not subject to it (franchise en
+/// base).
+pub fn charges_vat(stored: &[AppSetting]) -> bool {
+    !stored.iter().any(|setting| setting.key == "vat.is_subject" && setting.value.as_bool() == Some(false))
+}
+
+/// The VAT rate a new line or product starts with: none for a shop that charges none, else the
+/// shop's usual rate.
+pub fn default_vat_bp(stored: &[AppSetting]) -> i64 {
+    if !charges_vat(stored) {
+        return 0;
+    }
+    let usual = stored.iter().find(|setting| setting.key == "vat.default_rate_bp").and_then(|setting| setting.value.as_i64());
+    // A rate the lists cannot show would be saved without being seen.
+    usual.filter(|rate| VAT_PRESETS.iter().any(|(_, bp)| bp == rate)).unwrap_or(2000)
+}
 
 pub async fn list(client: &Client) -> ApiResult<Vec<AppSetting>> {
     client.get("/api/settings").await

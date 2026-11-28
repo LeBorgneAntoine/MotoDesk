@@ -157,22 +157,16 @@ impl AtelierPage {
             },
             move |this, result, window, cx| {
                 let Ok((catalogue, stored, team)) = result else { return };
-                if let Some(catalogue) = catalogue {
+                let stored = stored.unwrap_or_default();
+                if let Some(mut catalogue) = catalogue {
+                    if !settings::charges_vat(&stored) {
+                        products::without_vat(&mut catalogue);
+                    }
                     this.products = Rc::new(catalogue);
                 }
-                for setting in stored.into_iter().flatten() {
-                    match setting.key.as_str() {
-                        "vat.default_rate_bp" => {
-                            let rate = setting.value.as_i64();
-                            // A rate the lists cannot show would be saved without being seen.
-                            this.default_vat_bp =
-                                rate.filter(|rate| products::VAT_PRESETS.iter().any(|(_, bp)| bp == rate)).unwrap_or(2000);
-                        }
-                        "workshop.labor_rate_ht_cents" => {
-                            this.labour_rate_ht_cents = setting.value.as_f64().filter(|rate| rate.is_finite()).map(|rate| rate.round() as i64);
-                        }
-                        _ => {}
-                    }
+                this.default_vat_bp = settings::default_vat_bp(&stored);
+                if let Some(setting) = stored.iter().find(|setting| setting.key == "workshop.labor_rate_ht_cents") {
+                    this.labour_rate_ht_cents = setting.value.as_f64().filter(|rate| rate.is_finite()).map(|rate| rate.round() as i64);
                 }
                 this.employees = team.unwrap_or_default().into_iter().filter(|e| e.is_active.unwrap_or(true)).collect();
                 match reopen.as_deref() {

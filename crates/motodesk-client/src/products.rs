@@ -101,6 +101,14 @@ pub fn vehicle_type_label(value: &str) -> &str {
     VEHICLE_TYPES.iter().find(|(v, _)| *v == value).map(|(_, label)| *label).unwrap_or(value)
 }
 
+/// The catalogue as a shop that charges no VAT sells it: the price asked stays, with no tax in it.
+/// For the lines of new documents only; the products keep the rate written on them.
+pub fn without_vat(catalogue: &mut [ProductListItem]) {
+    for product in catalogue {
+        product.vat_rate_bp = 0;
+    }
+}
+
 /// (label, hundredths of a percent) of the VAT rates the forms offer.
 pub const VAT_PRESETS: [(&str, i64); 5] = [("20 %", 2000), ("10 %", 1000), ("5,5 %", 550), ("2,1 %", 210), ("0 %", 0)];
 
