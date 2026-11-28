@@ -189,7 +189,10 @@ pub async fn complete_chat_stream(
         }))
         .send()
         .await
-        .map_err(|e| LocalError::BadRequest(format!("OpenRouter injoignable ({e}).")))?;
+        .map_err(|e| {
+            tracing::warn!(error = %e, "OpenRouter could not be reached");
+            LocalError::BadRequest("OpenRouter injoignable : vérifiez la connexion internet.".into())
+        })?;
 
     let status = response.status();
     if !status.is_success() {

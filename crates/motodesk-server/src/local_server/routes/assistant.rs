@@ -156,7 +156,8 @@ async fn test_connection(
         .send()
         .await
         .map_err(|e| {
-            LocalError::BadRequest(format!("OpenRouter injoignable ({e})."))
+            tracing::warn!(error = %e, "OpenRouter could not be reached");
+            LocalError::BadRequest("OpenRouter injoignable : vérifiez la connexion internet.".into())
         })?;
 
     let status = response.status();

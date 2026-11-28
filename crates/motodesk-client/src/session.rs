@@ -43,8 +43,11 @@ pub struct Client {
 /// Read a JSON answer; an empty one reads as `null` (so `()` and `Option<T>` both work).
 pub(crate) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> ApiResult<T> {
     let source: &[u8] = if bytes.is_empty() { b"null" } else { bytes };
-    serde_json::from_slice(source)
-        .map_err(|e| ApiError::new(0, "bad_response", format!("Réponse inattendue du service de données : {e}")))
+    serde_json::from_slice(source).map_err(|e| {
+        // The parser's words are for whoever reads the log.
+        tracing::error!(error = %e, "an answer could not be read");
+        ApiError::new(0, "bad_response", "Réponse illisible. Vérifiez que tous les postes et le serveur sont à jour.")
+    })
 }
 
 /// One request being prepared. Built by [`Client::call`].
