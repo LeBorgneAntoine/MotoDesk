@@ -1,6 +1,7 @@
 pub mod assistant;
 pub mod auth_guard;
 pub mod backup;
+pub mod backup_copy;
 pub mod backup_format;
 pub mod bootstrap;
 pub mod cloud;

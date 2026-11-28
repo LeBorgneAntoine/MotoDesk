@@ -12,6 +12,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Deux réglages d'apparence disparaissent : les coins arrondis (tout est carré) et le flou.
 
 ### Ajouté
+- Sauvegardes copiées hors du poste : choisissez dans Réglages › Sauvegardes un dossier (clé USB, disque externe, réseau, dossier synchronisé) où chaque sauvegarde est aussi écrite. Une copie qui échoue est signalée, sans faire échouer la sauvegarde.
 - Réseau local : liste des postes et « Retirer ce poste » pour un poste perdu ou volé. La clé du réseau change, l'administrateur choisit un nouveau mot de passe, et chaque autre poste est reconnecté par un administrateur (ses données sont conservées). Un poste qui a perdu sa clé se reconnecte de la même façon.
 - Sur un poste neuf, « Restaurer une sauvegarde » dès l'écran d'accès, sans créer d'abord un réseau.
 - Réseau local : une clé de récupération est donnée à la création du réseau. Elle permet, depuis « Mot de passe perdu ? », de redonner l'accès à un compte ; elle est remplacée après usage et peut être renouvelée par un administrateur.

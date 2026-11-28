@@ -51,7 +51,20 @@ pub struct BackupStatus {
     pub auto_password_set: bool,
     /// A restore is queued and replaces the data at the next start.
     pub restore_pending: bool,
+    /// The folder away from this PC's disk that backups are also copied to, if one is chosen.
+    pub copy: Option<CopyStatus>,
     pub files: Vec<BackupFile>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct CopyStatus {
+    pub folder: String,
+    pub last_copy_at: Option<String>,
+    /// Why the latest copy did not get there.
+    pub error: Option<String>,
+    /// The folder is on the same disk as the data.
+    pub same_drive: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -93,6 +106,16 @@ pub async fn clear_auto_password(client: &Client) -> ApiResult<()> {
     client.call(Method::DELETE, "/api/backup/auto-password").done().await
 }
 
+/// Copy every backup to `folder` too; the latest is taken there at once.
+pub async fn set_copy_folder(client: &Client, folder: &str) -> ApiResult<BackupStatus> {
+    client.put("/api/backup/copy-folder", &serde_json::json!({ "folder": folder })).await
+}
+
+/// Stop copying. What was already copied stays where it is.
+pub async fn clear_copy_folder(client: &Client) -> ApiResult<()> {
+    client.delete("/api/backup/copy-folder").await
+}
+
 // ---- the reminder ------------------------------------------------------------------------------
 
 /// Without automatic backups, how old the last one may be before the owner is reminded.
@@ -110,15 +133,30 @@ pub enum Reminder {
     NoAutomatic { days: Option<i64> },
     /// Automatic backups are set up but none has been written for a long time.
     Stale { days: i64 },
+    /// Backups are made but all stay on this PC's disk.
+    NoCopy,
+    /// The latest backup did not reach the folder it is copied to.
+    CopyFailed,
 }
 
 impl Reminder {
+    /// The banner's heading.
+    pub fn title(self) -> &'static str {
+        match self {
+            Reminder::NoAutomatic { .. } | Reminder::Stale { .. } => "Données non sauvegardées",
+            Reminder::NoCopy => "Sauvegardes sur ce seul poste",
+            Reminder::CopyFailed => "Sauvegarde non copiée",
+        }
+    }
+
     /// What the banner says.
     pub fn message(self) -> String {
         match self {
             Reminder::NoAutomatic { days: None } => "Aucune sauvegarde n'a jamais été faite et aucune sauvegarde automatique n'est active : un incident sur ce poste ferait perdre les données de l'atelier. Choisissez un mot de passe de sauvegarde pour les activer.".into(),
             Reminder::NoAutomatic { days: Some(days) } => format!("La dernière sauvegarde date de {days} jours et aucune sauvegarde automatique n'est active. Choisissez un mot de passe de sauvegarde pour les activer."),
             Reminder::Stale { days } => format!("La dernière sauvegarde automatique date de {days} jours : elles semblent s'être arrêtées. Vérifiez Réglages › Sauvegardes."),
+            Reminder::NoCopy => "Les sauvegardes restent sur le disque de ce poste : une panne ou un vol emporterait les données et les sauvegardes. Choisissez un dossier où les copier dans Réglages › Sauvegardes.".into(),
+            Reminder::CopyFailed => "La dernière sauvegarde n'a pas été copiée hors de ce poste. Vérifiez le disque ou le dossier dans Réglages › Sauvegardes.".into(),
         }
     }
 }
@@ -133,11 +171,26 @@ fn age_in_days(last_backup_at: Option<&str>, now: chrono::DateTime<chrono::Utc>)
 pub fn reminder(status: &BackupStatus, now: chrono::DateTime<chrono::Utc>) -> Option<Reminder> {
     let days = age_in_days(status.last_backup_at.as_deref(), now);
     if !(status.auto_enabled && status.auto_password_set) {
-        return days.is_none_or(|days| days >= MANUAL_GRACE_DAYS).then_some(Reminder::NoAutomatic { days });
+        if days.is_none_or(|days| days >= MANUAL_GRACE_DAYS) {
+            return Some(Reminder::NoAutomatic { days });
+        }
+        return copy_reminder(status);
     }
     // The first automatic backup comes a couple of minutes after the app starts.
     let days = days?;
-    (days > status.frequency_days.max(1) + AUTOMATIC_SLACK_DAYS).then_some(Reminder::Stale { days })
+    if days > status.frequency_days.max(1) + AUTOMATIC_SLACK_DAYS {
+        return Some(Reminder::Stale { days });
+    }
+    copy_reminder(status)
+}
+
+/// Backups are being made: do they get off this disk? Asked once there is one to copy.
+fn copy_reminder(status: &BackupStatus) -> Option<Reminder> {
+    status.last_backup_at.as_ref()?;
+    match &status.copy {
+        None => Some(Reminder::NoCopy),
+        Some(copy) => copy.error.as_ref().map(|_| Reminder::CopyFailed),
+    }
 }
 
 #[cfg(test)]
@@ -147,7 +200,8 @@ mod tests {
     fn status(auto_enabled: bool, auto_password_set: bool, days_ago: Option<i64>) -> (BackupStatus, chrono::DateTime<chrono::Utc>) {
         let now = chrono::DateTime::parse_from_rfc3339("2026-11-22T12:00:00Z").unwrap().with_timezone(&chrono::Utc);
         let last_backup_at = days_ago.map(|days| (now - chrono::Duration::days(days)).to_rfc3339());
-        (BackupStatus { last_backup_at, auto_enabled, auto_password_set, frequency_days: 7, ..Default::default() }, now)
+        let copy = Some(CopyStatus { folder: "E:/".into(), ..Default::default() });
+        (BackupStatus { last_backup_at, auto_enabled, auto_password_set, frequency_days: 7, copy, ..Default::default() }, now)
     }
 
     fn reminded(auto_enabled: bool, auto_password_set: bool, days_ago: Option<i64>) -> Option<Reminder> {
@@ -174,6 +228,23 @@ mod tests {
         assert_eq!(reminder(&unreadable, now), None);
         assert!(Reminder::Stale { days: 11 }.message().contains("11 jours"));
         assert!(Reminder::NoAutomatic { days: None }.message().contains("jamais"));
+    }
+
+    #[test]
+    fn the_owner_is_told_when_backups_stay_on_this_disk() {
+        let (mut recent, now) = status(true, true, Some(1));
+        assert_eq!(reminder(&recent, now), None);
+        recent.copy = Some(CopyStatus { folder: "E:/".into(), error: Some("débranché".into()), ..Default::default() });
+        assert_eq!(reminder(&recent, now), Some(Reminder::CopyFailed));
+        recent.copy = None;
+        assert_eq!(reminder(&recent, now), Some(Reminder::NoCopy));
+        // A missing backup is said before a missing copy, and there is nothing to copy before one.
+        let (mut stale, now) = status(true, true, Some(30));
+        stale.copy = None;
+        assert_eq!(reminder(&stale, now), Some(Reminder::Stale { days: 30 }));
+        let (mut none_yet, now) = status(true, true, None);
+        none_yet.copy = None;
+        assert_eq!(reminder(&none_yet, now), None);
     }
 
     #[test]

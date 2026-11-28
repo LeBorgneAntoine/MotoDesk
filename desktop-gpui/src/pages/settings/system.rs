@@ -11,8 +11,9 @@ use motodesk_ui::*;
 use serde_json::Value;
 
 use super::registry::{AUTO_BACKUP, BACKUP_FREQUENCY, def_by_key, same};
-use crate::backend::ApiExt as _;
+use crate::backend::{ApiExt as _, PickExt as _};
 use crate::format::{self, humanize_error};
+use crate::notices::NoticesState;
 use crate::pages::updates::UpdatesCard;
 
 /// What the confirmation of a restore says: which file, from when, and what is lost.
@@ -243,6 +244,56 @@ impl SystemView {
         );
     }
 
+    fn choose_copy_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
+        cx.pick_folder(window, "Choisir le dossier où copier les sauvegardes", |this, picked, window, cx| {
+            let folder = match picked {
+                Ok(Some(folder)) => folder.display().to_string(),
+                Ok(None) => return,
+                Err(error) => {
+                    toast::error(format!("Impossible de choisir un dossier : {error}"), window, cx);
+                    return;
+                }
+            };
+            this.busy = true;
+            cx.notify();
+            cx.api_in(
+                window,
+                move |client| async move { backup::set_copy_folder(&client, &folder).await },
+                |this, result, window, cx| {
+                    this.busy = false;
+                    match result {
+                        Ok(status) => {
+                            if status.copy.as_ref().is_some_and(|copy| copy.error.is_none()) {
+                                toast::success("Dossier de copie enregistré.", window, cx);
+                            }
+                            this.status = Some(status);
+                            NoticesState::global(cx).update(cx, |notices, cx| notices.recheck(cx));
+                        }
+                        Err(error) => toast::error(humanize_error(&error, "Ce dossier ne convient pas."), window, cx),
+                    }
+                    cx.notify();
+                },
+            );
+        });
+    }
+
+    fn stop_copying(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.api_in(
+            window,
+            |client| async move { backup::clear_copy_folder(&client).await },
+            |this, result, window, cx| match result {
+                Ok(()) => {
+                    this.refresh(cx);
+                    NoticesState::global(cx).update(cx, |notices, cx| notices.recheck(cx));
+                }
+                Err(error) => toast::error(humanize_error(&error, "Impossible de retirer le dossier."), window, cx),
+            },
+        );
+    }
+
     fn export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let password = self.export_password.text(cx);
         if let Some(problem) = backup::password_problem(&password) {
@@ -264,6 +315,7 @@ impl SystemView {
                         this.export_password.clear(window, cx);
                         toast::success(format!("Sauvegarde écrite : {}", file.filename), window, cx);
                         this.refresh(cx);
+                        NoticesState::global(cx).update(cx, |notices, cx| notices.recheck(cx));
                     }
                     Err(error) => toast::error(humanize_error(&error, "Échec de la sauvegarde."), window, cx),
                 }
@@ -406,6 +458,52 @@ impl SystemView {
                         .error(self.frequency_problem.clone())
                         .child(Input::new(&self.frequency).invalid(self.frequency_problem.is_some())),
                 )),
+        )
+    }
+
+    /// Where the backups go besides this PC's own disk.
+    fn copy_card(&self, status: &BackupStatus, cx: &mut Context<Self>) -> SectionCard {
+        let m = cx.ui().m;
+        let choose = Button::new("backup-copy-choose")
+            .icon(IconName::FolderOpen)
+            .loading(self.busy)
+            .on_click(cx.listener(|this, _, window, cx| this.choose_copy_folder(window, cx)));
+        let card = SectionCard::new().title("Copie hors de ce poste").icon(IconName::HardDrive);
+        let Some(copy) = &status.copy else {
+            return card.child(
+                col()
+                    .gap(m.space_3)
+                    .child(Alert::warning().title("Les sauvegardes restent sur le disque de ce poste").child(
+                        "Une panne de disque ou un vol emporterait les données et les sauvegardes avec elles. Choisissez une clé USB, un disque externe, un dossier du réseau ou un dossier synchronisé.",
+                    ))
+                    .child(row().child(choose.primary().label("Choisir un dossier…"))),
+            );
+        };
+        let last = copy
+            .last_copy_at
+            .as_deref()
+            .map(|at| format!("Dernière copie {}", format::date_time(at)))
+            .unwrap_or_else(|| "Aucune copie pour l'instant : la prochaine sauvegarde y sera copiée.".into());
+        card.child(
+            col()
+                .gap(m.space_3)
+                .child(Self::text("Chaque sauvegarde est aussi copiée dans :", cx))
+                .child(Preformatted::new(&copy.folder))
+                .child(Self::text(last, cx))
+                .children(copy.error.clone().map(|error| Alert::danger().title("La dernière sauvegarde n'a pas été copiée").child(error)))
+                .when(copy.same_drive, |this| {
+                    this.child(Alert::warning().child(
+                        "Ce dossier est sur le même disque que les données : il ne protège pas d'une panne de disque, sauf s'il est synchronisé ailleurs.",
+                    ))
+                })
+                .child(
+                    row().gap(m.space_2).child(choose.label("Changer de dossier…")).child(
+                        Button::new("backup-copy-stop")
+                            .ghost()
+                            .label("Ne plus copier")
+                            .on_click(cx.listener(|this, _, window, cx| this.stop_copying(window, cx))),
+                    ),
+                ),
         )
     }
 
@@ -560,6 +658,7 @@ impl Render for SystemView {
                 "Une sauvegarde est un fichier chiffré (.mgbak) : base de données, journaux fiscaux et clés de caisse. Pour changer d'ordinateur, copiez-le dans le dossier des sauvegardes du nouveau poste, puis restaurez-le ici avec son mot de passe. Sans ce mot de passe, la sauvegarde est inutilisable et personne ne peut le retrouver.",
             ))
             .child(self.automatic(&status, cx))
+            .child(self.copy_card(&status, cx))
             .child(self.export_card(&status, cx))
             .child(self.files(&status, cx))
             .children(self.restore_target.clone().map(|file| self.restore_card(&file, cx)))

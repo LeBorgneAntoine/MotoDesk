@@ -84,11 +84,23 @@ fn ask_save_path<V: 'static>(cx: &mut Context<V>, suggested_name: &str) -> impl 
     }
 }
 
-/// Ask which files to open. Empty when the dialog was closed.
-fn ask_paths<V: 'static>(cx: &mut Context<V>, prompt: &str, multiple: bool) -> impl Future<Output = std::io::Result<Vec<PathBuf>>> + use<V> {
+#[derive(Clone, Copy)]
+enum Pick {
+    File,
+    Files,
+    Folder,
+}
+
+/// Ask which files, or which folder, to open. Empty when the dialog was closed.
+fn ask_paths<V: 'static>(cx: &mut Context<V>, prompt: &str, what: Pick) -> impl Future<Output = std::io::Result<Vec<PathBuf>>> + use<V> {
     let stand_in = dev::picked();
     let asked = stand_in.is_none().then(|| {
-        cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple, prompt: Some(prompt.to_string().into()) })
+        let (files, directories, multiple) = match what {
+            Pick::File => (true, false, false),
+            Pick::Files => (true, false, true),
+            Pick::Folder => (false, true, false),
+        };
+        cx.prompt_for_paths(PathPromptOptions { files, directories, multiple, prompt: Some(prompt.to_string().into()) })
     });
     async move {
         match (stand_in, asked) {
@@ -188,6 +200,14 @@ pub trait PickExt<V: 'static> {
         prompt: &str,
         done: impl FnOnce(&mut V, std::io::Result<Vec<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
     );
+
+    /// Ask the user for a folder: `None` when the dialog was closed.
+    fn pick_folder(
+        &mut self,
+        window: &Window,
+        prompt: &str,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    );
 }
 
 impl<V: 'static> PickExt<V> for Context<'_, V> {
@@ -198,7 +218,7 @@ impl<V: 'static> PickExt<V> for Context<'_, V> {
         max_bytes: usize,
         done: impl FnOnce(&mut V, std::io::Result<Option<PickedFile>>, &mut Window, &mut Context<V>) + 'static,
     ) {
-        let chosen = ask_paths(self, prompt, false);
+        let chosen = ask_paths(self, prompt, Pick::File);
         self.spawn_in(window, async move |view, cx| {
             let outcome = match chosen.await.map(|paths| paths.into_iter().next()) {
                 Ok(Some(path)) => cx.background_executor().spawn(async move { read_picked(&path, max_bytes).map(Some) }).await,
@@ -216,9 +236,23 @@ impl<V: 'static> PickExt<V> for Context<'_, V> {
         prompt: &str,
         done: impl FnOnce(&mut V, std::io::Result<Vec<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
     ) {
-        let chosen = ask_paths(self, prompt, true);
+        let chosen = ask_paths(self, prompt, Pick::Files);
         self.spawn_in(window, async move |view, cx| {
             let outcome = chosen.await;
+            let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
+        })
+        .detach();
+    }
+
+    fn pick_folder(
+        &mut self,
+        window: &Window,
+        prompt: &str,
+        done: impl FnOnce(&mut V, std::io::Result<Option<PathBuf>>, &mut Window, &mut Context<V>) + 'static,
+    ) {
+        let chosen = ask_paths(self, prompt, Pick::Folder);
+        self.spawn_in(window, async move |view, cx| {
+            let outcome = chosen.await.map(|paths| paths.into_iter().next());
             let _ = view.update_in(cx, |view, window, cx| done(view, outcome, window, cx));
         })
         .detach();
