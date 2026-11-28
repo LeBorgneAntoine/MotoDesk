@@ -3,7 +3,7 @@
 //! `cargo run -p motodesk-ui --example gallery`
 //!
 //! This is where a component is looked at before a screen uses it: add it here with every
-//! variant and state when you add or change one. `--dark`, `--compact`, `--panel` and
+//! variant and state when you add or change one. `--dark`, `--compact`, `--panel`, `--notices` and
 //! `--section <name>` start it in a given state (used to take screenshots).
 
 use std::rc::Rc;
@@ -27,6 +27,7 @@ struct Gallery {
     checked: bool,
     switched: bool,
     clicks: usize,
+    notices_open: bool,
     selected_row: Option<usize>,
     page: usize,
     _subscriptions: Vec<Subscription>,
@@ -103,6 +104,7 @@ impl Gallery {
             checked: true,
             switched: false,
             clicks: 0,
+            notices_open: args.iter().any(|a| a == "--notices"),
             selected_row: Some(2),
             page: 0,
             _subscriptions: vec![on_name, on_panels, on_keys],
@@ -111,6 +113,23 @@ impl Gallery {
             Self::open_demo_panels(&this.panels, cx);
         }
         this
+    }
+
+    /// One notice of each kind: with a thing to do, with a way out, one that can be removed.
+    fn notices() -> Vec<Notice> {
+        let say = |text: &'static str| move |window: &mut Window, cx: &mut App| toast::info(text, window, cx);
+        vec![
+            Notice::new("gap", Status::Danger, "Base plus ancienne que le cloud")
+                .body("Aucun document ne peut être émis tant que les modifications ne sont pas récupérées.")
+                .action(NoticeAction::new("Récupérer", say("Récupération")).primary())
+                .action(NoticeAction::new("Continuer sans récupérer", say("Ignoré"))),
+            Notice::new("backup", Status::Warning, "Sauvegarde non copiée")
+                .body("La dernière sauvegarde n'a pas été copiée hors de ce poste.")
+                .action(NoticeAction::new("Ouvrir les sauvegardes", say("Sauvegardes")).primary().busy(true))
+                .action(NoticeAction::new("Demain", say("Demain"))),
+            Notice::new("done", Status::Success, "Export terminé").body("Le fichier FEC est prêt.").on_dismiss(say("Retiré")),
+            Notice::new("till", Status::Info, "Caisse").body("Cet ordinateur n'est pas encore une caisse."),
+        ]
     }
 
     /// The menus of the title bar, with every kind of entry: an icon, keys that run the entry
@@ -748,6 +767,15 @@ impl Render for Gallery {
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Motodesk"))
                     .child(div().text_color(c.text_muted).child("Galerie du kit"))
                     .child(div().ml(m.space_2).child(MenuStrip::new(Self::menus(&nav, &self.panels))))
+                    .trailing(NotificationBell::new(Self::notices()).open(self.notices_open).on_open_change({
+                        let gallery = nav.clone();
+                        move |open, _, cx| {
+                            gallery.update(cx, |this, cx| {
+                                this.notices_open = open;
+                                cx.notify();
+                            })
+                        }
+                    }))
                     .trailing(Button::new("mode").small().ghost().icon(if theme.is_dark() { IconName::Sun } else { IconName::Moon }).label(if theme.is_dark() { "Clair" } else { "Sombre" }).on_click(|_, _, cx| {
                         UiTheme::update(cx, |t| t.mode = if t.mode == Mode::Dark { Mode::Light } else { Mode::Dark })
                     }))

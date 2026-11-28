@@ -19,6 +19,7 @@ use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::format::{self, humanize_error};
 use crate::notices::NoticesState;
+use crate::notifications::{self, Action, Notification};
 use crate::pages::atelier::AtelierPage;
 use crate::pages::billing::BillingPage;
 use crate::pages::data::DataPage;
@@ -87,7 +88,7 @@ pub struct Shell {
     /// Where this PC stands among the PCs of the shop (local networks only).
     mesh: MeshStatus,
     reconnect: Option<Reconnect>,
-    // What the shop must be told, above every screen (see `banners`).
+    // What the shop must be told, in the notification centre (see `notices`).
     /// What an invoice issued now would be missing.
     profile: Option<ProfileCheck>,
     /// Past days with trading and no daily closure, oldest first. Closing is manual and
@@ -131,6 +132,10 @@ impl Shell {
                 cx.notify();
             }),
             cx.observe(&PosState::global(cx), |_, _, cx| cx.notify()),
+            // The bell shows what the centre holds, whoever put it there.
+            cx.observe(&notifications::center(cx), |_, _, cx| cx.notify()),
+            // Everything a notice is made of ends in this frame being notified.
+            cx.observe_self(|this, cx| this.publish_notices(cx)),
             // A key pressed anywhere on the screen runs the menu entry that advertises it. In a
             // text field, copy, paste and undo stay the field's.
             cx.observe_keystrokes(|this, event, window, cx| {
@@ -143,6 +148,8 @@ impl Shell {
                 });
             }),
         ];
+        // What a previous session was told is not this one's.
+        notifications::publish("shell", Vec::new(), cx);
         // Someone is signed in: from now on the app looks for a newer version by itself.
         UpdateState::global(cx).update(cx, |updates, cx| updates.start(cx));
         cx.spawn(async move |this, cx| {
@@ -417,80 +424,68 @@ impl Shell {
         cx.api(|client| async move { sync::dismiss_restore_gap(&client).await }, |_, _, _| {});
     }
 
-    /// What the shop must know, above every screen. `current` is the screen shown: a notice
-    /// is not repeated on the screen where it is dealt with.
-    fn banners(&self, is_admin: bool, current: &str, cx: &mut Context<Self>) -> Vec<Alert> {
-        let m = cx.ui().m;
-        let mut banners = Vec::new();
-        let go = |screen: &'static str, parameter: Option<(&'static str, &'static str)>| {
-            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+    /// What the shop is told by this frame: the conditions it watches, as notifications.
+    fn notices(&self, cx: &mut Context<Self>) -> Vec<Notification> {
+        let is_admin = AuthStore::global(cx).read(cx).is_admin();
+        let go = |label: &'static str, screen: &'static str, parameter: Option<(&'static str, &'static str)>| {
+            Action::new(label, move |_, cx| {
                 Router::global(cx).update(cx, |router, cx| match parameter {
                     Some(parameter) => router.go_with(screen, [parameter], cx),
                     None => router.go(screen, cx),
                 })
-            }
+            })
         };
-        let actions = || row().mt(m.space_1).gap(m.space_2);
+        let shell = cx.entity().downgrade();
+        let mut notices = Vec::new();
 
         // An invoice cannot be validated without its mandatory mentions: said before anyone
         // has typed a whole document. Otherwise, once, that this PC could be a till.
         let till = PosState::global(cx).read(cx).config.enabled;
         let till_hint_dismissed = NoticesState::global(cx).read(cx).notices.till_hint_dismissed;
         if let Some(blocker) = self.profile.as_ref().and_then(ProfileCheck::blocker) {
-            banners.push(
-                Alert::warning()
-                    .flush()
-                    .title("Profil fiscal incomplet")
-                    .child(format!("{blocker}. Complétez Réglages › Légal & fiscal avant de valider une facture."))
-                    .child(actions().child(Button::new("notice-profile").link().small().label("Ouvrir les réglages").on_click(go(router::SETTINGS, Some(("cat", "legal")))))),
+            notices.push(
+                Notification::new("fiscal.profile", Status::Warning, "Profil fiscal incomplet")
+                    .body(format!("{blocker}. Complétez Réglages › Légal & fiscal avant de valider une facture."))
+                    .action(go("Ouvrir les réglages", router::SETTINGS, Some(("cat", "legal")))),
             );
-        } else if !till && !till_hint_dismissed && current != router::SETTINGS {
-            banners.push(
-                Alert::info()
-                    .flush()
-                    .title("Caisse")
-                    .child("Cet ordinateur n'est pas encore une caisse. Activez-la dans Réglages › Caisse si vous encaissez au comptoir.")
-                    .child(
-                        actions()
-                            .child(Button::new("notice-till").link().small().label("Configurer").on_click(go(router::SETTINGS, Some(("cat", "caisse")))))
-                            .child(Button::new("notice-till-later").link().small().label("Plus tard").on_click(|_, _, cx| {
-                                NoticesState::global(cx).update(cx, |notices, cx| notices.dismiss_till_hint(cx))
-                            })),
-                    ),
+        } else if !till && !till_hint_dismissed {
+            notices.push(
+                Notification::new("till.hint", Status::Info, "Caisse")
+                    .body("Cet ordinateur n'est pas encore une caisse. Activez-la dans Réglages › Caisse si vous encaissez au comptoir.")
+                    .action(go("Configurer", router::SETTINGS, Some(("cat", "caisse"))))
+                    .action(Action::new("Plus tard", |_, cx| NoticesState::global(cx).update(cx, |notices, cx| notices.dismiss_till_hint(cx))).keeps_open()),
             );
         }
         // A network without a recovery key written down is one forgotten password from being stuck.
         let key_on_screen = AuthStore::global(cx).read(cx).recovery_key.is_some();
-        if self.recovery_missing && !key_on_screen && current != router::EMPLOYEES {
-            banners.push(
-                Alert::warning()
-                    .flush()
-                    .title("Clé de récupération à noter")
-                    .child("Sans elle, un mot de passe administrateur perdu bloque les comptes pour de bon.")
-                    .child(actions().child(Button::new("notice-key").link().small().label("Créer la clé").on_click(go(router::EMPLOYEES, None)))),
+        if self.recovery_missing && !key_on_screen {
+            notices.push(
+                Notification::new("network.recovery-key", Status::Warning, "Clé de récupération à noter")
+                    .body("Sans elle, un mot de passe administrateur perdu bloque les comptes pour de bon.")
+                    .action(go("Créer la clé", router::EMPLOYEES, None)),
             );
         }
         let (behind, other) = (self.mesh.behind_count, self.mesh.other_version_count);
         if self.mesh.needs_reconnect {
-            banners.push(
-                Alert::warning()
-                    .flush()
-                    .title("Ce poste n'échange plus avec le réseau")
-                    .child("La clé du réseau a changé (un poste a été retiré) ou ce poste n'a plus la sienne.")
-                    .child(row().mt(m.space_1).child(
-                        Button::new("reconnect-open").primary().small().label("Reconnecter ce poste").on_click(
-                            cx.listener(|this, _, window, cx| this.start_reconnect(window, cx)),
-                        ),
-                    )),
+            let shell = shell.clone();
+            notices.push(
+                Notification::new("network.reconnect", Status::Danger, "Ce poste n'échange plus avec le réseau")
+                    .body("La clé du réseau a changé (un poste a été retiré) ou ce poste n'a plus la sienne.")
+                    .action(
+                        Action::new("Reconnecter ce poste", move |window, cx| {
+                            let _ = shell.update(cx, |this, cx| this.start_reconnect(window, cx));
+                        })
+                        .primary(),
+                    ),
             );
         } else if behind > 0 && is_admin {
-            banners.push(Alert::info().flush().title("Postes à reconnecter").child(format!(
+            notices.push(Notification::new("network.behind", Status::Info, "Postes à reconnecter").body(format!(
                 "{} encore l'ancienne clé du réseau : ouvrez-y « Reconnecter ce poste ». Un poste que vous avez retiré peut aussi apparaître ici.",
                 if behind > 1 { format!("{behind} postes ont") } else { "Un poste a".to_string() }
             )));
         }
         if other > 0 {
-            banners.push(Alert::warning().flush().title("Versions différentes sur le réseau").child(format!(
+            notices.push(Notification::new("network.versions", Status::Warning, "Versions différentes sur le réseau").body(format!(
                 "{} une autre version de Motodesk : rien n'est échangé avec {}. Mettez tous les postes à jour.",
                 if other > 1 { format!("{other} postes utilisent") } else { "Un autre poste utilise".to_string() },
                 if other > 1 { "eux" } else { "lui" }
@@ -499,66 +494,60 @@ impl Shell {
         // A newer version, for those who can install it. « Plus tard » brings it back tomorrow.
         let waiting = UpdateState::global(cx).read(cx).notice().map(|update| update.version.clone());
         if let Some(version) = waiting.filter(|_| is_admin) {
-            banners.push(
-                Alert::info().flush().title(format!("Nouvelle version disponible : Motodesk {version}")).child(
-                    row()
-                        .mt(m.space_1)
-                        .gap(m.space_2)
-                        .child(Button::new("update-open").primary().small().label("Voir les nouveautés").on_click(|_, window, cx| {
-                            update_screens::open_dialog(window, cx)
-                        }))
-                        .child(Button::new("update-snooze").link().small().label("Plus tard").on_click(|_, _, cx| {
-                            UpdateState::global(cx).update(cx, |updates, cx| updates.later(cx))
-                        })),
-                ),
+            notices.push(
+                Notification::new("update.available", Status::Info, format!("Nouvelle version disponible : Motodesk {version}"))
+                    .action(Action::new("Voir les nouveautés", update_screens::open_dialog).primary())
+                    .action(Action::new("Plus tard", |_, cx| UpdateState::global(cx).update(cx, |updates, cx| updates.later(cx))).keeps_open()),
             );
         }
-        if let Some(note) = self.backup_note.filter(|_| current != router::SETTINGS) {
-            banners.push(
-                Alert::warning().flush().title(note.title()).child(note.message()).child(
-                    actions()
-                        .child(Button::new("notice-backup").primary().small().label("Ouvrir les sauvegardes").on_click(go(router::SETTINGS, Some(("cat", "system")))))
-                        .child(Button::new("notice-backup-later").link().small().label("Demain").on_click(|_, _, cx| {
-                            NoticesState::global(cx).update(cx, |notices, cx| notices.snooze_backup_reminder(cx))
-                        })),
-                ),
+        if let Some(note) = self.backup_note {
+            notices.push(
+                Notification::new("backup.reminder", Status::Warning, note.title())
+                    .body(note.message())
+                    .action(go("Ouvrir les sauvegardes", router::SETTINGS, Some(("cat", "system"))).primary())
+                    .action(Action::new("Demain", |_, cx| NoticesState::global(cx).update(cx, |notices, cx| notices.snooze_backup_reminder(cx))).keeps_open()),
             );
         }
         if self.restore_gap > 0 {
-            banners.push(
-                Alert::warning()
-                    .flush()
-                    .title("Base plus ancienne que le cloud")
-                    .child(format!(
+            let (recover, skip) = (shell.clone(), shell.clone());
+            notices.push(
+                Notification::new("sync.restore-gap", Status::Danger, "Base plus ancienne que le cloud")
+                    .body(format!(
                         "Le cloud conserve au moins {} modification(s) de ce poste qui ne sont pas dans cette base (une sauvegarde plus ancienne \
                          a-t-elle été restaurée ?). Tant qu'elles ne sont pas récupérées, aucun document ne peut être émis : il bifurquerait du \
                          registre fiscal conservé dans le cloud.",
                         self.restore_gap
                     ))
-                    .child(
-                        actions()
-                            .child(
-                                Button::new("notice-gap")
-                                    .primary()
-                                    .small()
-                                    .label("Récupérer depuis le cloud")
-                                    .loading(self.recovering_gap)
-                                    .on_click(cx.listener(|this, _, window, cx| this.recover_gap(window, cx))),
-                            )
-                            .child(Button::new("notice-gap-skip").link().small().label("Continuer sans récupérer").on_click(cx.listener(|this, _, _, cx| this.dismiss_gap(cx)))),
+                    .action(
+                        Action::new("Récupérer depuis le cloud", move |window, cx| {
+                            let _ = recover.update(cx, |this, cx| this.recover_gap(window, cx));
+                        })
+                        .primary()
+                        .busy(self.recovering_gap)
+                        .keeps_open(),
+                    )
+                    .action(
+                        Action::new("Continuer sans récupérer", move |_, cx| {
+                            let _ = skip.update(cx, |this, cx| this.dismiss_gap(cx));
+                        })
+                        .keeps_open(),
                     ),
             );
         }
-        if !self.late_closures.is_empty() && is_admin && current != router::BILLING {
-            banners.push(
-                Alert::warning()
-                    .flush()
-                    .title("Clôtures à faire")
-                    .child(late_closures_message(&self.late_closures))
-                    .child(actions().child(Button::new("notice-closures").link().small().label("Clôturer").on_click(go(router::BILLING, Some(("section", "closures")))))),
+        if !self.late_closures.is_empty() && is_admin {
+            notices.push(
+                Notification::new("fiscal.closures", Status::Warning, "Clôtures à faire")
+                    .body(late_closures_message(&self.late_closures))
+                    .action(go("Clôturer", router::BILLING, Some(("section", "closures")))),
             );
         }
-        banners
+        notices
+    }
+
+    /// Hand the centre what holds now. Run whenever this frame is told something changed.
+    fn publish_notices(&mut self, cx: &mut Context<Self>) {
+        let notices = self.notices(cx);
+        notifications::publish("shell", notices, cx);
     }
 
     /// (colour of the dot, label) of the sync state.
@@ -770,7 +759,6 @@ impl Render for Shell {
             self.noticed_for = current.clone();
             self.refresh_notices(cx);
         }
-        let banners = self.banners(is_admin, current.as_ref(), cx);
 
         col()
             .size_full()
@@ -784,6 +772,7 @@ impl Render for Shell {
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Motodesk"))
                     .child(div().text_color(c.text_muted).child(title))
                     .when(!menus.is_empty(), |bar| bar.child(div().ml(m.space_2).child(MenuStrip::new(menus))))
+                    .trailing(notifications::bell(cx))
                     .when_some(user_name, |bar, name| {
                         bar.trailing(row().gap(m.space_2).text_color(c.text_muted).child(Icon::new(IconName::CircleUser)).child(name))
                     })
@@ -805,7 +794,6 @@ impl Render for Shell {
                             .flex_1()
                             .min_w_0()
                             .h_full()
-                            .children(banners)
                             .child(div().flex_1().min_h_0().child(screen)),
                     ),
             )

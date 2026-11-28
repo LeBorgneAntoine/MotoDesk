@@ -51,6 +51,8 @@ const SAFETY_COPY_PREFIX: &str = "local.db.before-restore-";
 const RESTORED_MARKER: &str = "restore.new-identity";
 /// Safety copies of replaced databases to keep (each is as large as the database).
 const SAFETY_COPIES_KEPT: usize = 2;
+/// The notification raised while the automatic backup fails.
+const AUTO_FAILED: &str = "backup.auto-failed";
 /// Automatic backups to keep; older ones are removed after each new one.
 const AUTO_KEPT: usize = 8;
 pub const MIN_PASSWORD_CHARS: usize = 10;
@@ -742,8 +744,19 @@ pub fn spawn_auto(state: SharedState) {
         // often opened for a shift and closed again.
         tokio::time::sleep(Duration::from_secs(120)).await;
         loop {
-            if let Err(e) = maybe_auto_backup(&state).await {
-                tracing::warn!(error = %e, "automatic backup skipped");
+            match maybe_auto_backup(&state).await {
+                Ok(()) => crate::notify::retract(AUTO_FAILED),
+                Err(e) => {
+                    tracing::warn!(error = %e, "automatic backup skipped");
+                    // Nobody is waiting for this task: without a word, a shop would go on believing
+                    // it is protected.
+                    crate::notify::post(
+                        AUTO_FAILED,
+                        crate::notify::Level::Warning,
+                        "Sauvegarde automatique échouée",
+                        "La sauvegarde automatique n'a pas pu être écrite. Faites une sauvegarde depuis Réglages › Sauvegardes ; les journaux de l'application en disent plus.",
+                    );
+                }
             }
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
