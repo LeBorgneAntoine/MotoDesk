@@ -431,6 +431,40 @@ async fn a_document_goes_from_draft_to_sealed_invoice_paid_then_credited() {
     assert_eq!(note.total_ttc_cents, Some(-9_720));
 }
 
+/// A business that charges no VAT only has to say so: the mention its invoices must carry is the
+/// one the settings screen shows, saved or not.
+#[tokio::test]
+async fn a_business_without_vat_validates_an_invoice_without_typing_the_mention() {
+    let (api, _) = local_network().await;
+    settings::set(&api, "vat.is_subject", &serde_json::json!(false)).await.unwrap();
+
+    let profile = fiscal::check_profile(&api).await.unwrap();
+    assert!(profile.complete, "still asked for: {:?}", profile.missing);
+    assert_eq!(profile.profile.vat_exemption_text, "TVA non applicable, art. 293 B du CGI.");
+
+    let draft = sales::create(
+        &api,
+        &SaleInput {
+            lines: vec![SaleLineInput {
+                label: Some("Révision".into()),
+                quantity_milli: 1_000,
+                unit_price_ht_cents: 8_000,
+                vat_rate_bp: 0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(sales::validate(&api, &draft.id).await.unwrap().is_sealed());
+
+    // Emptying the mention is a choice that is saved: it is then asked for.
+    settings::set(&api, "vat.exemption_text", &serde_json::json!("")).await.unwrap();
+    let profile = fiscal::check_profile(&api).await.unwrap();
+    assert!(profile.missing.iter().any(|mention| mention.key == "vat.exemption_text"));
+}
+
 #[tokio::test]
 async fn a_quote_becomes_an_invoice_or_a_repair_order_and_is_kept() {
     let api = client().await;

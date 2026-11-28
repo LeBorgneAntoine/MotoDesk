@@ -17,6 +17,10 @@
 //! authority and the net and VAT are derived from the *sum of the TTC amounts at
 //! that rate*. Three shelf items at 9,99 EUR ring up 29,97 EUR, exactly.
 
+/// What a business that charges no VAT (franchise en base) must write on its invoices. It applies
+/// until the business words it otherwise.
+pub const FRANCHISE_MENTION: &str = "TVA non applicable, art. 293 B du CGI.";
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::FiscalError;

@@ -25,6 +25,7 @@ use crate::appearance;
 use crate::auth::AuthStore;
 use crate::backend::ApiExt as _;
 use crate::format::humanize_error;
+use crate::notices::NoticesState;
 use crate::router::Router;
 use registry::{CATEGORIES, Category, Def, Kind, category_by_id, settings_for};
 
@@ -281,6 +282,7 @@ impl SettingsPage {
                             this.apply_look(cx);
                         }
                         this.refresh_profile(cx);
+                        NoticesState::global(cx).update(cx, |notices, cx| notices.recheck(cx));
                         toast::success("Paramètres enregistrés.", window, cx);
                     }
                     Err(error) => this.save_error = Some(humanize_error(&error, "Erreur d'enregistrement.")),
@@ -322,6 +324,7 @@ impl SettingsPage {
                             this.apply_look(cx);
                         }
                         this.refresh_profile(cx);
+                        NoticesState::global(cx).update(cx, |notices, cx| notices.recheck(cx));
                     }
                     Err(error) => this.save_error = Some(humanize_error(&error, "Erreur de réinitialisation.")),
                 }

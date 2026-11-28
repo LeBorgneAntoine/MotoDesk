@@ -35,6 +35,12 @@ impl NoticesState {
         self.notices.backup_reminder_snoozed(now_ms())
     }
 
+    /// A screen changed something the notices are about (the company's profile, say): they are
+    /// read again now, not when another screen is next opened.
+    pub fn recheck(&mut self, cx: &mut Context<Self>) {
+        cx.notify();
+    }
+
     /// « Demain »: the backup reminder comes back in a day.
     pub fn snooze_backup_reminder(&mut self, cx: &mut Context<Self>) {
         self.notices.snooze_backup_reminder(now_ms());

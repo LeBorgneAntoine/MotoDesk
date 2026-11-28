@@ -64,6 +64,9 @@ pub async fn load(pool: &SqlitePool) -> LocalResult<CompanyProfile> {
         payment_terms_days: 30,
         late_fee_rate_bp: 1_000,
         recovery_indemnity_cents: 4_000,
+        // The settings screen shows this sentence before anything is saved: it applies as shown.
+        // A business that empties the field has saved that, and is asked for it again.
+        vat_exemption_text: motodesk_fiscal::vat::FRANCHISE_MENTION.into(),
         ..Default::default()
     };
 

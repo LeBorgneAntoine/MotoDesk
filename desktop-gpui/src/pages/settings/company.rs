@@ -10,6 +10,7 @@ use motodesk_ui::*;
 use crate::auth::AuthStore;
 use crate::backend::{ApiExt as _, PickExt as _};
 use crate::format::humanize_error;
+use crate::notices::NoticesState;
 
 pub struct CompanyView {
     company: Option<Company>,
@@ -106,6 +107,8 @@ impl CompanyView {
                     Ok(company) => {
                         this.show(company, window, cx);
                         this.done = Some("Informations enregistrées.");
+                        // The company's name is one of the mentions the banner asks for.
+                        NoticesState::global(cx).update(cx, |notices, cx| notices.recheck(cx));
                     }
                     Err(error) => this.error = Some(humanize_error(&error, "Échec de l'enregistrement.")),
                 }

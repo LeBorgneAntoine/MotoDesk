@@ -127,7 +127,7 @@ impl Shell {
             cx.observe(&AuthStore::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&UpdateState::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&NoticesState::global(cx), |this, _, cx| {
-                this.refresh_backup_note(cx);
+                this.refresh_notices(cx);
                 cx.notify();
             }),
             cx.observe(&PosState::global(cx), |_, _, cx| cx.notify()),
