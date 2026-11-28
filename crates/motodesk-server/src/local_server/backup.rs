@@ -87,6 +87,8 @@ pub struct BackupStatus {
     pub auto_password_set: bool,
     /// A restore is queued and will replace the data at the next start.
     pub restore_pending: bool,
+    /// The folder away from this PC's disk that backups are also copied to, if one is chosen.
+    pub copy: Option<crate::local_server::backup_copy::CopyStatus>,
     pub files: Vec<BackupFile>,
 }
 
@@ -210,6 +212,7 @@ pub async fn status(state: &SharedState) -> LocalResult<BackupStatus> {
             .flatten()
             .is_some(),
         restore_pending: state.data_dir.join(PENDING_DB).exists(),
+        copy: crate::local_server::backup_copy::status(&state.data_dir),
         files,
     })
 }
@@ -277,6 +280,10 @@ async fn write_backup(state: &SharedState, password: &str, prefix: &str) -> Loca
 
     // Visible under its final name only once it is complete.
     fs::rename(&partial, &final_path).map_err(io_err)?;
+
+    // Then away from this disk. A copy that fails is remembered and does not fail the backup.
+    let (data_dir, finished) = (state.data_dir.clone(), final_path.clone());
+    let _ = tokio::task::spawn_blocking(move || crate::local_server::backup_copy::copy(&data_dir, &finished)).await;
 
     let now = Utc::now().to_rfc3339();
     let _ = sqlx::query("UPDATE sync_state SET last_backup_at = $1 WHERE id = 1")

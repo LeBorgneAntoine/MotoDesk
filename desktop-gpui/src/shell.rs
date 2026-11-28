@@ -515,7 +515,7 @@ impl Shell {
         }
         if let Some(note) = self.backup_note.filter(|_| current != router::SETTINGS) {
             banners.push(
-                Alert::warning().flush().title("Données non sauvegardées").child(note.message()).child(
+                Alert::warning().flush().title(note.title()).child(note.message()).child(
                     actions()
                         .child(Button::new("notice-backup").primary().small().label("Ouvrir les sauvegardes").on_click(go(router::SETTINGS, Some(("cat", "system")))))
                         .child(Button::new("notice-backup-later").link().small().label("Demain").on_click(|_, _, cx| {
