@@ -27,6 +27,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Workflow de publication : un tag `vX.Y.Z` construit l'installateur et prépare une version brouillon.
 
 ### Corrigé
+- Les erreurs courantes sont dites en français (mot de passe incorrect, session expirée, droits insuffisants, élément introuvable, disque plein, fichier bloqué, base occupée) au lieu de messages en anglais ou techniques ; le détail reste dans les journaux.
 - Réseau local : les échanges entre postes sont désormais chiffrés (ils n'étaient que signés : clients, ventes et empreintes de mots de passe circulaient en clair). Tous les postes doivent être mis à jour ensemble.
 - Réseau local : seul un administrateur peut ajouter un poste au réseau (le compte de n'importe quel employé suffisait).
 - Réseau local : une coupure pendant la création du réseau ou l'adhésion d'un poste ne laisse plus le poste ni le réseau à moitié configurés ; un enregistrement de compte qui échoue ne le fait plus disparaître.

@@ -43,7 +43,7 @@ async fn next_number(
     Json(body): Json<NextNumberBody>,
 ) -> LocalResult<Json<AllocatedNumber>> {
     let kind = DocumentKind::parse(&body.kind).ok_or_else(|| {
-        LocalError::BadRequest("kind must be invoice, credit_note, quote or receipt".into())
+        LocalError::BadRequest("type de document inconnu".into())
     })?;
 
     // Invoice numbers are allocated by validation, inside the same transaction

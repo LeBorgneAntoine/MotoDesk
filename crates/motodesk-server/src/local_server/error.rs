@@ -6,21 +6,23 @@ use axum::{
 use serde_json::json;
 use thiserror::Error;
 
+/// What a request is refused with. Every message here is read at the counter: in French, saying
+/// what happened and, when there is something to do, what.
 #[derive(Debug, Error)]
 pub enum LocalError {
-    #[error("invalid credentials")]
+    #[error("Identifiant ou mot de passe incorrect.")]
     InvalidCredentials,
 
-    #[error("unauthorized")]
+    #[error("Votre session a expiré : reconnectez-vous.")]
     Unauthorized,
 
-    #[error("forbidden")]
+    #[error("Votre compte n'a pas les droits pour cette action. Demandez à un administrateur.")]
     Forbidden,
 
-    #[error("not found")]
+    #[error("Élément introuvable : il a peut-être été supprimé, ici ou sur un autre poste.")]
     NotFound,
 
-    #[error("bad request: {0}")]
+    #[error("{0}")]
     BadRequest(String),
 
     /// The request is fine but not possible in the state the installation is in.
@@ -49,8 +51,43 @@ pub enum LocalError {
     #[error("Le serveur cloud n'est pas joignable. Vérifiez votre connexion internet et l'adresse du serveur.")]
     CloudRequired,
 
+    /// Something failed that the request is not to blame for. This text is for the log; the person
+    /// is told [`internal_message`].
     #[error("internal error: {0:#}")]
     Internal(#[from] anyhow::Error),
+}
+
+/// What to say about a failure that is not a refusal: the common causes are named, because there
+/// is something to do about them; anything else points to the logs, which hold the detail.
+fn internal_message(error: &anyhow::Error) -> &'static str {
+    const BUSY: &str = "La base de données est occupée (un échange avec un autre poste est en cours). Réessayez dans un instant.";
+    const FULL: &str = "Le disque est plein : libérez de la place, puis réessayez.";
+    const DENIED: &str = "Windows refuse l'accès à un fichier (droits, antivirus, ou fichier ouvert dans un autre programme). Fermez ce qui pourrait l'utiliser, puis réessayez.";
+    for cause in error.chain() {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            // 32 and 33: Windows says another program holds the file, or part of it.
+            if cfg!(windows) && matches!(io.raw_os_error(), Some(32 | 33)) {
+                return DENIED;
+            }
+            match io.kind() {
+                std::io::ErrorKind::StorageFull => return FULL,
+                std::io::ErrorKind::PermissionDenied => return DENIED,
+                std::io::ErrorKind::NotFound => return "Un fichier ou un dossier attendu est introuvable (disque débranché ?).",
+                _ => {}
+            }
+        }
+        let text = cause.to_string().to_lowercase();
+        if text.contains("database is locked") || text.contains("table is locked") || text.contains("pool timed out") {
+            return BUSY;
+        }
+        if text.contains("disk is full") {
+            return FULL;
+        }
+        if text.contains("disk i/o error") || text.contains("disk image is malformed") {
+            return "La base de données signale un problème de disque. N'écrivez plus rien : faites une sauvegarde et demandez de l'aide.";
+        }
+    }
+    "Une erreur inattendue s'est produite. Réessayez ; si elle revient, joignez les journaux (Paramètres › Sauvegardes › Diagnostic) à votre demande d'aide."
 }
 
 impl LocalError {
@@ -77,7 +114,10 @@ impl IntoResponse for LocalError {
     fn into_response(self) -> Response {
         let (status, code) = self.status_and_code();
         let message = match &self {
-            LocalError::BadRequest(msg) => msg.clone(),
+            LocalError::Internal(error) => {
+                tracing::error!(error = %format!("{error:#}"), "a request failed unexpectedly");
+                internal_message(error).to_string()
+            }
             other => other.to_string(),
         };
         let body = json!({ "error": { "code": code, "message": message } });
@@ -115,9 +155,46 @@ fn unique_violation_message(raw: &str) -> String {
     text.to_string()
 }
 
+impl From<serde_json::Error> for LocalError {
+    fn from(err: serde_json::Error) -> Self {
+        LocalError::Internal(err.into())
+    }
+}
+
+pub type LocalResult<T> = Result<T, LocalError>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What reaches the screen, whatever the kind of refusal.
+    async fn said(error: LocalError) -> String {
+        let body = axum::body::to_bytes(error.into_response().into_body(), 64 * 1024).await.unwrap();
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error"]["message"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn everyday_refusals_are_said_in_french() {
+        assert_eq!(said(LocalError::InvalidCredentials).await, "Identifiant ou mot de passe incorrect.");
+        assert!(said(LocalError::Unauthorized).await.contains("reconnectez-vous"));
+        assert!(said(LocalError::Forbidden).await.contains("administrateur"));
+        assert!(said(LocalError::NotFound).await.starts_with("Élément introuvable"));
+        assert_eq!(said(LocalError::BadRequest("aucune session ouverte".into())).await, "aucune session ouverte");
+    }
+
+    #[tokio::test]
+    async fn an_unexpected_failure_names_its_cause_when_it_can_and_shows_no_internals() {
+        use std::io::{Error, ErrorKind};
+        let internal = |error: anyhow::Error| LocalError::Internal(error);
+        let full = anyhow::Error::new(Error::from(ErrorKind::StorageFull)).context("écriture (D:/x)");
+        assert!(said(internal(full)).await.starts_with("Le disque est plein"));
+        let denied = anyhow::Error::new(Error::from(ErrorKind::PermissionDenied));
+        assert!(said(internal(denied)).await.starts_with("Windows refuse"));
+        let busy = anyhow::anyhow!("error returned from database: (code: 5) database is locked");
+        assert!(said(internal(busy)).await.contains("occupée"));
+        let other = said(internal(anyhow::anyhow!("no such column: secret_key at offset 12"))).await;
+        assert!(other.starts_with("Une erreur inattendue") && !other.contains("column"), "{other}");
+    }
 
     #[test]
     fn duplicates_are_reported_in_plain_french() {
@@ -126,11 +203,3 @@ mod tests {
         assert!(unique_violation_message("UNIQUE constraint failed: categories.name").contains("catégorie"));
     }
 }
-
-impl From<serde_json::Error> for LocalError {
-    fn from(err: serde_json::Error) -> Self {
-        LocalError::Internal(err.into())
-    }
-}
-
-pub type LocalResult<T> = Result<T, LocalError>;

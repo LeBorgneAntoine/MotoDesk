@@ -118,7 +118,7 @@ fn io_err(e: impl Into<anyhow::Error>) -> LocalError {
 /// Same, but says which operation and file failed: "in use by another process"
 /// alone does not tell anyone what to look at.
 fn io_at<'a>(what: &'a str, path: &'a Path) -> impl FnOnce(std::io::Error) -> LocalError + 'a {
-    move |e| LocalError::Internal(anyhow::anyhow!("{what} ({}) : {e}", path.display()))
+    move |e| LocalError::Internal(anyhow::Error::new(e).context(format!("{what} ({})", path.display())))
 }
 
 // ------------------------------------------------------------- start-up -----
@@ -277,7 +277,7 @@ async fn write_backup(state: &SharedState, password: &str, prefix: &str) -> Loca
         })
         .await
         .map_err(io_err)?
-        .map_err(|e| LocalError::Internal(anyhow::anyhow!("écriture de la sauvegarde : {e}")))?;
+        .map_err(|e| LocalError::Internal(anyhow::Error::from(e).context("écriture de la sauvegarde")))?;
     }
 
     // Visible under its final name only once it is complete.
@@ -459,7 +459,7 @@ async fn stage_and_queue(
     let pending = state.data_dir.join(PENDING_DB);
     rename_patiently(&staged_db, &pending)
         .await
-        .map_err(|e| io_err(anyhow::anyhow!("mise en attente de la base ({} -> {}) : {e}", staged_db.display(), pending.display())))?;
+        .map_err(|e| io_err(anyhow::Error::new(e).context(format!("mise en attente de la base ({} -> {})", staged_db.display(), pending.display()))))?;
 
     Ok(RestoreResult {
         restart_required: true,

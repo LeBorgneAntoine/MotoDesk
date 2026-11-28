@@ -50,7 +50,10 @@ impl Cloud {
             })
         })?;
         let status = response.status();
-        let bytes = response.bytes().await.map_err(|e| ApiError::network(e.to_string()))?;
+        let bytes = response.bytes().await.map_err(|e| {
+            tracing::warn!(error = %e, "the cloud's answer was cut off");
+            ApiError::network("La réponse du serveur cloud a été interrompue. Réessayez.")
+        })?;
         if !status.is_success() {
             return Err(ApiError::from_response(status.as_u16(), &bytes));
         }

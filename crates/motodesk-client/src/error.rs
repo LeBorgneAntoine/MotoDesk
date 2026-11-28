@@ -47,7 +47,7 @@ impl ApiError {
             Ok(Body { error }) => {
                 Self { status, code: error.code, message: error.message, details: error.details }
             }
-            Err(_) => Self::new(status, "http_error", format!("HTTP {status}")),
+            Err(_) => Self::new(status, "http_error", bare_status_message(status)),
         }
     }
 
@@ -63,6 +63,22 @@ impl ApiError {
     pub fn is_network(&self) -> bool {
         self.status == 0
     }
+}
+
+/// What to say when an answer carries no message of its own (a proxy's page, a request the
+/// server could not even read). The number stays: it is what support asks for.
+fn bare_status_message(status: u16) -> String {
+    let what = match status {
+        401 => "Votre session a expiré : reconnectez-vous.",
+        403 => "Votre compte n'a pas les droits pour cette action.",
+        404 => "Élément introuvable.",
+        408 | 504 => "Le serveur a mis trop de temps à répondre. Réessayez.",
+        413 => "Ce qui est envoyé est trop volumineux.",
+        429 => "Trop d'essais : réessayez dans une minute.",
+        500..=599 => "Le serveur a rencontré un problème. Réessayez dans un moment.",
+        _ => "La demande n'a pas pu être traitée. Vérifiez que tous les postes sont à jour.",
+    };
+    format!("{what} (erreur {status})")
 }
 
 #[cfg(test)]
@@ -82,6 +98,9 @@ mod tests {
     #[test]
     fn a_body_that_is_not_an_error_still_gives_the_status() {
         let e = ApiError::from_response(502, b"<html>Bad gateway</html>");
-        assert_eq!((e.status, e.code.as_str(), e.message.as_str()), (502, "http_error", "HTTP 502"));
+        assert_eq!((e.status, e.code.as_str()), (502, "http_error"));
+        assert_eq!(e.message, "Le serveur a rencontré un problème. Réessayez dans un moment. (erreur 502)");
+        assert!(ApiError::from_response(413, b"").message.contains("trop volumineux"));
+        assert!(ApiError::from_response(422, b"missing field `x`").message.contains("erreur 422"));
     }
 }
