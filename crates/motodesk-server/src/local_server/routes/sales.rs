@@ -483,7 +483,7 @@ pub(crate) async fn validate(
         None,
     )
     .await?;
-    after_sale_sealed(&state, id).await?;
+    after_commit("the follow-ups of the sale", after_sale_sealed(&state, id)).await;
     Ok(Json(sealed))
 }
 
@@ -706,20 +706,14 @@ pub(crate) async fn credit_note(
     let reopened = reopen_orders_if_cancelled(&mut tx, id, &original, &now).await?;
     tx.commit().await?;
 
-    fiscal::replicate(&state.db, device_id, &register, &lot.entry, &lot.links).await?;
-    let sealed = load_sale(&state, note_id).await?;
-    let _ = sync_log::append(
-        &state.db,
-        device_id,
-        EntityType::Sale,
-        note_id,
-        OpKind::Insert,
-        sealed.clone(),
-        None,
-    )
-    .await?;
+    // From here the credit note is sealed: see `after_commit`.
+    after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, &register, &lot.entry, &lot.links)).await;
+    let sealed = after_commit("read the credit note back", load_sale(&state, note_id)).await;
+    if let Some(sealed) = &sealed {
+        after_commit("announce the credit note", sync_log::append(&state.db, device_id, EntityType::Sale, note_id, OpKind::Insert, sealed.clone(), None)).await;
+    }
     // After the credit note itself, which the movements refer to.
-    emit_stock_movements(&state, note_id).await?;
+    after_commit("announce the stock movements", emit_stock_movements(&state, note_id)).await;
     for order_id in reopened {
         if let Ok(payload) = crate::local_server::routes::workshop::show_payload(&state, order_id).await {
             let _ = sync_log::append(
@@ -736,6 +730,7 @@ pub(crate) async fn credit_note(
     }
     state.notify_sync();
 
+    let sealed = sealed.unwrap_or_else(|| json!({ "id": note_id.to_string(), "reference": lot.reference, "status": "credit_note", "document_kind": "credit_note" }));
     Ok((StatusCode::CREATED, Json(sealed)))
 }
 
@@ -878,6 +873,22 @@ async fn credit_source(
     Ok(source)
 }
 
+/// A step that follows a committed record: telling the other PCs, reading the row back, the
+/// stock and workshop follow-ups. The record exists whatever happens here, so a failure is
+/// logged and never answered to the caller, who would record the same thing a second time.
+pub(crate) async fn after_commit<T, E: std::fmt::Display>(
+    step: &str,
+    work: impl std::future::Future<Output = Result<T, E>>,
+) -> Option<T> {
+    match work.await {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::error!(%error, step, "a step after a recorded operation failed");
+            None
+        }
+    }
+}
+
 /// Freeze, number, sign and lock. Everything here happens in one transaction.
 pub(crate) async fn seal_document(
     state: &SharedState,
@@ -907,21 +918,15 @@ pub(crate) async fn seal_document(
     .await?;
     tx.commit().await?;
 
-    fiscal::replicate(&state.db, device_id, register, &lot.entry, &lot.links).await?;
-    let sale = load_sale(state, id).await?;
-    let _ = sync_log::append(
-        &state.db,
-        device_id,
-        EntityType::Sale,
-        id,
-        OpKind::Update,
-        sale.clone(),
-        None,
-    )
-    .await?;
+    // From here the document is sealed: see `after_commit`.
+    after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, register, &lot.entry, &lot.links)).await;
+    let sale = after_commit("read the document back", load_sale(state, id)).await;
+    if let Some(sale) = &sale {
+        after_commit("announce the document", sync_log::append(&state.db, device_id, EntityType::Sale, id, OpKind::Update, sale.clone(), None)).await;
+    }
     state.notify_sync();
 
-    Ok(sale)
+    Ok(sale.unwrap_or_else(|| json!({ "id": id.to_string(), "reference": lot.reference, "status": kind.as_str(), "document_kind": kind.as_str() })))
 }
 
 pub(crate) struct SealedLot {
@@ -1398,19 +1403,14 @@ async fn add_payment(
     }
     tx.commit().await?;
 
-    fiscal::replicate(&state.db, device_id, &register, &entry, &links).await?;
-    let payment = load_payment(&state, payment_id).await?;
-    let _ = sync_log::append(
-        &state.db,
-        device_id,
-        EntityType::Payment,
-        payment_id,
-        OpKind::Insert,
-        payment.clone(),
-        None,
-    )
-    .await?;
+    // From here the money is recorded: see `after_commit`.
+    after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, &register, &entry, &links)).await;
+    let payment = after_commit("read the payment back", load_payment(&state, payment_id)).await;
+    if let Some(payment) = &payment {
+        after_commit("announce the payment", sync_log::append(&state.db, device_id, EntityType::Payment, payment_id, OpKind::Insert, payment.clone(), None)).await;
+    }
     state.notify_sync();
+    let payment = payment.unwrap_or_else(|| json!({ "id": payment_id.to_string(), "sale_id": id.to_string(), "amount_cents": body.amount_cents }));
 
     Ok((StatusCode::CREATED, Json(payment)))
 }
@@ -1543,19 +1543,14 @@ async fn reverse_payment(
     .await?;
     tx.commit().await?;
 
-    fiscal::replicate(&state.db, device_id, &register, &entry, &links).await?;
-    let payment = load_payment(&state, reversal_id).await?;
-    let _ = sync_log::append(
-        &state.db,
-        device_id,
-        EntityType::Payment,
-        reversal_id,
-        OpKind::Insert,
-        payment.clone(),
-        None,
-    )
-    .await?;
+    // From here the reversal is recorded: see `after_commit`.
+    after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, &register, &entry, &links)).await;
+    let payment = after_commit("read the reversal back", load_payment(&state, reversal_id)).await;
+    if let Some(payment) = &payment {
+        after_commit("announce the reversal", sync_log::append(&state.db, device_id, EntityType::Payment, reversal_id, OpKind::Insert, payment.clone(), None)).await;
+    }
     state.notify_sync();
+    let payment = payment.unwrap_or_else(|| json!({ "id": reversal_id.to_string(), "amount_cents": amount }));
 
     Ok((StatusCode::CREATED, Json(payment)))
 }
@@ -1660,8 +1655,10 @@ pub(crate) async fn reprint(
     .await?;
     tx.commit().await?;
 
-    let device_id = state.device_id().await?;
-    fiscal::replicate(&state.db, device_id, &register, &entry, &links).await?;
+    // From here the copy is journalled: see `after_commit`.
+    if let Some(device_id) = after_commit("find this PC", state.device_id()).await {
+        after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, &register, &entry, &links)).await;
+    }
     state.notify_sync();
 
     Ok(json!({
@@ -3462,5 +3459,40 @@ pub(crate) mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, LocalError::BadRequest(_)));
+    }
+
+    /// Once a document or a payment is committed, whatever fails afterwards must not be answered
+    /// as a failure: the person at the keyboard would record it a second time. The change log is
+    /// made to refuse every write here, as a database locked by another PC's changes would.
+    #[tokio::test]
+    async fn what_is_recorded_is_never_answered_as_failed() {
+        let state = shop().await;
+        let paid = draft_with(&state, vec![shelf_line("Casque", 12_000, 1_000)]).await;
+        validate(State(state.clone()), Path(paid)).await.unwrap();
+        let sealed_later = draft_with(&state, vec![shelf_line("Chaîne", 4_000, 1_000)]).await;
+
+        sqlx::query("CREATE TRIGGER broken_change_log BEFORE INSERT ON change_log BEGIN SELECT RAISE(ABORT, 'broken on purpose'); END")
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let Json(invoice) = validate(State(state.clone()), Path(sealed_later)).await.expect("the invoice is sealed");
+        assert!(invoice["locked_at"].is_string());
+
+        let payment = try_pay(&state, paid, 12_000, "cash").await.expect("the payment is recorded");
+        assert_eq!(payment["amount_cents"], 12_000);
+        let payment_id = Uuid::parse_str(payment["id"].as_str().unwrap()).unwrap();
+
+        let (_, Json(reversal)) = reverse_payment(State(state.clone()), Path(payment_id)).await.expect("the reversal is recorded");
+        assert_eq!(reversal["amount_cents"], -12_000);
+
+        let note = credit(&state, paid, vec![]).await.expect("the credit note is sealed");
+        assert!(note["locked_at"].is_string());
+
+        let Json(copy) = reprint(State(state.clone()), Path(sealed_later)).await.expect("the reprint is journalled");
+        assert_eq!(copy["copy_number"], 1);
+
+        let (payments,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM payments").fetch_one(&state.db).await.unwrap();
+        assert_eq!(payments, 2, "one payment and its reversal, each recorded once");
     }
 }

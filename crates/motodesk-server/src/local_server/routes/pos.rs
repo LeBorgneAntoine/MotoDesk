@@ -23,7 +23,7 @@ use crate::local_server::error::{LocalError, LocalResult};
 use crate::local_server::fiscal::{self, mentions, closures, EntryLinks};
 use crate::local_server::pos::{escpos, terminal};
 use crate::local_server::routes::sales::{
-    after_sale_sealed, load_sale, seal_in_tx, write_lines, LineInputBody,
+    after_commit, after_sale_sealed, load_sale, seal_in_tx, write_lines, LineInputBody,
 };
 use crate::local_server::state::SharedState;
 use crate::local_server::sync_log;
@@ -247,38 +247,24 @@ pub(crate) async fn checkout(
 
     tx.commit().await?;
 
-    fiscal::replicate(&state.db, device_id, &register, &lot.entry, &lot.links).await?;
+    // From here the ticket is sealed and paid. A till that is told otherwise keeps its cart and
+    // sells it again: see `after_commit`.
+    after_commit("announce the ticket's journal entry", fiscal::replicate(&state.db, device_id, &register, &lot.entry, &lot.links)).await;
     for (entry, links) in &payment_entries {
-        fiscal::replicate(&state.db, device_id, &register, entry, links).await?;
+        after_commit("announce a payment's journal entry", fiscal::replicate(&state.db, device_id, &register, entry, links)).await;
     }
-    let sale = load_sale(&state, id).await?;
-    let _ = sync_log::append(
-        &state.db,
-        device_id,
-        EntityType::Sale,
-        id,
-        OpKind::Insert,
-        sale.clone(),
-        None,
-    )
-    .await?;
+    let sale = after_commit("read the ticket back", load_sale(&state, id)).await;
+    if let Some(sale) = &sale {
+        after_commit("announce the ticket", sync_log::append(&state.db, device_id, EntityType::Sale, id, OpKind::Insert, sale.clone(), None)).await;
+    }
     // Only now: the stock movements and order updates this makes refer to the sale, and
     // the other PCs apply changes in the order they were logged.
-    let _ = after_sale_sealed(&state, id).await;
+    after_commit("the follow-ups of the sale", after_sale_sealed(&state, id)).await;
     // The takings travel with the ticket. Only the journal entry used to, so the
     // other PCs saw a paid ticket with no payment behind it.
     for payment_id in payment_ids {
         if let Ok(payment) = crate::local_server::routes::sales::load_payment(&state, payment_id).await {
-            let _ = sync_log::append(
-                &state.db,
-                device_id,
-                EntityType::Payment,
-                payment_id,
-                OpKind::Insert,
-                payment,
-                None,
-            )
-            .await?;
+            after_commit("announce a payment", sync_log::append(&state.db, device_id, EntityType::Payment, payment_id, OpKind::Insert, payment, None)).await;
         }
     }
     state.notify_sync();
@@ -294,6 +280,9 @@ pub(crate) async fn checkout(
         .map(|(_, a)| *a)
         .sum();
 
+    let sale = sale.unwrap_or_else(|| {
+        json!({ "id": id.to_string(), "reference": lot.reference, "status": "paid", "document_kind": kind.as_str(), "total_ttc_cents": totals.total_ttc_cents })
+    });
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -404,14 +393,15 @@ async fn open_session(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    fiscal::replicate(&state.db, device_id, &register, &entry, &links).await?;
+    after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, &register, &entry, &links)).await;
     state.notify_sync();
 
-    let row = open_session_row(&state, register.id).await?.ok_or(LocalError::NotFound)?;
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::to_value(row).unwrap_or(Value::Null)),
-    ))
+    let row = after_commit("read the session back", open_session_row(&state, register.id)).await.flatten();
+    let session = match row {
+        Some(row) => serde_json::to_value(row).unwrap_or(Value::Null),
+        None => json!({ "id": id.to_string(), "opened_at": now.to_rfc3339(), "opening_float_cents": body.opening_float_cents }),
+    };
+    Ok((StatusCode::CREATED, Json(session)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -482,7 +472,7 @@ async fn close_session(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    fiscal::replicate(&state.db, device_id, &register, &entry, &links).await?;
+    after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, &register, &entry, &links)).await;
 
     // The session is closed and journalled by now. If the day cannot be closed as
     // well, say so without turning the whole answer into an error: the cashier has
@@ -494,7 +484,10 @@ async fn close_session(
         match closures::close(&state, &register, motodesk_fiscal::ClosureKind::Day, on).await {
             Ok(closed) => day_closure = Some(serde_json::to_value(closed).unwrap_or(Value::Null)),
             Err(LocalError::BadRequest(msg)) => day_closure_error = Some(msg),
-            Err(other) => return Err(other),
+            Err(other) => {
+                tracing::error!(error = %other, "the day could not be closed with the session");
+                day_closure_error = Some("La journée n'a pas pu être clôturée. Clôturez-la depuis Comptabilité.".into());
+            }
         }
     }
 
@@ -548,7 +541,7 @@ async fn open_drawer(State(state): State<SharedState>) -> LocalResult<Json<Value
     )
     .await?;
     tx.commit().await?;
-    fiscal::replicate(&state.db, device_id, &register, &entry, &links).await?;
+    after_commit("announce the journal entry", fiscal::replicate(&state.db, device_id, &register, &entry, &links)).await;
     Ok(Json(json!({
         "journal_seq": entry.seq,
         "kick_drawer": true,
@@ -1610,5 +1603,37 @@ mod tests {
         assert_eq!(euros(5), "0,05 €");
         assert_eq!(euros(-4002), "-40,02 €");
         assert_eq!(euros(100), "1,00 €");
+    }
+
+    /// The till keeps its cart when a checkout fails, and the next press sells it again: a ticket
+    /// that is sealed and paid must never be answered as a failure.
+    #[tokio::test]
+    async fn a_sealed_ticket_is_never_answered_as_failed() {
+        let state = shop().await;
+        // The register exists already, as on a till that has sold before.
+        fiscal::current(&state).await.unwrap();
+        sqlx::query("CREATE TRIGGER broken_change_log BEFORE INSERT ON change_log BEGIN SELECT RAISE(ABORT, 'broken on purpose'); END")
+            .execute(&state.db)
+            .await
+            .unwrap();
+
+        let (_, Json(out)) = checkout(
+            State(state.clone()),
+            Json(CheckoutBody {
+                client_id: None,
+                kind: Some("receipt".into()),
+                notes: None,
+                lines: helmet_and_service(),
+                payments: vec![cash(25_200)],
+            }),
+        )
+        .await
+        .expect("the ticket is sealed and paid");
+        assert_eq!(out["sale"]["status"], "paid");
+        assert!(out["sale"]["reference"].as_str().unwrap().starts_with("RC-"));
+
+        let (tickets,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sales WHERE locked_at IS NOT NULL").fetch_one(&state.db).await.unwrap();
+        let (payments,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM payments").fetch_one(&state.db).await.unwrap();
+        assert_eq!((tickets, payments), (1, 1));
     }
 }
