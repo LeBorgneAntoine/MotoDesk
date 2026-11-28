@@ -545,6 +545,21 @@ mod migration_tests {
         assert!(broken.is_empty(), "foreign keys broken after the update");
     }
 
+    /// The checksum a database keeps of each migration covers its line endings: a build whose
+    /// files end their lines otherwise refuses every shop's data. `.gitattributes` pins them.
+    #[test]
+    fn every_migration_is_built_with_the_same_line_endings() {
+        for migration in MIGRATOR.iter() {
+            let bytes = migration.sql.as_bytes();
+            let bare = (0..bytes.len()).filter(|&i| bytes[i] == b'\n' && (i == 0 || bytes[i - 1] != b'\r')).count();
+            assert_eq!(
+                bare, 0,
+                "migration {} has {bare} line(s) without a carriage return: check the file out again (see .gitattributes)",
+                migration.version
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_database_from_any_earlier_version_upgrades_cleanly() {
         let versions: Vec<i64> = MIGRATOR.iter().map(|m| m.version).collect();
