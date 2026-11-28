@@ -1,0 +1,5 @@
+# A shop's database remembers each of its migrations by a checksum of the file's exact bytes, and
+# refuses to open if the program that reads it was built from other bytes. The line ending is part
+# of those bytes, so it must not depend on how a machine has set git up. It is CRLF because that is
+# what every database made so far holds. Never change it.
+crates/motodesk-server/migrations/*.sql text eol=crlf
