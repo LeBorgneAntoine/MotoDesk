@@ -148,7 +148,7 @@ pub const SETTINGS: [Def; 38] = [
     Def { wide: true, ..text("contact", "contact.address_line2", "Complément d'adresse", "Bât. B, 1er étage") },
     text("contact", "contact.postal_code", "Code postal", "35000"),
     text("contact", "contact.city", "Ville", "Rennes"),
-    Def { initial: Initial::Text("France"), ..text("contact", "contact.country", "Pays", "") },
+    text("contact", "contact.country", "Pays", "France"),
     text("contact", "contact.phone", "Téléphone", "02 99 00 00 00"),
     text("contact", "contact.email", "Email", "contact@atelier.fr"),
     Def { wide: true, ..text("contact", "contact.website", "Site web", "https://atelier.fr") },
@@ -163,8 +163,10 @@ pub const SETTINGS: [Def; 38] = [
     Def { description: "14 chiffres, sans espaces.", ..text("legal", "legal.siret", "SIRET", "12345678900012") },
     Def { description: "9 chiffres. Déduit du SIRET si laissé vide.", ..text("legal", "legal.siren", "SIREN", "123456789") },
     text("legal", "legal.vat_number", "N° TVA intracommunautaire", "FR12345678901"),
+    // No form is assumed: it says what the business is, and decides what its invoices must carry.
     Def {
         kind: Kind::Choice(&[
+            ("", "Choisir…"),
             ("EI", "Entreprise individuelle"),
             ("AE", "Auto-entrepreneur"),
             ("EURL", "EURL"),
@@ -173,7 +175,6 @@ pub const SETTINGS: [Def; 38] = [
             ("SASU", "SASU"),
             ("SA", "SA"),
         ]),
-        initial: Initial::Text("EI"),
         ..text("legal", "legal.legal_form", "Forme juridique", "")
     },
     number("legal", "legal.capital_eur", "Capital social", 0, "€"),
@@ -192,7 +193,7 @@ pub const SETTINGS: [Def; 38] = [
     Def {
         kind: Kind::Area,
         description: "Affichée sur les documents si vous n'êtes pas assujetti.",
-        initial: Initial::Text("TVA non applicable, art. 293 B du CGI."),
+        initial: Initial::Text(motodesk_fiscal::vat::FRANCHISE_MENTION),
         wide: true,
         ..text("legal", "vat.exemption_text", "Mention en cas d'exonération", "")
     },
@@ -371,6 +372,19 @@ mod tests {
 
     fn def(key: &str) -> &'static super::Def {
         def_by_key(key).unwrap_or_else(|| panic!("no setting {key}"))
+    }
+
+    /// What a field shows before anything is saved must be what applies: a default that only
+    /// the screen knows looks filled in while the service reports it missing.
+    #[test]
+    fn a_field_nothing_is_saved_for_shows_what_applies() {
+        // Nobody has said what the business is: the field asks.
+        assert_eq!(def("legal.legal_form").default_value(), json!(""));
+        assert!(matches!(def("legal.legal_form").kind, Kind::Choice(options) if options[0].0.is_empty()));
+        // The service applies this one until it is worded otherwise.
+        assert_eq!(def("vat.exemption_text").default_value(), json!(motodesk_fiscal::vat::FRANCHISE_MENTION));
+        // Nothing prints a country nobody typed.
+        assert_eq!(def("contact.country").default_value(), json!(""));
     }
 
     #[test]
