@@ -415,6 +415,11 @@ impl Gallery {
         col()
             .gap(m.space_7)
             .child(
+                Self::block("Logo", cx).child(
+                    row().gap(m.space_5).items_center().child(Logo::new()).child(div().p(m.space_3).bg(c.accent).child(Logo::new().tiled())),
+                ),
+            )
+            .child(
                 Self::block("Heading, Tag, Icon", cx)
                     .child(
                         row()
@@ -763,7 +768,7 @@ impl Render for Gallery {
             .fs(m.fs_md)
             .child(
                 TitleBar::new()
-                    .child(Icon::new(IconName::Bike).color(c.accent))
+                    .child(Logo::new())
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Motodesk"))
                     .child(div().text_color(c.text_muted).child("Galerie du kit"))
                     .child(div().ml(m.space_2).child(MenuStrip::new(Self::menus(&nav, &self.panels))))

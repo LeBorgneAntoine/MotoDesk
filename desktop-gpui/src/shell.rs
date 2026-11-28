@@ -768,7 +768,7 @@ impl Render for Shell {
             .fs(m.fs_md)
             .child(
                 TitleBar::new()
-                    .child(Icon::new(IconName::Bike).color(c.accent))
+                    .child(Logo::new())
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Motodesk"))
                     .child(div().text_color(c.text_muted).child(title))
                     .when(!menus.is_empty(), |bar| bar.child(div().ml(m.space_2).child(MenuStrip::new(menus))))

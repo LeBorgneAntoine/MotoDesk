@@ -700,7 +700,7 @@ impl Render for AuthPage {
             .bg(c.accent)
             .text_color(c.text_on_accent)
             .child(
-                row().gap(m.space_2).child(Icon::new(IconName::Bike).lg()).child(
+                row().gap(m.space_2).child(Logo::new().tiled()).child(
                     div().fs_tight(m.fs_md).font_weight(FontWeight::SEMIBOLD).child("Motodesk"),
                 ),
             )
