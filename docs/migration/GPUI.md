@@ -60,12 +60,13 @@ Ce qui manquait encore sur les écrans migrés est repris :
 - **Page de connexion** : « Mot de passe perdu ? » (la clé de récupération donne un nouveau mot
   de passe à un compte, puis la clé qui la remplace est montrée) et « Restaurer une
   sauvegarde » sur un poste vierge (choix du fichier `.mgbak`, mot de passe, redémarrage).
-- **Bandeaux d'alerte**, au-dessus de tous les écrans, dans l'ordre de Svelte : profil fiscal
-  incomplet (sinon, une fois, « ce poste n'est pas une caisse »), clé de récupération à noter,
-  réseau local, versions différentes, nouvelle version, données non sauvegardées (« Demain »
-  le repousse d'un jour), base plus ancienne que le cloud, clôtures à faire. Un bandeau n'est
-  pas répété sur l'écran où il se règle, et chacun est relu quand l'écran change. Ce que le
-  poste a repoussé est dans `notices.store.json` (Svelte le gardait dans le navigateur).
+- **Centre de notifications** : les anciens bandeaux d'alerte, qui prenaient la hauteur des
+  écrans, sont la cloche de la barre de titre (le compte prend la couleur du plus pressant).
+  On y trouve : profil fiscal incomplet (sinon, une fois, « ce poste n'est pas une caisse »),
+  clé de récupération à noter, réseau local, versions différentes, nouvelle version, données
+  non sauvegardées (« Demain » le repousse d'un jour), base plus ancienne que le cloud,
+  clôtures à faire. Ils sont relus quand l'écran change. Ce que le poste a repoussé est dans
+  `notices.store.json`. Comment en ajouter : « Prévenir l'utilisateur » ci-dessous.
 - **Fiche client** : ses ventes et ses ordres de réparation récents, sous ses véhicules. Un
   ordre s'ouvre sur sa fiche dans L'Atelier (Svelte menait seulement au tableau).
 - **Menus de la barre de titre** : chaque écran qui en avait sous Svelte dit les siens
@@ -613,6 +614,30 @@ Ce qui reste après le retrait de Svelte et de Tauri :
 - Les demandes de fusion ouvertes sur `master` (corrections du service trouvées en chemin)
   touchent aussi des fichiers Svelte : cette part-là n'aura plus d'objet une fois cette
   branche fusionnée.
+
+## Prévenir l'utilisateur
+
+Rien ne se pose au-dessus des écrans : ce qui demande l'attention va dans le centre de
+notifications (`desktop-gpui/src/notifications.rs`). Chaque notification a une clé ; la même
+clé remplace ce qui s'y trouvait.
+
+- **Une condition**, vraie ou non (une journée non clôturée) : calculez la liste entière de
+  votre partie et publiez-la sous un nom de source ; ce qui n'y est plus disparaît.
+
+  ```rust
+  notifications::publish("atelier", vec![
+      Notification::new("atelier.late", Status::Warning, "Ordres en retard")
+          .body("Deux ordres devaient être rendus hier.")
+          .action(Action::new("Voir", |_, cx| /* aller à l'écran */).primary()),
+  ], cx);
+  ```
+
+- **Un événement** (un export terminé, un refus) : `notifications::post(…, cx)`, avec
+  `.dismissible()` pour que l'utilisateur puisse la retirer, et `notifications::retract(clé, cx)`
+  si elle cesse d'être vraie.
+- **Un travail de fond** du service, ou toute tâche sans fenêtre : depuis n'importe quel fil,
+  `motodesk_server::notify::post(clé, Level::Warning, titre, texte)` puis `retract(clé)`.
+  La sauvegarde automatique qui échoue s'en sert.
 
 ## Comment un écran parle au service
 

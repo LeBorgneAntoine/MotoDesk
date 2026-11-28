@@ -17,6 +17,7 @@ mod background;
 mod format;
 mod menus;
 mod notices;
+mod notifications;
 mod pages;
 mod pos;
 mod printing;
@@ -79,6 +80,11 @@ fn main() {
     };
     // The service decides whether the background mode is on; this app carries it out.
     motodesk_server::background::set_host(background::apply);
+    // What the service's background work has to say goes to the notification centre.
+    let (to_center, from_service) = tokio::sync::mpsc::unbounded_channel();
+    motodesk_server::notify::set_host(move |message| {
+        let _ = to_center.send(message);
+    });
 
     // Before anything reads the data folder: an install made under the former product name
     // hands its data over to the current folder.
@@ -119,6 +125,7 @@ fn main() {
         assistant::AssistantState::init(&pos_dir.clone().unwrap_or_default(), cx);
         updates::UpdateState::init(&pos_dir.clone().unwrap_or_default(), cx);
         notices::NoticesState::init(&pos_dir.clone().unwrap_or_default(), cx);
+        notifications::init(from_service, cx);
 
         // Started by the Windows session: stay out of the way until the user asks.
         let hidden = background::SUPPORTED && background::started_in_background();

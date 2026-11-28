@@ -8,6 +8,7 @@
 //! in the background" preference with [`background::set_host`].
 
 pub mod background;
+pub mod notify;
 pub mod local_server;
 pub mod logs;
 pub mod previous_install;

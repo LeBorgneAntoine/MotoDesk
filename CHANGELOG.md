@@ -12,6 +12,7 @@ projet suit le [versionnage sémantique](https://semver.org/lang/fr/).
 - Deux réglages d'apparence disparaissent : les coins arrondis (tout est carré) et le flou.
 
 ### Ajouté
+- Centre de notifications dans la barre de titre : les bandeaux qui occupaient le haut des écrans y sont réunis, avec leurs actions. Une sauvegarde automatique qui échoue y est désormais signalée.
 - Sauvegardes copiées hors du poste : choisissez dans Réglages › Sauvegardes un dossier (clé USB, disque externe, réseau, dossier synchronisé) où chaque sauvegarde est aussi écrite. Une copie qui échoue est signalée, sans faire échouer la sauvegarde.
 - Réseau local : liste des postes et « Retirer ce poste » pour un poste perdu ou volé. La clé du réseau change, l'administrateur choisit un nouveau mot de passe, et chaque autre poste est reconnecté par un administrateur (ses données sont conservées). Un poste qui a perdu sa clé se reconnecte de la même façon.
 - Sur un poste neuf, « Restaurer une sauvegarde » dès l'écran d'accès, sans créer d'abord un réseau.
