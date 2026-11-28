@@ -133,6 +133,14 @@ pub fn seal(
 }
 
 impl FiscalEntry {
+    /// Whether the digests still match the content: the entry is as it was sealed. Says nothing
+    /// of who sealed it; that is the signature's part.
+    pub fn is_intact(&self) -> bool {
+        hash_payload(&self.payload).is_ok_and(|hash| hash == self.payload_hash)
+            && compute_chain_hash(&self.register_id, self.seq, &self.occurred_at, &self.event_type, &self.payload_hash, &self.prev_hash)
+                == self.chain_hash
+    }
+
     /// The tip this entry leaves behind.
     pub fn tip(&self) -> ChainTip {
         ChainTip {

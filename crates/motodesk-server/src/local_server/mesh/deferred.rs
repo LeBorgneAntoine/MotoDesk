@@ -23,6 +23,9 @@ pub(super) async fn is_waiting(
     entity_type: EntityType,
     entity_id: Uuid,
 ) -> LocalResult<bool> {
+    if stands_alone(entity_type) {
+        return Ok(false);
+    }
     let found: Option<(i64,)> =
         sqlx::query_as("SELECT 1 FROM sync_deferred WHERE entity_type = $1 AND entity_id = $2 LIMIT 1")
             .bind(entity_type.as_str())
@@ -30,6 +33,12 @@ pub(super) async fn is_waiting(
             .fetch_optional(&mut **tx)
             .await?;
     Ok(found.is_some())
+}
+
+/// A journal entry is written once and never changed, so nothing of it can overtake anything.
+/// Held back by id, a spoiled copy sent first would keep the real entry out for good.
+fn stands_alone(entity_type: EntityType) -> bool {
+    entity_type == EntityType::FiscalEntry
 }
 
 /// Keep a change (already in the change log) for another try. `error` is why it failed.
@@ -63,7 +72,7 @@ pub(super) async fn retry(tx: &mut Transaction<'_, Sqlite>) -> LocalResult<u32> 
         let mut blocked: HashSet<(&'static str, Uuid)> = HashSet::new();
         for op in waiting {
             let row = (op.entity_type.as_str(), op.entity_id);
-            if blocked.contains(&row) {
+            if !stands_alone(op.entity_type) && blocked.contains(&row) {
                 continue;
             }
             let mut savepoint = Acquire::begin(&mut *tx).await?;

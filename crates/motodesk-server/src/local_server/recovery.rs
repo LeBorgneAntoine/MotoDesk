@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use motodesk_core::entity::EntityType;
 use motodesk_core::sync::{ChangeLogEntry, SyncPullResponse};
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -70,6 +71,7 @@ pub async fn recover_from_cloud(state: &SharedState) -> LocalResult<RecoveryResu
         recovered: true,
         ..Default::default()
     };
+    let mut journal = Vec::new();
     loop {
         let res = state
             .http
@@ -94,6 +96,7 @@ pub async fn recover_from_cloud(state: &SharedState) -> LocalResult<RecoveryResu
         let Some(last) = page.ops.last().map(|o| o.seq) else {
             break;
         };
+        journal.extend(page.ops.iter().filter(|op| op.entity_type == EntityType::FiscalEntry).map(|op| op.id));
         let (fetched, applied) = apply_page(state, page.ops).await?;
         out.fetched += fetched;
         out.applied += applied;
@@ -104,6 +107,7 @@ pub async fn recover_from_cloud(state: &SharedState) -> LocalResult<RecoveryResu
     }
     out.skipped = out.fetched - out.applied;
 
+    ensure_journal_is_back(state, &journal).await?;
     let rebuilt = finish(state).await?;
     out.registers_moved = rebuilt.registers_moved;
     out.closures_restored = rebuilt.closures_restored;
@@ -122,6 +126,25 @@ pub(crate) async fn apply_page(
     let applied = mesh::apply_batch(state, ops).await?.applied;
     sync_log::mark_synced(&state.db, &ids).await?;
     Ok((fetched, applied))
+}
+
+/// The write block is only lifted once every recovered journal entry of this PC is in. One
+/// that was refused (it names a replacement key this PC does not have, say) would be missing,
+/// and writing on from the older entry would fork the chain.
+pub(crate) async fn ensure_journal_is_back(state: &SharedState, entries: &[uuid::Uuid]) -> LocalResult<()> {
+    for id in entries {
+        let waiting: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM sync_deferred WHERE change_id = $1")
+            .bind(id.to_string())
+            .fetch_optional(&state.db)
+            .await?;
+        if waiting.is_some() {
+            return Err(LocalError::BadRequest(
+                "des écritures fiscales de ce poste n'ont pas pu être reprises (clé de signature manquante ?) : restaurez une sauvegarde plus récente ou la clé avant de continuer"
+                    .into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Everything recovered: bring the register's working copies up to its journal and
